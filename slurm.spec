@@ -11,6 +11,7 @@
 # --with aix         %_with_aix         1    build aix RPM
 # --with auth_none   %_with_auth_none   1    build auth-none RPM
 # --with blcr        %_with_blcr        1    require blcr support
+# --with dmtcp        %_with_dmtcp      1    require dmtcp support
 # --with bluegene    %_with_bluegene    1    build bluegene RPM
 # --with cray        %_with_cray        1    build for a Cray system without ALPS
 # --with cray_alps   %_with_cray_alps   1    build for a Cray system with ALPS
@@ -51,6 +52,7 @@
 # If they are not set they will still be compiled if the packages exist.
 %slurm_without_opt mysql
 %slurm_without_opt blcr
+%slurm_without_opt dmtcp
 %slurm_without_opt openssl
 
 # Build with munge by default on all platforms (disable using --without munge)
@@ -419,6 +421,16 @@ Requires: slurm
 Gives the ability for Slurm to use Berkeley Lab Checkpoint/Restart
 %endif
 
+%if %{slurm_with dmtcp}
+%package dmtcp
+Summary: Allows Slurm to use DMTCP Checkpoint/Restart
+Group: System Environment/Base
+Requires: slurm
+%description dmtcp
+Gives the ability for Slurm to use DMTCP Checkpoint/Restart
+%endif
+
+
 #############################################################################
 
 %prep
@@ -439,6 +451,7 @@ Gives the ability for Slurm to use Berkeley Lab Checkpoint/Restart
 	%{?with_ssl:--with-ssl=%{?with_ssl}} \
 	%{?with_munge:--with-munge=%{?with_munge}}\
 	%{?with_blcr:--with-blcr=%{?with_blcr}}\
+	%{?with_dmtcp:--with-dmtcp=%{?with_dmtcp}}\
 	%{?slurm_with_cray:--enable-native-cray}\
 	%{?slurm_with_cray_network:--enable-cray-network}\
 	%{?slurm_with_salloc_background:--enable-salloc-background} \
@@ -569,11 +582,21 @@ rm -f $RPM_BUILD_ROOT/%{_perldir}/perllocal.pod
 rm -f $RPM_BUILD_ROOT/%{_perldir}/auto/Slurmdb/.packlist
 
 %if ! %{slurm_with blcr}
+rm -f ${RPM_BUILD_ROOT}%{_libdir}/slurm/checkpoint_blcr.so
+%endif
+
+%if ! %{slurm_with dmtcp}
+rm -f ${RPM_BUILD_ROOT}%{_libdir}/slurm/checkpoint_dmtcp.so
+%endif
+
+#shared files
+%if ! %{slurm_with blcr}
+%if ! %{slurm_with dmtcp}
 # remove these if they exist
 rm -f ${RPM_BUILD_ROOT}%{_mandir}/man1/srun_cr*
 rm -f ${RPM_BUILD_ROOT}%{_bindir}/srun_cr
-rm -f ${RPM_BUILD_ROOT}%{_libdir}/slurm/checkpoint_blcr.so
 rm -f ${RPM_BUILD_ROOT}%{_libexecdir}/slurm/cr_*
+%endif
 %endif
 
 %if ! %{slurm_with lua}
@@ -830,6 +853,10 @@ rm -rf $RPM_BUILD_ROOT
 %exclude %{_mandir}/man1/srun_cr*
 %exclude %{_bindir}/srun_cr
 %endif
+%if %{slurm_with dmtcp}
+%exclude %{_mandir}/man1/srun_cr*
+%exclude %{_bindir}/srun_cr
+%endif
 #############################################################################
 
 %files -f devel.files devel
@@ -1059,6 +1086,16 @@ rm -rf $RPM_BUILD_ROOT
 %{_bindir}/srun_cr
 %{_libexecdir}/slurm/cr_*
 %{_libdir}/slurm/checkpoint_blcr.so
+%{_mandir}/man1/srun_cr*
+%endif
+#############################################################################
+
+%if %{slurm_with dmtcp}
+%files dmtcp
+%defattr(-,root,root)
+%{_bindir}/srun_cr
+%{_libexecdir}/slurm/cr_*
+%{_libdir}/slurm/checkpoint_dmtcp.so
 %{_mandir}/man1/srun_cr*
 %endif
 #############################################################################

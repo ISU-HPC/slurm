@@ -1,0 +1,45 @@
+#!/bin/sh
+
+startDMTCP(){
+  folder=$1
+  firstTask=1
+  cd $folder
+
+  lockdir=$folder"/$SLURM_JOB_ID.mutprueba.lock"
+
+  if mkdir "$lockdir"  &> /dev/null
+  then
+    coordinator_file="$folder/coordinator_file"
+
+    #if this is the first node, start coordinator
+    if [ ! -f $coordinator_file ]; then
+
+      #tell the rest of nodes where the coordinator is
+      echo "export DMTCP_COORD_HOST=`hostname`" >> $coordinator_file
+      echo "export DMTCP_COORD_PORT=7779" >> $coordinator_file
+
+      dmtcp_coordinator --daemon --exit-on-last
+      source $coordinator_file
+      firstTask=0
+     fi
+
+     # remove directory when script finishes
+     rm -rf "$lockdir"
+     trap 'rm $coordinator_file' KILL
+  fi
+  return $firstTask
+}
+
+type dmtcp_launch >/dev/null 2>&1 || { echo >&2 "dmtcp_launch is not installed or not present in \$PATH.  Aborting."; exit 1; }
+
+SLURM_CHECKPOINT_IMAGE_DIR=$1
+SLURM_JOB_ID=$2
+folder=$SLURM_CHECKPOINT_IMAGE_DIR/$SLURM_JOB_ID
+
+#The basic idea is that a task starts controller and runs the MPI application. The rest do nothing
+if  ! startDMTCP $folder ;
+then
+  exit 0
+fi
+
+/bin/bash ./dmtcp_restart_script.sh
