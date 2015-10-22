@@ -14,11 +14,12 @@
 
 #include <slurm/spank.h>
 #include <slurm/slurm.h>
+#include "src/common/xmalloc.h"
 
 /*
  * All spank plugins must define this macro for the SLURM plugin loader.
  */
-SPANK_PLUGIN(renice, 1);
+SPANK_PLUGIN(dmtcp, 1);
 
 /*
  *  Minimum allowable value for priority. May be set globally
@@ -26,7 +27,8 @@ SPANK_PLUGIN(renice, 1);
  */
 
 static int dmtcp_enabled=1;
-static int dmtcp_port=7779;
+static int dmtcp_port=7779; // DMTCP default port.
+static int number_of_coordinators=16; // max number of coordinators running on the same host.
 static int _enable_dmtcp (int val, const char *optarg, int remote);
 
 extern char **environ;
@@ -37,7 +39,7 @@ extern char **environ;
  */
 struct spank_option spank_options[] =
 {
-    { "with-dmtcp",NULL, "Allow DMTCP checkpoint on the job being run", 2, 0,
+    { "with-dmtcp",NULL, "Allows DMTCP checkpoints on the job being run", 2, 0,
         (spank_opt_cb_f) _enable_dmtcp
     },
     SPANK_OPTIONS_TABLE_END
@@ -62,59 +64,29 @@ int slurm_spank_task_init(spank_t sp, int ac, char **av){
   if (dmtcp_enabled != 0)
     return (0);
 
-
   //Is this the first job? If so, create env vars and start coordinator
 
   //job id, needed to access the rest of information
   uint32_t job_id;
   if (spank_get_item (sp, S_JOB_ID, &job_id) != 0){
     slurm_error("Could not get job id");
-    return (-1);
-  }
-
-  // I AM NOT SURE THIS IS USEFUL AT ALL. Ill leave it here just in case
-  /*
-  job_info_msg_t * job_info_msg;
-  if (slurm_load_job(&job_info_msg, job_id,0) != 0){
-    slurm_error("Could not get job information");
-    return (-1);
-  }
-  slurm_job_info_t job_info = job_info_msg->job_array[0];
-  */
-
-  char ** job_env;
-  char *env_var;
-  int i = 0;
-
-  if (spank_get_item (sp, S_JOB_ENV, &job_env) != 0){
-    slurm_error("Could not get job env");
-    return (-1);
+    return (ESPANK_ERROR);
   }
 
   char dmtcp_coordinator[1024];
   if (gethostname(dmtcp_coordinator, 1024) != 0){
-    slurm_error("Could not get dmtcp_coordinator");
-    return (-1);
+    slurm_error("Could not get hostname");
+    return (ESPANK_ERROR);
   }
 
-  char aux[2048];
-  char *param;
-  char* value;
 
-  while (i < 100){
-    env_var = job_env[i];
-    strcpy(aux, env_var);
-    param=strtok(aux,"=");
-    value=strtok(NULL,"=");
-
-    if (strcmp(param, "SLURM_CHECKPOINT_IMAGE_DIR") == 0)
-      break;
-    i+=1;
-
+  char *ckpt_dir;
+  char aux[9];
+  if (spank_get_item (sp, S_CHECKPOINT_DIR, &ckpt_dir) != 0){
+    slurm_error("Could not get checkpoint dir");
+    return (ESPANK_ERROR);
   }
 
-  char ckpt_dir[1024];
-  strcpy(ckpt_dir, value);
   strcat(ckpt_dir, "/");
   sprintf(aux, "%d", job_id);
   strcat(ckpt_dir, aux);
@@ -125,53 +97,105 @@ int slurm_spank_task_init(spank_t sp, int ac, char **av){
 
   //Create checkpoint dir. If does not exit, it means that I am the first task
   //so this is how I implement concurrence
+
   if (mkdir(ckpt_dir, S_IRWXU) == 0){
-    FILE *fp;
-    fp=fopen(ckpt_file, "w");
-    fprintf(fp, "DMTCP_COORDINATOR=%s\n", dmtcp_coordinator);
-    fprintf(fp, "DMTCP_PORT=%d\n", dmtcp_port);
-    fclose(fp);
 
-    //this launches a coordinator that ends when the job dies, whih is just perfect
+    //get dmtcp port from env variable
+     char dmtcp_user_port[5];
+     spank_err_t error = spank_getenv (sp, "DMTCP_PORT", dmtcp_user_port, 5);
 
-    char coordinator_exec[1024] = "dmtcp_coordinator --daemon -p ";
-    sprintf(aux, "%d", dmtcp_port);
-    strcat(coordinator_exec,aux);
 
-    if (system(coordinator_exec) != 0){
-      slurm_error("could not start coordinator");
-      return(-1);
-    }
+     if (error == 0)
+      dmtcp_port = strtol(dmtcp_user_port, NULL, 10);
+    else if (error == ESPANK_ENV_NOEXIST)
+      slurm_error ("DMTCP port not set with an envirnonment variable. Using default one, %d", dmtcp_port);
 
-    //HERE I SHOULD MODIFY THE CALL TO EXEC THE APPLICATION
+    char coordinator_exec[1024] = "dmtcp_coordinator --exit-on-last --daemon -p ";
+    sprintf(coordinator_exec, "%s%d", coordinator_exec,dmtcp_port);
+
+    int coordinators=0;
+   while (system(coordinator_exec) != 0){
+     dmtcp_port +=1;
+     coordinators +=1;
+     strcpy(coordinator_exec, "dmtcp_coordinator --exit-on-last --daemon -p ");
+     sprintf(coordinator_exec, "%s%d", coordinator_exec,dmtcp_port);
+     slurm_error("executing: %s", coordinator_exec);
+
+     if (coordinators > number_of_coordinators)
+      break;
+   }
+      //if checkpoint could not be started, we are continuing anyway
+
+
+      FILE *fp;
+      fp=fopen(ckpt_file, "w");
+      fprintf(fp, "DMTCP_COORDINATOR=%s\n", dmtcp_coordinator);
+      fprintf(fp, "DMTCP_PORT=%d\n", dmtcp_port);
+      fclose(fp);
+
+
+    //we modify the application to be executed by including a DMTCP wrapper.
+    char **argv;
+    char **newArgv;
+    uint32_t argc;
+    uint32_t cont;
+
+    spank_get_item (sp, S_JOB_ARGV, &argc,&argv);
+
+    argc += 1;
+    newArgv = malloc (sizeof(char*) * (argc + 1));
+    newArgv[0] = strdup("/usr/local/bin/dmtcp_launch"); //TODO should not be hardcoded
+
+    for (cont = 0; cont < argc-1; cont++)
+      newArgv[cont+1] = strdup(argv[cont]);
+  //  newArgv[argc] = NULL;
+    if (spank_set_item(sp, S_JOB_ARGV, &argc,&newArgv) != ESPANK_SUCCESS)
+      slurm_error("modification did not succeed");
+    else
+      slurm_error("DMTCP wrapper enabled");
   }
-
-  //open the file and read variables.
-  //note that file is being written by some other task, hence the wait and the read.
-  /*
-  FILE *fp = NULL;
-  while (fp == NULL){
-    fp = fopen(ckpt_file, "r");
-    sleep(1);
-  }
-    //read vars
-  fclose(fp);
-  */
-
-  //HERE I SHOULD MODIFY THE CALL TO EXEC NOTHING
-
-
-
-  slurm_error("End of slurm_spank_task_post_fork");
 
   return (0);
 
 }
 
+int slurm_spank_task_exit(spank_t sp, int ac, char **av){
 
+  //here we want to delete dmtcp_coordinator file and shutdown coordinator
+  slurm_error("starting slurm_spank_task_exit");
+
+  //job id, needed to access the rest of information
+  uint32_t job_id;
+  if (spank_get_item (sp, S_JOB_ID, &job_id) != 0){
+    slurm_error("Could not get job id");
+    return (0);
+  }
+
+  char *ckpt_dir;
+  char aux[9];
+  if (spank_get_item (sp, S_CHECKPOINT_DIR, &ckpt_dir) != 0){
+    slurm_error("Could not get checkpoint dir");
+    return (0);
+  }
+
+  char ckpt_file[1024];
+  strcpy(ckpt_file,ckpt_dir);
+  strcat(ckpt_file, "/");
+  sprintf(aux, "%d", job_id);
+  strcat(ckpt_file, aux);
+
+  strcat(ckpt_file, "/dmtcp_coordinator");
+
+
+  if ( remove (ckpt_file) != 0 )
+    slurm_error ( "could not delete file %s. OK.", ckpt_file );
+
+  return (0);
+ }
 
 static int _enable_dmtcp (int val, const char *optarg, int remote)
 {
+
     dmtcp_enabled=0;
     return (0);
 }
