@@ -18,7 +18,6 @@
 AC_DEFUN([X_AC_DMTCP], [
 
   _x_ac_dmtcp_dirs="/usr /usr/local /opt/freeware /opt/dmtcp"
-  _x_ac_dmtcp_libs="dmtcp.h"
 
   AC_ARG_WITH(
     [dmtcp],
@@ -31,15 +30,10 @@ AC_DEFUN([X_AC_DMTCP], [
     [
       for d in $_x_ac_dmtcp_dirs; do
 	test -d "$d" || continue
-	test -d "$d/include" || continue
-#	test -f "$d/include/dmtcp.h" || continue
-	for lib in $_x_ac_dmtcp_libs; do
-	  test -f "$d/include/$lib" || continue
       x_ac_cv_dmtcp_dir=$d
-#	  AC_LINK_IFELSE(
-#	    [AC_LANG_CALL([], cr_get_restart_info)],
-#	    AS_VAR_SET(x_ac_cv_dmtcp_dir, $d))
-	done
+	  AC_LINK_IFELSE(
+	    [AC_LANG_CALL([], cr_get_restart_info)],
+	    AS_VAR_SET(x_ac_cv_dmtcp_dir, $d))
 	test -n "$x_ac_cv_dmtcp_dir" && break
       done
     ])
