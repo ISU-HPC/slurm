@@ -1,10 +1,12 @@
 #!/bin/sh
+set -x
+
 SLURM_CHECKPOINT_IMAGE_DIR=$1
 SLURM_JOB_ID=$2
 
 folder=$SLURM_CHECKPOINT_IMAGE_DIR/$SLURM_JOB_ID
-coordinator_file="$folder/coordinator_file"
-source $coordinator_file
+dmtcp_coordinator="$folder/dmtcp_coordinator"
+source $dmtcp_coordinator
 
 exec dmtcp_command  bc
 

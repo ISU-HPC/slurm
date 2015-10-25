@@ -13,13 +13,13 @@ pkglib_LTLIBRARIES = checkpoint_dmtcp.la
 checkpoint_dmtcp_la_SOURCES = checkpoint_dmtcp.c spank_dmtcp.c
 checkpoint_dmtcp_la_LDFLAGS = $(SO_LDFLAGS) $(PLUGIN_FLAGS)
 
-dist_pkglibexec_SCRIPTS = cr_checkpoint.sh cr_restart.sh 
+dist_pkglibexec_SCRIPTS = cr_checkpoint.sh cr_restart.sh
 
 force:
 
 $(checkpoint_dmtcp_LDADD) : force
 	@cd `dirname $@` && $(MAKE) `basename $@`
 else
-EXTRA_checkpoint_dmtcp_la_SOURCES = checkpoint_dmtcp.c spank_dmtcp
+EXTRA_checkpoint_dmtcp_la_SOURCES = checkpoint_dmtcp.c spank_dmtcp.c
 EXTRA_DIST = cr_checkpoint.sh cr_restart.sh
 endif

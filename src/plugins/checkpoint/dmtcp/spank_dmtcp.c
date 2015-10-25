@@ -19,19 +19,17 @@
 /*
  * All spank plugins must define this macro for the SLURM plugin loader.
  */
-SPANK_PLUGIN(dmtcp, 1);
+SPANK_PLUGIN(dmtcp_spank, 2);
 
 /*
  *  Minimum allowable value for priority. May be set globally
  *   via plugin option min_prio=<prio>
  */
 
-static int dmtcp_enabled=1;
+static int dmtcp_enabled=0;
 static const uint32_t default_dmtcp_port=7779; // DMTCP default port.
-static int number_of_coordinators=16; // max number of coordinators running on the same host.
+static const uint32_t number_of_coordinators=16; // max number of coordinators running on the same host.
 static int _enable_dmtcp (int val, const char *optarg, int remote);
-
-extern char **environ;
 
 
 /*
@@ -50,7 +48,7 @@ struct spank_option spank_options[] =
  */
 int slurm_spank_init (spank_t sp, int ac, char **av)
 {
-
+   slurm_error("checkpoint/dmtcp_spank init");
    spank_option_register (sp, spank_options);
 
     return (0);
@@ -61,8 +59,10 @@ int slurm_spank_init (spank_t sp, int ac, char **av)
 int slurm_spank_task_init(spank_t sp, int ac, char **av){
 
   // is DMTCP allowed? If not, exit
+  slurm_error("1 ");
   if (dmtcp_enabled != 0)
     return (0);
+    slurm_error("2 ");
 
   //Is this the first job? If so, create env vars and start coordinator
 
@@ -110,15 +110,16 @@ int slurm_spank_task_init(spank_t sp, int ac, char **av){
       dmtcp_port = default_dmtcp_port;
 
     char coordinator_exec[1024] = "dmtcp_coordinator --exit-on-last --daemon ";
-    sprintf(coordinator_exec, "%s --ckptdir %s --tmpdir %s", coordinator_exec,ckpt_dir);
+    sprintf(coordinator_exec, "%s --ckptdir %s", coordinator_exec,ckpt_dir);
     sprintf(coordinator_exec, "%s -p %d", coordinator_exec,dmtcp_port);
     slurm_error("Executing coordinator as %s", coordinator_exec);
+
     int coordinators=0;
    while (system(coordinator_exec) != 0){
      dmtcp_port +=1;
      coordinators +=1;
      strcpy(coordinator_exec, "dmtcp_coordinator --exit-on-last --daemon ");
-     sprintf(coordinator_exec, "%s --ckptdir %s --tmpdir %s", coordinator_exec,ckpt_dir);
+     sprintf(coordinator_exec, "%s --ckptdir %s", coordinator_exec,ckpt_dir);
      sprintf(coordinator_exec, "%s -p %d", coordinator_exec,dmtcp_port);
      if (coordinators > number_of_coordinators)
       break;
@@ -164,7 +165,7 @@ int slurm_spank_task_init(spank_t sp, int ac, char **av){
 int slurm_spank_task_exit(spank_t sp, int ac, char **av){
 
   //here we want to delete dmtcp_coordinator file and shutdown coordinator
-  slurm_error("starting slurm_spank_task_exit");
+  slurm_error("starting slurm_spank_task_exit :(");
 
   //job id, needed to access the rest of information
   uint32_t job_id;
@@ -196,6 +197,8 @@ int slurm_spank_task_exit(spank_t sp, int ac, char **av){
 
 static int _enable_dmtcp (int val, const char *optarg, int remote)
 {
+  slurm_error("spank _enable_dmtcp");
+
     dmtcp_enabled=0;
     return (0);
 }

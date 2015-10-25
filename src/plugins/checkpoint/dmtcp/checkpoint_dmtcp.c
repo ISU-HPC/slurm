@@ -117,6 +117,7 @@ static int _on_ckpt_complete(uint32_t group_id, uint32_t user_id,
 
 
 /* path to shell scripts */
+static const char scch_path[] = SLURM_PREFIX "/sbin/scch";
 static const char cr_checkpoint_path[] = PKGLIBEXECDIR "/cr_checkpoint.sh";
 static const char cr_restart_path[] = PKGLIBEXECDIR "/cr_restart.sh";
 
@@ -151,11 +152,12 @@ static pthread_cond_t ckpt_agent_cond = PTHREAD_COND_INITIALIZER;
  * (major.minor.micro combined into a single number).
  */
 
- /* disabled for SPANK
+ /*
 const char plugin_name[]       	= "DMTCP checkpoint plugin";
 const char plugin_type[]       	= "checkpoint/dmtcp";
 const uint32_t plugin_version	= SLURM_VERSION_NUMBER;
 */
+
 
 /*
  * init() is called when the plugin is loaded, before any other functions
@@ -417,37 +419,6 @@ extern check_jobinfo_t slurm_ckpt_copy_job(check_jobinfo_t jobinfo)
 
 extern int slurm_ckpt_stepd_prefork(stepd_step_rec_t *job)
 {
-
-	/*
-	 * I was thinking that a thread can be created here to
-	 * communicate with the tasks via sockets/pipes.
-	 * Maybe this is not needed - we can modify MVAPICH2
-	 */
-
-	/* set LD_PRELOAD for batch script shell */
-	//if (job->batch) {
-/*
-		old_env = getenvp(job->env, "LD_PRELOAD");
-		if (old_env) {
-			while ((ptr = strtok_r(old_env, " :", &save_ptr))) {
-				old_env = NULL;
-				if (!ptr)
-					break;
-				if (!strncmp(ptr, "libcr_run.so", 12) ||
-				    !strncmp(ptr, "libcr_omit.so", 13))
-					continue;
-				xstrcat(new_env, ptr);
-				xstrcat(new_env, ":");
-			}
-		}
-		ptr = xstrdup("libcr_run.so");
-		if (new_env)
-			xstrfmtcat(ptr, ":%s", new_env);
-		setenvf(&job->env, "LD_PRELOAD", ptr);
-		xfree(new_env);
-		xfree(ptr);
-*/
-		//}
 	return SLURM_SUCCESS;
 }
 
@@ -528,26 +499,28 @@ extern int slurm_ckpt_signal_tasks(stepd_step_rec_t *job, char *image_dir)
 			}
 
 
-/* BLCR
+
+			/* BLCR
 			argv[0] = (char *)cr_checkpoint_path;
 			argv[1] = pid;
 			argv[2] = context_file;
 			argv[3] = NULL;
 
-*/
+			*/
 
-/* DMTCP */
-			argv[0] = (char *)cr_checkpoint_path;
-			argv[1] = job->ckpt_dir;
+			/* DMTCP */
+			//argv = xmalloc( sizeof(char*) * 4);
+			argv[0] = strdup(cr_checkpoint_path);
+			argv[1] = strdup(job->ckpt_dir);
 			argv[2] =  malloc(10 * sizeof(char));
 			snprintf(argv[2], sizeof(int)*5, "%d", job->jobid);
-			execv(argv[0], argv);
-			exit(errno);
 			argv[3] = NULL;
 
-
 			execv(argv[0], argv);
 			exit(errno);
+
+
+
 		}
 		close(fd[i*2]);
 	}
@@ -577,7 +550,7 @@ extern int slurm_ckpt_signal_tasks(stepd_step_rec_t *job, char *image_dir)
 extern int slurm_ckpt_restart_task(stepd_step_rec_t *job,
 				   char *image_dir, int gtid)
 {
-	char *argv[4]; //BLCR IS 3, DMTCP IS 4
+	char *argv[4];
 	char context_file[MAX_PATH_LEN];
 
 	/* jobid and stepid must NOT be spelled here,
@@ -588,22 +561,11 @@ extern int slurm_ckpt_restart_task(stepd_step_rec_t *job,
 		sprintf(context_file, "%s/task.%d.ckpt", image_dir, gtid);
 	}
 
-/* BLCR
-	argv[0] = (char *)cr_restart_path;
-	argv[1] = context_file;
-	argv[2] = NULL;
-*/
-
-
-/*DMTCP */
-
-		argv[0] = (char *)cr_restart_path;
-		argv[1] = job->ckpt_dir;
-		argv[2] =  malloc(10 * sizeof(char));
-		snprintf(argv[2], sizeof(int)*5, "%d", job->jobid);
-		execv(argv[0], argv);
-		exit(errno);
-		argv[3] = NULL;
+	argv[0] = strdup(cr_restart_path);
+	argv[1] = strdup(job->ckpt_dir);
+	argv[2] = xmalloc(10 * sizeof(char));
+	snprintf(argv[2], sizeof(int)*5, "%d", job->jobid);
+	argv[3] = NULL;
 
 	execv(argv[0], argv);
 
@@ -698,7 +660,6 @@ static void *_ckpt_agent_thr(void *arg)
 	debug3("checkpoint/dmtcp: sending checkpoint tasks request %u to %u.%u",
 	       req->op, req->job_id, req->step_id);
 
-	//MANUEL this one returns error
 	rc = checkpoint_tasks(req->job_id, req->step_id, req->begin_time,
 			      req->image_dir, req->wait, req->nodelist);
 	if (rc != SLURM_SUCCESS) {
@@ -766,10 +727,87 @@ static void _ckpt_req_free(void *ptr)
 
 
 /* a checkpoint completed, process the images files */
-/*this was currently doing nothing, so I have removed the code and scch param*/
 static int _on_ckpt_complete(uint32_t group_id, uint32_t user_id,
 			     uint32_t job_id, uint32_t step_id,
 			     char *image_dir, uint32_t error_code)
 {
+	int status;
+	pid_t cpid;
+
+	if (access(scch_path, R_OK | X_OK) < 0) {
+		if (errno == ENOENT)
+			debug("checkpoint/dmtcp: file %s not found", scch_path);
+		else
+			info("Access denied for %s: %m", scch_path);
+		return SLURM_ERROR;
+	}
+
+	if ((cpid = fork()) < 0) {
+		error ("_on_ckpt_complete: fork: %m");
+		return SLURM_ERROR;
+	}
+
+	if (cpid == 0) {
+		/*
+		 * We don't fork and wait the child process because the job
+		 * read lock is held. It could take minutes to delete/move
+		 * the checkpoint image files. So there is a race condition
+		 * of the user requesting another checkpoint before SCCH
+		 * finishes.
+		 */
+		/* fork twice to avoid zombies */
+		if ((cpid = fork()) < 0) {
+			error("_on_ckpt_complete: second fork: %m");
+			exit(127);
+		}
+		/* grand child execs */
+		if (cpid == 0) {
+			char *args[6];
+			char str_job[11];
+			char str_step[11];
+			char str_err[11];
+
+			/*
+			 * XXX: if slurmctld is running as root, we must setuid here.
+			 * But what if slurmctld is running as SlurmUser?
+			 * How about we make scch setuid and pass the user/group to it?
+			 */
+			if (geteuid() == 0) { /* root */
+				if (setgid(group_id) < 0) {
+					error("_on_ckpt_complete: failed to "
+					      "setgid: %m");
+					exit(127);
+				}
+				if (setuid(user_id) < 0) {
+					error("_on_ckpt_complete: failed to "
+					      "setuid: %m");
+					exit(127);
+				}
+			}
+			snprintf(str_job,  sizeof(str_job),  "%u", job_id);
+			snprintf(str_step, sizeof(str_step), "%u", step_id);
+			snprintf(str_err,  sizeof(str_err),  "%u", error_code);
+
+			args[0] = (char *)scch_path;
+			args[1] = str_job;
+			args[2] = str_step;
+			args[3] = str_err;
+			args[4] = image_dir;
+			args[5] = NULL;
+
+			execv(scch_path, args);
+			error("execv failure: %m");
+			exit(127);
+		}
+		/* child just exits */
+		exit(0);
+	}
+
+	while(1) {
+		if (waitpid(cpid, &status, 0) < 0 && errno == EINTR)
+			continue;
+		break;
+	}
+
 	return SLURM_SUCCESS;
 }
