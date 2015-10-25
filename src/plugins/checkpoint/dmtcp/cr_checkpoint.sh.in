@@ -6,4 +6,6 @@ folder=$SLURM_CHECKPOINT_IMAGE_DIR/$SLURM_JOB_ID
 coordinator_file="$folder/coordinator_file"
 source $coordinator_file
 
-exec dmtcp_command  c
+exec dmtcp_command  bc
+
+echo "I existed for a while" >> /tmp/test

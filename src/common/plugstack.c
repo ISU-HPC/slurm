@@ -2176,8 +2176,6 @@ spank_err_t spank_set_item(spank_t spank, spank_item_t item, ...)
 	char ***p2argv;
 	char **p2str;
 
-	slurm_error("Starting set item");
-
 	stepd_step_task_info_t *task;
 	stepd_step_rec_t  *slurmd_job = NULL;
 	struct spank_launcher_job_info *launcher_job = NULL;
@@ -2210,32 +2208,34 @@ spank_err_t spank_set_item(spank_t spank, spank_item_t item, ...)
 		p2argv = va_arg(vargs, char ***);
 		int count = 0;
 
+		char** argv = *p2argv;
+		uint32_t argc = *p2int;
+
+
+
 		//This modifies both spank->job and spank->task.
 		if (spank->stack->type == S_TYPE_LOCAL) {
-			launcher_job->argc = *p2int;
+			launcher_job->argc = argc;
 			launcher_job->argv = xmalloc (sizeof(char*) * (launcher_job->argc + 1));
-			for (count = 0; count < launcher_job->argc; count ++){
-				launcher_job->argv[count] = xmalloc( strlen (*p2argv[count])+1 );
-				strcpy(launcher_job->argv[count], *p2argv[count]);
-				}
+			for (count = 0; count < launcher_job->argc; count ++)
+				launcher_job->argv[count] = strdup(argv[count]);
+
 		} else if (slurmd_job) {
-			slurmd_job->argc = *p2int;
+			slurmd_job->argc = argc;
 			slurmd_job->argv = xmalloc (sizeof(char*) * (slurmd_job->argc + 1));
-			for (count = 0; count < slurmd_job->argc; count ++){
-				slurmd_job->argv[count] = xmalloc( strlen (*p2argv[count])+1 );
-				strcpy(slurmd_job->argv[count], *p2argv[count]);
-				}
+			for (count = 0; count < slurmd_job->argc; count ++)
+				slurmd_job->argv[count] = strdup( argv[count]);
+
 		} else {
 			rc=ESPANK_ERROR;
 		}
 
 		task = spank->task;
-		task->argc = *p2int;
+		task->argc = argc;
 		task->argv = xmalloc (sizeof(char*) * (task->argc + 1));
-		for (count = 0; count < task->argc; count ++){
-			task->argv[count] = xmalloc( strlen (*p2argv[count])+1 );
-			strcpy(task->argv[count], *p2argv[count]);
-			}
+		for (count = 0; count < task->argc; count ++)
+			task->argv[count] =strdup(argv[count]);
+
 
 		task->argv[task->argc] = NULL;
 		break;

@@ -698,6 +698,7 @@ static void *_ckpt_agent_thr(void *arg)
 	debug3("checkpoint/dmtcp: sending checkpoint tasks request %u to %u.%u",
 	       req->op, req->job_id, req->step_id);
 
+	//MANUEL this one returns error
 	rc = checkpoint_tasks(req->job_id, req->step_id, req->begin_time,
 			      req->image_dir, req->wait, req->nodelist);
 	if (rc != SLURM_SUCCESS) {

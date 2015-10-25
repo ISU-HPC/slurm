@@ -27,7 +27,7 @@ SPANK_PLUGIN(dmtcp, 1);
  */
 
 static int dmtcp_enabled=1;
-static int dmtcp_port=7779; // DMTCP default port.
+static const uint32_t default_dmtcp_port=7779; // DMTCP default port.
 static int number_of_coordinators=16; // max number of coordinators running on the same host.
 static int _enable_dmtcp (int val, const char *optarg, int remote);
 
@@ -82,6 +82,7 @@ int slurm_spank_task_init(spank_t sp, int ac, char **av){
 
   char *ckpt_dir;
   char aux[9];
+
   if (spank_get_item (sp, S_CHECKPOINT_DIR, &ckpt_dir) != 0){
     slurm_error("Could not get checkpoint dir");
     return (ESPANK_ERROR);
@@ -99,28 +100,26 @@ int slurm_spank_task_init(spank_t sp, int ac, char **av){
   //so this is how I implement concurrence
 
   if (mkdir(ckpt_dir, S_IRWXU) == 0){
+    //get dmtcp po rt from env variable
 
-    //get dmtcp port from env variable
-     char dmtcp_user_port[5];
-     spank_err_t error = spank_getenv (sp, "DMTCP_PORT", dmtcp_user_port, 5);
-
-
-     if (error == 0)
+     char dmtcp_user_port[99];
+     int dmtcp_port;
+     if ( spank_getenv (sp, "DMTCP_PORT", dmtcp_user_port, 99) == 0)
       dmtcp_port = strtol(dmtcp_user_port, NULL, 10);
-    else if (error == ESPANK_ENV_NOEXIST)
-      slurm_error ("DMTCP port not set with an envirnonment variable. Using default one, %d", dmtcp_port);
+    else
+      dmtcp_port = default_dmtcp_port;
 
-    char coordinator_exec[1024] = "dmtcp_coordinator --exit-on-last --daemon -p ";
-    sprintf(coordinator_exec, "%s%d", coordinator_exec,dmtcp_port);
-
+    char coordinator_exec[1024] = "dmtcp_coordinator --exit-on-last --daemon ";
+    sprintf(coordinator_exec, "%s --ckptdir %s --tmpdir %s", coordinator_exec,ckpt_dir);
+    sprintf(coordinator_exec, "%s -p %d", coordinator_exec,dmtcp_port);
+    slurm_error("Executing coordinator as %s", coordinator_exec);
     int coordinators=0;
    while (system(coordinator_exec) != 0){
      dmtcp_port +=1;
      coordinators +=1;
-     strcpy(coordinator_exec, "dmtcp_coordinator --exit-on-last --daemon -p ");
-     sprintf(coordinator_exec, "%s%d", coordinator_exec,dmtcp_port);
-     slurm_error("executing: %s", coordinator_exec);
-
+     strcpy(coordinator_exec, "dmtcp_coordinator --exit-on-last --daemon ");
+     sprintf(coordinator_exec, "%s --ckptdir %s --tmpdir %s", coordinator_exec,ckpt_dir);
+     sprintf(coordinator_exec, "%s -p %d", coordinator_exec,dmtcp_port);
      if (coordinators > number_of_coordinators)
       break;
    }
@@ -135,20 +134,23 @@ int slurm_spank_task_init(spank_t sp, int ac, char **av){
 
 
     //we modify the application to be executed by including a DMTCP wrapper.
+
+
     char **argv;
     char **newArgv;
-    uint32_t argc;
-    uint32_t cont;
+    uint32_t argc = 0;
+    uint32_t cont = 0;
 
     spank_get_item (sp, S_JOB_ARGV, &argc,&argv);
 
     argc += 1;
     newArgv = malloc (sizeof(char*) * (argc + 1));
-    newArgv[0] = strdup("/usr/local/bin/dmtcp_launch"); //TODO should not be hardcoded
+    newArgv[0] = strdup("/dmtcp_stuff/bin/dmtcp_launch");
 
     for (cont = 0; cont < argc-1; cont++)
       newArgv[cont+1] = strdup(argv[cont]);
-  //  newArgv[argc] = NULL;
+    //newArgv[argc] = NULL;
+
     if (spank_set_item(sp, S_JOB_ARGV, &argc,&newArgv) != ESPANK_SUCCESS)
       slurm_error("modification did not succeed");
     else
@@ -187,15 +189,13 @@ int slurm_spank_task_exit(spank_t sp, int ac, char **av){
   strcat(ckpt_file, "/dmtcp_coordinator");
 
 
-  if ( remove (ckpt_file) != 0 )
-    slurm_error ( "could not delete file %s. OK.", ckpt_file );
+  remove (ckpt_file);
 
   return (0);
  }
 
 static int _enable_dmtcp (int val, const char *optarg, int remote)
 {
-
     dmtcp_enabled=0;
     return (0);
 }
