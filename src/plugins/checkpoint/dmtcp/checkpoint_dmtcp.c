@@ -117,7 +117,6 @@ static int _on_ckpt_complete(uint32_t group_id, uint32_t user_id,
 
 
 /* path to shell scripts */
-static const char scch_path[] = SLURM_PREFIX "/sbin/scch";
 static const char cr_checkpoint_path[] = PKGLIBEXECDIR "/cr_checkpoint.sh";
 static const char cr_restart_path[] = PKGLIBEXECDIR "/cr_restart.sh";
 
@@ -434,6 +433,7 @@ extern int slurm_ckpt_signal_tasks(stepd_step_rec_t *job, char *image_dir)
 	int i;
 	char c;
 
+	image_dir = slurm_get_checkpoint_dir();
 	debug3("checkpoint/dmtcp: slurm_ckpt_signal_tasks: image_dir=%s",
 	       image_dir);
 	/*
@@ -453,11 +453,13 @@ extern int slurm_ckpt_signal_tasks(stepd_step_rec_t *job, char *image_dir)
 
 	for (i = 0; i < job->node_tasks; i ++) {
 		if (job->batch) {
-			sprintf(context_file, "%s/script.ckpt", image_dir);
+			sprintf(context_file, "%s/%d.ckpt", image_dir, job->jobid);
 		} else {
-			sprintf(context_file, "%s/task.%d.ckpt",
-				image_dir, job->task[i]->gtid);
+			sprintf(context_file, "%s/%d/task.%d.ckpt",
+				image_dir, job->jobid, job->task[i]->gtid);
 		}
+		error("context_file set to  %s", context_file);
+
 		sprintf(pid, "%u", (unsigned int)job->task[i]->pid);
 
 		if (pipe(&fd[i*2]) < 0) {
@@ -498,16 +500,6 @@ extern int slurm_ckpt_signal_tasks(stepd_step_rec_t *job, char *image_dir)
 				exit(errno);
 			}
 
-
-
-			/* BLCR
-			argv[0] = (char *)cr_checkpoint_path;
-			argv[1] = pid;
-			argv[2] = context_file;
-			argv[3] = NULL;
-
-			*/
-
 			/* DMTCP */
 			//argv = xmalloc( sizeof(char*) * 4);
 			argv[0] = strdup(cr_checkpoint_path);
@@ -518,7 +510,6 @@ extern int slurm_ckpt_signal_tasks(stepd_step_rec_t *job, char *image_dir)
 
 			execv(argv[0], argv);
 			exit(errno);
-
 
 
 		}
@@ -550,8 +541,10 @@ extern int slurm_ckpt_signal_tasks(stepd_step_rec_t *job, char *image_dir)
 extern int slurm_ckpt_restart_task(stepd_step_rec_t *job,
 				   char *image_dir, int gtid)
 {
-	char *argv[4];
+	char *argv[3];
 	char context_file[MAX_PATH_LEN];
+
+	slurm_error("HI AM IN RESTART");
 
 	/* jobid and stepid must NOT be spelled here,
 	 * since it is a new job/step */
@@ -563,9 +556,7 @@ extern int slurm_ckpt_restart_task(stepd_step_rec_t *job,
 
 	argv[0] = strdup(cr_restart_path);
 	argv[1] = strdup(job->ckpt_dir);
-	argv[2] = xmalloc(10 * sizeof(char));
-	snprintf(argv[2], sizeof(int)*5, "%d", job->jobid);
-	argv[3] = NULL;
+	argv[2] = NULL;
 
 	execv(argv[0], argv);
 
@@ -699,9 +690,6 @@ static void *_ckpt_agent_thr(void *arg)
 	}
 	unlock_slurmctld(job_write_lock);
 
-	_on_ckpt_complete(req->gid, req->uid, req->job_id, req->step_id,
-			  req->image_dir, rc);
-
 	slurm_mutex_lock(&ckpt_agent_mutex);
 	ckpt_agent_count --;
 	if (ckpt_agent_count == 0) {
@@ -723,91 +711,4 @@ static void _ckpt_req_free(void *ptr)
 		xfree(req->nodelist);
 		xfree(req);
 	}
-}
-
-
-/* a checkpoint completed, process the images files */
-static int _on_ckpt_complete(uint32_t group_id, uint32_t user_id,
-			     uint32_t job_id, uint32_t step_id,
-			     char *image_dir, uint32_t error_code)
-{
-	int status;
-	pid_t cpid;
-
-	if (access(scch_path, R_OK | X_OK) < 0) {
-		if (errno == ENOENT)
-			debug("checkpoint/dmtcp: file %s not found", scch_path);
-		else
-			info("Access denied for %s: %m", scch_path);
-		return SLURM_ERROR;
-	}
-
-	if ((cpid = fork()) < 0) {
-		error ("_on_ckpt_complete: fork: %m");
-		return SLURM_ERROR;
-	}
-
-	if (cpid == 0) {
-		/*
-		 * We don't fork and wait the child process because the job
-		 * read lock is held. It could take minutes to delete/move
-		 * the checkpoint image files. So there is a race condition
-		 * of the user requesting another checkpoint before SCCH
-		 * finishes.
-		 */
-		/* fork twice to avoid zombies */
-		if ((cpid = fork()) < 0) {
-			error("_on_ckpt_complete: second fork: %m");
-			exit(127);
-		}
-		/* grand child execs */
-		if (cpid == 0) {
-			char *args[6];
-			char str_job[11];
-			char str_step[11];
-			char str_err[11];
-
-			/*
-			 * XXX: if slurmctld is running as root, we must setuid here.
-			 * But what if slurmctld is running as SlurmUser?
-			 * How about we make scch setuid and pass the user/group to it?
-			 */
-			if (geteuid() == 0) { /* root */
-				if (setgid(group_id) < 0) {
-					error("_on_ckpt_complete: failed to "
-					      "setgid: %m");
-					exit(127);
-				}
-				if (setuid(user_id) < 0) {
-					error("_on_ckpt_complete: failed to "
-					      "setuid: %m");
-					exit(127);
-				}
-			}
-			snprintf(str_job,  sizeof(str_job),  "%u", job_id);
-			snprintf(str_step, sizeof(str_step), "%u", step_id);
-			snprintf(str_err,  sizeof(str_err),  "%u", error_code);
-
-			args[0] = (char *)scch_path;
-			args[1] = str_job;
-			args[2] = str_step;
-			args[3] = str_err;
-			args[4] = image_dir;
-			args[5] = NULL;
-
-			execv(scch_path, args);
-			error("execv failure: %m");
-			exit(127);
-		}
-		/* child just exits */
-		exit(0);
-	}
-
-	while(1) {
-		if (waitpid(cpid, &status, 0) < 0 && errno == EINTR)
-			continue;
-		break;
-	}
-
-	return SLURM_SUCCESS;
 }
