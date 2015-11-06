@@ -113,8 +113,11 @@ int main(int argc, char *argv[])
 		exit(error_exit);
 	}
 
+  int stepid;
+  if (opt.stepid != 0)
+    stepid = opt.stepid;
 
-  slurm_checkpoint_migrate ( opt.jobid, opt.nodes);
+  slurm_checkpoint_migrate ( opt.jobid, stepid, opt.nodes);
 
   return (0);
 }

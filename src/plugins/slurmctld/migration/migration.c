@@ -8,7 +8,7 @@
 #include "slurm/slurm.h"
 #include "src/common/checkpoint.h"
 #include "src/common/slurm_protocol_api.h"
-#include "src/plugins/slurmctld/migration/migration_api.h"
+#include "src/plugins/slurmctld/migration/migration.h"
 
 
 const char plugin_name[]       	= "Migration";
@@ -113,7 +113,7 @@ extern int slurm_checkpoint_migrate (uint32_t job_id, uint32_t step_id, char *de
 
 		/*restart checkpoint */
 	job_info.req_nodes = destination_nodes;
-	if (slurm_checkpoint_restart(job_id, step_id, 0,  checkpoint_directory) != 0)) {
+	if (slurm_checkpoint_restart(job_id, step_id, 0,  checkpoint_directory) != 0) {
 		slurm_perror("Error restarting job\n");
 		return(EMIGRATION_ERROR);
 		}
