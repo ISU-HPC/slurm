@@ -38,48 +38,50 @@
  *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301  USA.
 \*****************************************************************************/
 
-#ifdef HAVE_CONFIG_H
+#if HAVE_CONFIG_H
 #  include "config.h"
 #endif
 
-#ifdef WITH_PTHREADS
-#  include <pthread.h>
-#endif
-
-#ifdef HAVE_AIX
-#  undef HAVE_UNSETENV
-#  include <sys/checkpnt.h>
-#endif
-#ifndef HAVE_UNSETENV
-#  include "src/common/unsetenv.h"
-#endif
-
-#include <sys/param.h>
-#include <sys/resource.h>
-#include <sys/stat.h>
-#include <sys/time.h>
-#include <sys/types.h>
-#include <sys/utsname.h>
-#include <sys/wait.h>
-#include <ctype.h>
-#include <fcntl.h>
+#include <sys/resource.h> /* for RLIMIT_NOFILE */
+#include <pwd.h>
 #include <stdio.h>
 #include <stdlib.h>
-#include <string.h>
-#include <signal.h>
-#include <termios.h>
 #include <unistd.h>
-#include <grp.h>
+#include <sys/types.h>
+#include <sys/stat.h>
+#include <sys/param.h>               /* MAXPATHLEN */
+#include <fcntl.h>
 
-#include <slurm/slurm.h>
+#include "slurm/slurm.h"
 
+#include "src/common/cpu_frequency.h"
+#include "src/common/env.h"
 #include "src/common/plugstack.h"
+#include "src/common/proc_args.h"
 #include "src/common/read_config.h"
+#include "src/common/slurm_rlimits_info.h"
 #include "src/common/xstring.h"
-
+#include "src/common/xmalloc.h"
 
 #include "src/plugins/slurmctld/migration/migration.h"
 #include "opt.h"
+
+#define MAX_RETRIES 15
+
+static void  _env_merge_filter(job_desc_msg_t *desc);
+static int   _fill_job_desc_from_opts(job_desc_msg_t *desc);
+static int   _check_cluster_specific_settings(job_desc_msg_t *desc);
+static void *_get_script_buffer(const char *filename, int *size);
+static char *_script_wrap(char *command_string);
+static void  _set_exit_code(void);
+static void  _set_prio_process_env(void);
+static int   _set_rlimit_env(void);
+static void  _set_spank_env(void);
+static void  _set_submit_dir_env(void);
+static int   _set_umask_env(void);
+static int   _job_wait(uint32_t job_id);
+
+
 
 static int   _slurm_debug_env_val (void);
 
@@ -87,16 +89,30 @@ static int   _slurm_debug_env_val (void);
 int main(int argc, char *argv[])
 {
 
-  char *script_name;
-  void *script_body;
-  int script_size = 0;
   log_options_t logopt = LOG_OPTS_STDERR_ONLY;
+	job_desc_msg_t desc;
+	submit_response_msg_t *resp;
+	char *script_name;
+	void *script_body;
+	int script_size = 0;
+	int rc = 0, retries = 0;
 
-
-  slurm_conf_init(NULL);
+	slurm_conf_init(NULL);
 	log_init(xbasename(argv[0]), logopt, 0, NULL);
 
+	_set_exit_code();
+	if (spank_init_allocator() < 0) {
+		error("Failed to initialize plugin stack");
+		exit(error_exit);
+	}
+
+	/* Be sure to call spank_fini when sbatch exits
+	 */
+	if (atexit((void (*) (void)) spank_fini) < 0)
+		error("Failed to register atexit handler for plugins: %m");
+
 	script_name = process_options_first_pass(argc, argv);
+	/* reinit log with new verbosity (if changed by command line) */
 	if (opt.verbose || opt.quiet) {
 		logopt.stderr_level += opt.verbose;
 		logopt.stderr_level -= opt.quiet;
@@ -104,20 +120,18 @@ int main(int argc, char *argv[])
 		log_alter(logopt, 0, NULL);
 	}
 
+
 	if (process_options_second_pass(
-				(argc),
+				argc,
 				argv,
 				script_name ? xbasename (script_name) : "stdin",
 				script_body, script_size) < 0) {
-		error("smigrate parameter parsing");
+		error("sbatch parameter parsing");
 		exit(error_exit);
 	}
 
-  int stepid;
-  if (opt.stepid != 0)
-    stepid = opt.stepid;
 
-  slurm_checkpoint_migrate ( opt.jobid, stepid, opt.nodes);
+  slurm_checkpoint_migrate ( opt.jobid, opt.stepid, opt.nodes);
 
   return (0);
 }
@@ -137,4 +151,20 @@ static int _slurm_debug_env_val (void)
 			level = 0;
 	}
 	return ((int) level);
+}
+
+
+
+static void _set_exit_code(void)
+{
+	int i;
+	char *val = getenv("SLURM_EXIT_ERROR");
+
+	if (val) {
+		i = atoi(val);
+		if (i == 0)
+			error("SLURM_EXIT_ERROR has zero value");
+		else
+			error_exit = i;
+	}
 }

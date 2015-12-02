@@ -187,14 +187,13 @@ static void argerror(const char *msg, ...)
 static void _opt_default()
 {
 	opt.jobid    = NO_VAL;
-	opt.stepid    = NO_VAL;
+	opt.stepid    = 0;
 	opt.nodes = "";
 	opt.hold	    = false;
 	opt.priority = 0;
 	opt.test_only   = false;
 	opt.quiet = 0;
 	opt.verbose = 0;
-
 
 }
 
@@ -212,12 +211,11 @@ static struct option long_options[] = {
 	{"nodes",         required_argument, 0, 'N'},
 	{"priority",      required_argument, 0, LONG_OPT_PRIORITY},
 	{"quiet",         no_argument,       0, 'Q'},
-	{"stepid",     required_argument,       0, LONG_OPT_STEPID},
+	{"stepid",        required_argument, 0, LONG_OPT_STEPID},
 	{"test-only",     no_argument,       0, LONG_OPT_TEST_ONLY},
 	{"usage",         no_argument,       0, 'u'},
 	{"verbose",       no_argument,       0, 'v'},
 	{"version",       no_argument,       0, 'V'},
-
 	{NULL,            0,                 0, 0}
 };
 
@@ -479,8 +477,8 @@ static void _help(void)
 "  -v, --verbose               verbose mode (multiple -v's increase verbosity)\n"
 "  -H, --hold                  submit job in held state\n"
 "      --priority=value        set the priority of the job to value\n"
-"      --test-only				check whether the operation can be performed, but not perform it"
-"		--stepid=id			perform migration on selected step [NOT IMPLEMENTED]"
+"      --test-only             check whether the operation can be performed, but not perform it\n"
+"      --stepid=id             perform migration on selected step [NOT IMPLEMENTED]\n"
 "\n"
 "Help options:\n"
 "  -h, --help                  show this help message\n"
