@@ -124,8 +124,8 @@ slurmctld_config_t slurmctld_config;
  * plugin_version - an unsigned 32-bit integer containing the Slurm version
  * (major.minor.micro combined into a single number).
  */
-const char plugin_name[]        = "node_features knl_cray plugin";
-const char plugin_type[]        = "node_features/knl_cray";
+const char plugin_name[]        = "node_features knl_generic plugin";
+const char plugin_type[]        = "node_features/knl_generic";
 const uint32_t plugin_version   = SLURM_VERSION_NUMBER;
 
 /* Configuration Paramters */
@@ -452,7 +452,7 @@ static char *_run_script(char *cmd_path, char **script_argv, int *status)
 	if (access(cmd_path, R_OK | X_OK) < 0) {
 		error("%s: %s can not be executed: %m", __func__, cmd_path);
 		*status = 127;
-		resp = xstrdup("Slurm node_features/knl_cray configuration error");
+		resp = xstrdup("Slurm node_features/knl_generic configuration error");
 		return resp;
 	}
 	if (pipe(pfd) != 0) {
@@ -607,7 +607,7 @@ static void _make_uid_array(char *uid_str)
 	tok = strtok_r(tmp_str, ",", &save_ptr);
 	while (tok) {
 		if (uid_from_string(tok, &allowed_uid[allowed_uid_cnt++]) < 0)
-			error("knl_cray.conf: Invalid AllowUserBoot: %s", tok);
+			error("knl_generic.conf: Invalid AllowUserBoot: %s", tok);
 		tok = strtok_r(NULL, ",", &save_ptr);
 	}
 	xfree(tmp_str);
@@ -660,7 +660,7 @@ extern int init(void)
 		if (s_p_get_string(&tmp_str, "AllowMCDRAM", tbl)) {
 			allow_mcdram = _knl_mcdram_parse(tmp_str, ",");
 			if (_knl_mcdram_bits_cnt(allow_mcdram) < 1) {
-				fatal("knl_cray.conf: Invalid AllowMCDRAM=%s",
+				fatal("knl_generic.conf: Invalid AllowMCDRAM=%s",
 				      tmp_str);
 			}
 			xfree(tmp_str);
@@ -668,7 +668,7 @@ extern int init(void)
 		if (s_p_get_string(&tmp_str, "AllowNUMA", tbl)) {
 			allow_numa = _knl_numa_parse(tmp_str, ",");
 			if (_knl_numa_bits_cnt(allow_numa) < 1) {
-				fatal("knl_cray.conf: Invalid AllowNUMA=%s",
+				fatal("knl_generic.conf: Invalid AllowNUMA=%s",
 				      tmp_str);
 			}
 			xfree(tmp_str);
@@ -680,7 +680,7 @@ extern int init(void)
 		if (s_p_get_string(&tmp_str, "DefaultMCDRAM", tbl)) {
 			default_mcdram = _knl_mcdram_parse(tmp_str, ",");
 			if (_knl_mcdram_bits_cnt(default_mcdram) != 1) {
-				fatal("knl_cray.conf: Invalid DefaultMCDRAM=%s",
+				fatal("knl_generic.conf: Invalid DefaultMCDRAM=%s",
 				      tmp_str);
 			}
 			xfree(tmp_str);
@@ -688,7 +688,7 @@ extern int init(void)
 		if (s_p_get_string(&tmp_str, "DefaultNUMA", tbl)) {
 			default_numa = _knl_numa_parse(tmp_str, ",");
 			if (_knl_numa_bits_cnt(default_numa) != 1) {
-				fatal("knl_cray.conf: Invalid DefaultNUMA=%s",
+				fatal("knl_generic.conf: Invalid DefaultNUMA=%s",
 				      tmp_str);
 			}
 			xfree(tmp_str);
