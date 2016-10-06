@@ -385,6 +385,7 @@ dnl Check for compilation of SLURM with BLCR support:
 dnl
 X_AC_BLCR
 
+dnl Check for compilation of SLURM with CRIU support:
 dnl
 dnl Check for compilation of SLURM with MULTICHECKPOINT support:
 dnl

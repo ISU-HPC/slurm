@@ -162,7 +162,6 @@ enum spank_item {
     S_STEP_ALLOC_MEM,        /* Step alloc'd memory in MB (uint64_t *)       */
     S_SLURM_RESTART_COUNT,    /* Job restart count (uint32_t *)               */
     S_CHECKPOINT_DIR          /* Slurm checkpoint dir (char **)               */
-
 };
 
 typedef enum spank_item spank_item_t;

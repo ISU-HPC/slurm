@@ -1,0 +1,21 @@
+#!/bin/bash
+
+#$1: chekpoint dir (system)
+#$2: job ID
+#$3: full job name
+
+
+checkpointDir="$1/$2"
+
+#create string ins SED format
+oldPath=$3
+newPath="$checkpointDir/inputScript.sh"
+oldPath="${oldPath//\//\\/}"
+newPath="${newPath//\//\\/}"
+
+# replace path of old script path by the new one"
+@CRIU_HOME@/crit decode -i $checkpointDir/reg-files.img | sed -e "s/$oldPath/$newPath/g" | @CRIU_HOME@/crit encode -o $checkpointDir/reg-files-new.img
+mv $checkpointDir/reg-files-new.img $checkpointDir/reg-files.img
+
+#restore
+sudo @CRIU_HOME@/criu restore -vvvv -o $checkpointDir/checkpoint_restart.log --shell-job -D $checkpointDir

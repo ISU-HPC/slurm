@@ -1,0 +1,19 @@
+#!/bin/sh
+
+#$1: chekpoint dir (system)
+#$2: job ID
+#$3: full job name
+
+#Create checkpoint dir
+checkpointDir="$1/$2"
+mkdir -p $checkpointDir
+
+#Save script to checkpoint in checkpoint dir
+cp -u $3 $checkpointDir"/inputScript.sh"
+
+#Find script ID
+processPID=`ps aux | grep -m 1 "sh $3" | awk '{print $2}'`
+
+#Checkpoint Script
+sudo @CRIU_HOME@/criu dump -vvvv -o $checkpointDir/checkpoint_create.log --shell-job -D $checkpointDir --leave-running -t $processPID
+exit $?
