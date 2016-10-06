@@ -2156,6 +2156,10 @@ spank_err_t spank_get_item(spank_t spank, spank_item_t item, ...)
 		p2vers = va_arg(vargs, char  **);
 		*p2vers = SLURM_MICRO;
 		break;
+	case S_CHECKPOINT_DIR:
+		p2str = va_arg(vargs, char  **);
+		*p2str = slurmd_job->ckpt_dir;
+		break;
 	default:
 		rc = ESPANK_BAD_ARG;
 		break;
