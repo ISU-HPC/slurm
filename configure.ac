@@ -387,6 +387,7 @@ X_AC_BLCR
 
 dnl Check for compilation of SLURM with CRIU support:
 dnl
+<<<<<<< multicheckpoint
 dnl Check for compilation of SLURM with MULTICHECKPOINT support:
 dnl
 X_AC_MULTICHECKPOINT
@@ -403,6 +404,9 @@ dnl Check for compilation of SLURM with DMTCP support:
 dnl
 X_AC_DMTCP
 
+=======
+X_AC_CRIU
+>>>>>>> CRIU plugin files
 
 dnl
 dnl Check for compilation of SLURM with CURL support:
@@ -528,6 +532,7 @@ AC_CONFIG_FILES([Makefile
 		 src/plugins/checkpoint/blcr/cr_restart.sh
 <<<<<<< multicheckpoint
 <<<<<<< multicheckpoint
+<<<<<<< multicheckpoint
 		 src/plugins/checkpoint/multicheckpoint/Makefile
 		 src/plugins/checkpoint/multicheckpoint/cr_checkpoint.sh
 		 src/plugins/checkpoint/multicheckpoint/cr_restart.sh
@@ -542,6 +547,11 @@ AC_CONFIG_FILES([Makefile
 		 src/plugins/checkpoint/dmtcp/cr_checkpoint.sh
 		 src/plugins/checkpoint/dmtcp/cr_restart.sh
 >>>>>>> DMTCP plugin Files- WORK IN PROGRESS
+=======
+		 src/plugins/checkpoint/criu/Makefile
+		 src/plugins/checkpoint/criu/cr_checkpoint.sh
+		 src/plugins/checkpoint/criu/cr_restart.sh
+>>>>>>> CRIU plugin files
 		 src/plugins/checkpoint/none/Makefile
 		 src/plugins/checkpoint/ompi/Makefile
 		 src/plugins/checkpoint/poe/Makefile

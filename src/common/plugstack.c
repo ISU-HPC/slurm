@@ -2158,6 +2158,7 @@ spank_err_t spank_get_item(spank_t spank, spank_item_t item, ...)
 		break;
 	case S_CHECKPOINT_DIR:
 <<<<<<< multicheckpoint
+<<<<<<< multicheckpoint
     p2str = va_arg(vargs, char  **);
     *p2str = slurmd_job->ckpt_dir;
      break;
@@ -2166,6 +2167,11 @@ spank_err_t spank_get_item(spank_t spank, spank_item_t item, ...)
 		*p2str = slurmd_job->ckpt_dir;
  		break;
 >>>>>>> DMTCP plugin Files- WORK IN PROGRESS
+=======
+		p2str = va_arg(vargs, char  **);
+		*p2str = slurmd_job->ckpt_dir;
+		break;
+>>>>>>> CRIU plugin files
 	default:
 		rc = ESPANK_BAD_ARG;
 		break;
