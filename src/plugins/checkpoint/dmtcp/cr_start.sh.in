@@ -1,0 +1,126 @@
+#!/bin/sh
+
+
+###############################################################
+###############################################################
+####  VARIABLE INICIALIZATION #######
+
+
+source /etc/profile
+source  /etc/bashrc
+
+export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/home/localsoft/dmtcp/lib/dmtcp/:/home/localsoft/mvapich2/lib
+
+
+
+
+###############################################################
+###############################################################
+####  CONCURRENCY & INICIALIZATION OF DMTCP COORDINATOR #######
+
+
+startDMTCP(){
+  folder=$1
+  mkdir -p $folder
+  cd $folder
+
+  firstTask=1
+
+  lockdir=$folder"/$SLURM_JOB_ID.mutprueba.lock"
+
+  if mkdir "$lockdir"  &> /dev/null
+  then
+    dmtcp_coordinator="$folder/dmtcp_coordinator"
+
+    #if this is the first node, start coordinator
+    if [ ! -f $dmtcp_coordinator ]; then
+
+      #tell the rest of nodes where the coordinator is
+      echo "export DMTCP_COORD_HOST=`hostname`" >> $dmtcp_coordinator
+      echo "export DMTCP_COORD_PORT=7779" >> $dmtcp_coordinator
+
+      @DMTCP_HOME@/dmtcp_coordinator --daemon --exit-on-last
+      source $dmtcp_coordinator
+      firstTask=0
+     fi
+
+     # remove directory when script finishes
+     rm -rf "$lockdir"
+     trap 'rm $dmtcp_coordinator' KILL
+  fi
+  cd -
+  return $firstTask
+}
+
+
+folder=$SLURM_CHECKPOINT_IMAGE_DIR/$SLURM_JOB_ID
+
+#The basic idea is that a task starts controller and runs the MPI application. The rest do nothing
+if  ! startDMTCP  $folder ;
+then
+  echo "lockdir $SLURM_CHECKPOINT_IMAGE_DIR/$SLURM_JOB_ID If you are debugging, yo probably want to delete it"
+  exit 0
+fi
+
+
+#############################
+#############################
+####  JOB EXECUTION   #######
+
+
+# This is what should be executed the Slurm + DMTCP + MPI integration worked.
+# DMTCP executes the script specified as input parameter. Note that slurm inputs are allways scripts, not applications.
+@DMTCP_HOME@/dmtcp_launch --ckptdir $folder --ib $@
+
+
+#############################
+#############################
+####  DEBUGGING CODE  #######
+
+
+#This makes su sure that the environment is correct and all the required libraries and paths exist.
+#pwd
+#env
+#whoami
+
+##################
+#### Some tests testing for partial things.
+
+#echo "First test: Slurm executing an MPI task without DMTCP"
+#works as expected
+#mpiexec ./helloWorldMPI
+
+#echo "Second test: Slurm executing DMTCP on a serial task, without MPI"
+#works as expected
+#dmtcp_launch ./helloWorld
+
+#echo "Third test: DMTCP + MPI. mpiexec not called"
+#works as expected
+# (although it does not make much sense)
+#dmtcp_launch --ib  ./helloWorldMPI
+
+#echo "sixth test: mpirun_rsh"
+#suceeds
+#mpirun_rsh -np 2 acme11 acme13 /home/dmtcpuser/manuelTests/helloWorldMPI
+
+#echo "seventh test: mpirun_rsh + DMTCP"
+#suceeds, but has no stdout
+#dmtcp_launch --ib mpirun_rsh -np 2 acme11 acme13 /home/dmtcpuser/manuelTest/helloWorldMPI
+
+
+
+##################
+#### Some tests testing DMTCP+MPI+Slurm.
+
+
+#echo "forth test: DMTCP + MPI. mpiexec called"
+#fails
+#dmtcp_launch --ib mpiexec ./helloWorldMPI
+
+#echo "fifth test: DMTCP + MPI + Resource Manager plugin"
+#fails
+#dmtcp_launch --ib --rm mpiexec ./helloWorldMPI
+
+
+
+exit $?
