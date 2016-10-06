@@ -66,6 +66,7 @@ enum checkpoint_plugin {
 	CHECK_NONE,
 	CHECK_AIX,
 	CHECK_BLCR,
+	CHECK_CRIU,
 	CHECK_OMPI,
 	CHECK_POE
 };
