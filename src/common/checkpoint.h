@@ -66,8 +66,11 @@ enum checkpoint_plugin {
 	CHECK_NONE,
 	CHECK_AIX,
 	CHECK_BLCR,
+<<<<<<< multicheckpoint
 	CHECK_MULTICHECKPOINT,
 	CHECK_CRIU,
+=======
+>>>>>>> DMTCP plugin Files- WORK IN PROGRESS
 	CHECK_DMTCP,
 	CHECK_OMPI,
 	CHECK_POE
