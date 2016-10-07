@@ -396,6 +396,12 @@ X_AC_DMTCP
 
 
 dnl
+dnl Check for compilation of SLURM with DMTCP support:
+dnl
+X_AC_DMTCP
+
+
+dnl
 dnl Check for compilation of SLURM with CURL support:
 dnl
 LIBCURL_CHECK_CONFIG
@@ -523,6 +529,10 @@ AC_CONFIG_FILES([Makefile
 		 src/plugins/checkpoint/dmtcp/Makefile
 		 src/plugins/checkpoint/dmtcp/cr_checkpoint.sh
 		 src/plugins/checkpoint/dmtcp/cr_restart.sh
+		 src/plugins/checkpoint/multicheckpoint/Makefile
+		 src/plugins/checkpoint/multicheckpoint/cr_checkpoint.sh
+		 src/plugins/checkpoint/multicheckpoint/cr_restart.sh
+		 src/plugins/checkpoint/multicheckpoint/cr_start.sh
 		 src/plugins/checkpoint/none/Makefile
 		 src/plugins/checkpoint/ompi/Makefile
 		 src/plugins/checkpoint/poe/Makefile

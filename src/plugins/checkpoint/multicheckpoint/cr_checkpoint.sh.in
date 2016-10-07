@@ -1,0 +1,3 @@
+#!/bin/sh
+
+echo "HI THIS IS MULTICHECKPOINT CHECKPOINT"
