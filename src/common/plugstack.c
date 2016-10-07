@@ -2215,13 +2215,13 @@ spank_err_t spank_set_item(spank_t spank, spank_item_t item, ...)
 		if (spank->stack->type == S_TYPE_LOCAL) {
 			launcher_job->argc = argc;
 			launcher_job->argv = xmalloc (sizeof(char*) * (launcher_job->argc + 1));
-			for (count = 0; count launcher_job->argc; count ++)
+			for (count = 0; count < launcher_job->argc; count ++)
 				launcher_job->argv[count] = strdup(argv[count]);
 
 		} else if (slurmd_job) {
 			slurmd_job->argc = argc;
 			slurmd_job->argv = xmalloc (sizeof(char*) * (slurmd_job->argc + 1));
-			for (count = 0; count slurmd_job->argc; count ++)
+			for (count = 0; count < slurmd_job->argc; count ++)
 				slurmd_job->argv[count] = strdup( argv[count]);
 
 		} else {
@@ -2231,7 +2231,7 @@ spank_err_t spank_set_item(spank_t spank, spank_item_t item, ...)
 		task = spank->task;
 		task->argc = argc;
 		task->argv = xmalloc (sizeof(char*) * (task->argc + 1));
-		for (count = 0; count task->argc; count ++)
+		for (count = 0; count < task->argc; count ++)
 			task->argv[count] =strdup(argv[count]);
 
 
