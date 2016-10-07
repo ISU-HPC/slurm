@@ -1,3 +1,3 @@
 # Makefile for checkpoint plugins
 
-SUBDIRS = blcr none ompi poe
+SUBDIRS = blcr multicheckpoint none ompi poe
