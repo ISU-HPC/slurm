@@ -331,6 +331,12 @@ spank_err_t spank_option_getopt (spank_t spank, struct spank_option *opt,
  */
 spank_err_t spank_get_item (spank_t spank, spank_item_t item, ...);
 
+/*  Set  the value for the current job or task item specified.
+ *  Returns ESPANK_SUCCESS on success, ESPANK_ERROR if not.
+ * Currently it only allows to modify "S_JOB_ENV".
+*/
+spank_err_t spank_set_item (spank_t spank, spank_item_t item, ...);
+
 /*  Place a copy of environment variable "var" from the job's environment
  *   into buffer "buf" of size "len."
  *
