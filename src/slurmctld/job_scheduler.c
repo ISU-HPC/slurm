@@ -1074,6 +1074,7 @@ extern int schedule(uint32_t job_limit)
 	return job_count;
 }
 
+/* TODO MANUEL: aqui lo mismo hay que hacer algo con el migration...*/
 /* Thread used to possibly start job scheduler later, if nothing else does */
 static void *_sched_agent(void *args)
 {

@@ -385,28 +385,19 @@ dnl Check for compilation of SLURM with BLCR support:
 dnl
 X_AC_BLCR
 
+dnl
 dnl Check for compilation of SLURM with CRIU support:
 dnl
-<<<<<<< multicheckpoint
+X_AC_CRIU
+
+dnl
+dnl Check for compilation of SLURM with DMTCP support:
+dnl
+X_AC_DMTCP
+
 dnl Check for compilation of SLURM with MULTICHECKPOINT support:
 dnl
 X_AC_MULTICHECKPOINT
-
-
-dnl
-dnl Check for compilation of SLURM with DMTCP support:
-dnl
-X_AC_DMTCP
-
-
-dnl
-dnl Check for compilation of SLURM with DMTCP support:
-dnl
-X_AC_DMTCP
-
-=======
-X_AC_CRIU
->>>>>>> CRIU plugin files
 
 dnl
 dnl Check for compilation of SLURM with CURL support:
@@ -530,28 +521,16 @@ AC_CONFIG_FILES([Makefile
 		 src/plugins/checkpoint/blcr/Makefile
 		 src/plugins/checkpoint/blcr/cr_checkpoint.sh
 		 src/plugins/checkpoint/blcr/cr_restart.sh
-<<<<<<< multicheckpoint
-<<<<<<< multicheckpoint
-<<<<<<< multicheckpoint
+		 src/plugins/checkpoint/criu/Makefile
+		 src/plugins/checkpoint/criu/cr_checkpoint.sh
+		 src/plugins/checkpoint/criu/cr_restart.sh
+		 src/plugins/checkpoint/dmtcp/Makefile
+		 src/plugins/checkpoint/dmtcp/cr_checkpoint.sh
+		 src/plugins/checkpoint/dmtcp/cr_restart.sh
 		 src/plugins/checkpoint/multicheckpoint/Makefile
 		 src/plugins/checkpoint/multicheckpoint/cr_checkpoint.sh
 		 src/plugins/checkpoint/multicheckpoint/cr_restart.sh
 		 src/plugins/checkpoint/multicheckpoint/cr_start.sh
-=======
-		 src/plugins/checkpoint/dmtcp/Makefile
-		 src/plugins/checkpoint/dmtcp/cr_checkpoint.sh
-		 src/plugins/checkpoint/dmtcp/cr_restart.sh
->>>>>>> DMTCP plugin Files- WORK IN PROGRESS
-=======
-		 src/plugins/checkpoint/dmtcp/Makefile
-		 src/plugins/checkpoint/dmtcp/cr_checkpoint.sh
-		 src/plugins/checkpoint/dmtcp/cr_restart.sh
->>>>>>> DMTCP plugin Files- WORK IN PROGRESS
-=======
-		 src/plugins/checkpoint/criu/Makefile
-		 src/plugins/checkpoint/criu/cr_checkpoint.sh
-		 src/plugins/checkpoint/criu/cr_restart.sh
->>>>>>> CRIU plugin files
 		 src/plugins/checkpoint/none/Makefile
 		 src/plugins/checkpoint/ompi/Makefile
 		 src/plugins/checkpoint/poe/Makefile

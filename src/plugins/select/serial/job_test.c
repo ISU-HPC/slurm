@@ -107,6 +107,15 @@ uint16_t _can_job_run_on_node(struct job_record *job_ptr, bitstr_t *core_map,
 		return cpus;
 	}
 
+	/* MANUEL esto no tengo ni idea, lo he copiado de arriba */
+	if (((job_ptr->bit_flags & MIGRATION_TEST) == 0) &&
+			!test_only && IS_NODE_COMPLETING(node_ptr)) {
+		/* Do not allocate more jobs to nodes with completing jobs,
+		 * migration scheduler independently handles completing nodes */
+		cpus = 0;
+		return cpus;
+	}
+
 	cpus = _allocate_cores(job_ptr, core_map, node_i);
 
 	core_start_bit = cr_get_coremap_offset(node_i);
@@ -177,8 +186,8 @@ static int _is_node_busy(struct part_res_record *p_ptr, uint32_t node_i,
 	uint32_t i, cpu_end   = cr_get_coremap_offset(node_i+1);
 
 	for (; p_ptr; p_ptr = p_ptr->next) {
-		if (sharing_only && 
-		    ((p_ptr->num_rows < 2) || 
+		if (sharing_only &&
+		    ((p_ptr->num_rows < 2) ||
 		     (p_ptr->part_ptr == my_part_ptr)))
 			continue;
 		if (!p_ptr->row)
@@ -200,7 +209,7 @@ static int _is_node_busy(struct part_res_record *p_ptr, uint32_t node_i,
  * Determine which of these nodes are usable by this job
  *
  * Remove nodes from the bitmap that don't have enough memory or gres to
- * support the job. 
+ * support the job.
  *
  * Return SLURM_ERROR if a required node can't be used.
  *
@@ -311,7 +320,7 @@ static int _verify_node_state(struct part_res_record *cr_part_ptr,
 			} else if (job_node_req == NODE_CR_ONE_ROW) {
 				/* cannot use this node if it is running jobs
 				 * in sharing partitions */
-				if (_is_node_busy(cr_part_ptr, i, 1, 
+				if (_is_node_busy(cr_part_ptr, i, 1,
 						  job_ptr->part_ptr)) {
 					debug3("select/serial: node %s vbusy",
 					       node_ptr->name);
@@ -373,7 +382,7 @@ bitstr_t *_make_core_bitmap(bitstr_t *node_map)
 static int _get_res_usage(struct job_record *job_ptr, bitstr_t *node_map,
 			   bitstr_t *core_map, uint32_t cr_node_cnt,
 			   struct node_use_record *node_usage,
-			   uint16_t cr_type, uint16_t **cpu_cnt_ptr, 
+			   uint16_t cr_type, uint16_t **cpu_cnt_ptr,
 			   bool test_only)
 {
 	uint16_t *cpu_cnt, max_cpu_cnt = 0, part_lln_flag = 0;
@@ -495,7 +504,7 @@ static uint16_t *_select_nodes(struct job_record *job_ptr,
  *         allocations
  */
 extern int cr_job_test(struct job_record *job_ptr, bitstr_t *bitmap, int mode,
-			uint16_t cr_type, enum node_cr_state job_node_req, 
+			uint16_t cr_type, enum node_cr_state job_node_req,
 			uint32_t cr_node_cnt,
 			struct part_res_record *cr_part_ptr,
 			struct node_use_record *node_usage)
@@ -929,7 +938,7 @@ alloc_job:
 			continue;
 		if (c >= csize)	{
 			error("select/serial: cr_job_test "
-			      "core_bitmap index error on node %s", 
+			      "core_bitmap index error on node %s",
 			      select_node_record[n].node_ptr->name);
 			drain_nodes(select_node_record[n].node_ptr->name,
 				    "Bad core count", getuid());

@@ -585,6 +585,14 @@ uint16_t _can_job_run_on_node(struct job_record *job_ptr, bitstr_t *core_map,
 		return cpus;
 	}
 
+	/* MANUEL: ESTO NO TENGO NI IDEA, LO HE COPIADO DE ARRIBA */
+  if (((job_ptr->bit_flags & MIGRATION_TEST) == 0) &&
+  		!test_only && IS_NODE_COMPLETING(node_ptr)) {
+  	/* Do not allocate more jobs to nodes with completing jobs,
+  	* migration scheduler independently handles completing nodes */
+  	cpus = 0;
+  	return cpus;
+   }
 	core_start_bit = cr_get_coremap_offset(node_i);
 	core_end_bit   = cr_get_coremap_offset(node_i+1) - 1;
 	cpus_per_core  = select_node_record[node_i].cpus /
@@ -2578,7 +2586,7 @@ static int _eval_nodes_dfly(struct job_record *job_ptr, bitstr_t *bitmap,
 		}
 	}
 
-	/* Determine lowest level switch satisfying request with best fit 
+	/* Determine lowest level switch satisfying request with best fit
 	 * in respect of the specific required nodes if specified
 	 */
 	best_fit_inx = -1;
@@ -2604,7 +2612,7 @@ static int _eval_nodes_dfly(struct job_record *job_ptr, bitstr_t *bitmap,
 		 * lower level switch OR
 		 * same level but tighter switch (less resource waste) OR
 		 * 2 required switches of same level and nodes count
-		 * but the latter accumulated CPUs count is bigger than 
+		 * but the latter accumulated CPUs count is bigger than
 		 * the former one
 		 */
 		if ((best_fit_inx == -1) ||
@@ -2673,7 +2681,7 @@ static int _eval_nodes_dfly(struct job_record *job_ptr, bitstr_t *bitmap,
 				      [best_fit_location], i))
 				cpus_array[j] = 0;
 			else
-				cpus_array[j] = _get_cpu_cnt(job_ptr, i, 
+				cpus_array[j] = _get_cpu_cnt(job_ptr, i,
 							     cpu_cnt);
 		}
 
@@ -2701,12 +2709,12 @@ static int _eval_nodes_dfly(struct job_record *job_ptr, bitstr_t *bitmap,
 		/* accumulate resources from this leaf on a best-fit basis */
 		while ((max_nodes > 0) && ((rem_nodes > 0) || (rem_cpus > 0))) {
 			/* pick a node using a best-fit approach */
-			/* if rem_cpus < 0, then we will search for nodes 
+			/* if rem_cpus < 0, then we will search for nodes
 			 * with lower free cpus nb first
 			 */
 			int suff = 0, bfsuff = 0, bfloc = 0 , bfsize = 0;
 			int ca_bfloc = 0;
-			for (i = first, j = 0; ((i <= last) && (first >= 0)); 
+			for (i = first, j = 0; ((i <= last) && (first >= 0));
 			     i++, j++) {
 				if (cpus_array[j] == 0)
 					continue;
@@ -2725,7 +2733,7 @@ static int _eval_nodes_dfly(struct job_record *job_ptr, bitstr_t *bitmap,
 			/* no node found, break */
 			if (bfsize == 0)
 				break;
-			
+
 			/* clear resources of this node from the switch */
 			bit_clear(switches_bitmap[best_fit_location], bfloc);
 			switches_node_cnt[best_fit_location]--;
@@ -2763,7 +2771,7 @@ static int _eval_nodes_dfly(struct job_record *job_ptr, bitstr_t *bitmap,
 			max_nodes--;
 			rem_cpus -= bfsize;
 			break;
-		}		
+		}
 
 		/* free best-switch nodes available cpus array */
 		xfree(cpus_array);
