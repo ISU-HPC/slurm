@@ -169,6 +169,16 @@ static int _print_stats(void)
 		printf("\tQueue length mean: %u\n",
 		       buf->bf_queue_len_sum / buf->bf_cycle_counter);
 	}
+	if (buf->mg_active) {
+		printf("\nMigration stats (WARNING: data obtained"
+					 " in the middle of migration execution.)\n");
+	} else
+		printf("\nMigration stats\n");
+
+	printf("\tTotal migrated jobs (since last slurm start): %u\n",
+				 buf->mg_migrated_jobs);
+	printf("\tTotal migrated jobs (since last stats cycle start): %u\n",
+				 buf->mg_last_migrated_jobs);
 
 	printf("\nRemote Procedure Call statistics by message type\n");
 	for (i = 0; i < buf->rpc_type_size; i++) {

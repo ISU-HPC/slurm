@@ -1497,6 +1497,7 @@ static int _load_job_state(Buf buffer, uint16_t protocol_version)
 		}
 		safe_unpack32(&job_ptr->bit_flags, buffer);
 		job_ptr->bit_flags &= ~BACKFILL_TEST;
+		job_ptr->bit_flags &= ~MIGRATION_TEST;
 		safe_unpackstr_xmalloc(&tres_alloc_str,
 				       &name_len, buffer);
 		safe_unpackstr_xmalloc(&tres_fmt_alloc_str,
@@ -1690,6 +1691,7 @@ static int _load_job_state(Buf buffer, uint16_t protocol_version)
 		}
 		safe_unpack32(&job_ptr->bit_flags, buffer);
 		job_ptr->bit_flags &= ~BACKFILL_TEST;
+		job_ptr->bit_flags &= ~MIGRATION_TEST;
 		safe_unpackstr_xmalloc(&tres_alloc_str,
 				       &name_len, buffer);
 		safe_unpackstr_xmalloc(&tres_fmt_alloc_str,
@@ -7251,6 +7253,7 @@ _copy_job_desc_to_job_record(job_desc_msg_t * job_desc,
 	job_ptr->mail_user = xstrdup(job_desc->mail_user);
 	job_ptr->bit_flags = job_desc->bitflags;
 	job_ptr->bit_flags &= ~BACKFILL_TEST;
+	job_ptr->bit_flags &= ~MIGRATION_TEST;
 	job_ptr->ckpt_interval = job_desc->ckpt_interval;
 	job_ptr->spank_job_env = job_desc->spank_job_env;
 	job_ptr->spank_job_env_size = job_desc->spank_job_env_size;
@@ -7531,7 +7534,7 @@ static bool _test_nodes_ready(struct job_record *job_ptr)
 	if (bit_overlap(job_ptr->node_bitmap, power_node_bitmap))
 		return false;
 
-	if (job_ptr->wait_all_nodes && 
+	if (job_ptr->wait_all_nodes &&
 	    ((select_g_job_ready(job_ptr) & READY_NODE_STATE) == 0))
 		return false;
 

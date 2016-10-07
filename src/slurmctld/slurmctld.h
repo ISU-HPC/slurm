@@ -181,6 +181,10 @@ typedef struct diag_stats {
 	uint32_t bf_queue_len_sum;
 	time_t   bf_when_last_cycle;
 	uint32_t bf_active;
+
+	uint32_t migrated_jobs;
+	uint32_t last_migrated_jobs;
+	uint32_t mg_active;
 } diag_stats_t;
 
 /* This is used to point out constants that exist in the

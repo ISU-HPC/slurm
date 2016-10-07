@@ -21,6 +21,7 @@ SUBDIRS =		\
 	slurmdbd	\
 	smap		\
 	smd		\
+	smigrate \
 	sprio		\
 	squeue		\
 	sreport		\

@@ -111,6 +111,10 @@ extern void pack_all_stat(int resp, char **buffer_ptr, int *buffer_size,
 			pack32(slurmctld_diag_stats.bf_depth_try_sum, buffer);
 			pack32(slurmctld_diag_stats.bf_queue_len_sum, buffer);
 			pack32(slurmctld_diag_stats.bf_active,	 buffer);
+
+			pack32(slurmctld_diag_stats.migrated_jobs, buffer);
+			pack32(slurmctld_diag_stats.last_migrated_jobs,
+			       buffer);
 		}
 	}
 
@@ -150,6 +154,9 @@ extern void reset_stats(int level)
 	slurmctld_diag_stats.bf_last_depth = 0;
 	slurmctld_diag_stats.bf_last_depth_try = 0;
 	slurmctld_diag_stats.bf_active = 0;
+
+	slurmctld_diag_stats.migrated_jobs = 0;
+	slurmctld_diag_stats.last_migrated_jobs = 0;
 
 	last_proc_req_start = time(NULL);
 }
