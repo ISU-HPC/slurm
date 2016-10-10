@@ -502,11 +502,13 @@ extern int slurm_ckpt_signal_tasks(stepd_step_rec_t *job, char *image_dir)
 			}
 
 			/* MULTICHECKPOINT */
-			//argv = xmalloc( sizeof(char*) * 4);
-			argv[0] = strdup(cr_checkpoint_path);
-			argv[1] = strdup(job->ckpt_dir);
-			argv[2] =  malloc(10 * sizeof(char));
-			snprintf(argv[2], sizeof(int)*5, "%d", job->jobid);
+			//1: process PID
+			//$2: context file
+			//$3: Slurm checkpoint image dir.
+
+			argv[0] = pid;
+			argv[1] = context_file;
+			argv[2] = image_dir;
 			argv[3] = NULL;
 
 			execv(argv[0], argv);
@@ -543,28 +545,42 @@ extern int slurm_ckpt_restart_task(stepd_step_rec_t *job,
 				   char *image_dir, int gtid)
 {
 	char *argv[4];
-
+	char pid[16];
+	int i;
 	//TODO manuel: context_file aqui no sirve para nada, no?
 
 	char context_file[MAX_PATH_LEN];
+	for (i = 0; i < job->node_tasks; i ++) {
 
-	/* jobid and stepid must NOT be spelled here,
-	 * since it is a new job/step */
-	if (job->batch) {
-		sprintf(context_file, "%s/script.ckpt", image_dir);
-	} else {
-		sprintf(context_file, "%s/task.%d.ckpt", image_dir, gtid);
-	}
+		sprintf(pid, "%u", (unsigned int)job->task[i]->pid);
 
-	argv[0] = strdup(cr_restart_path);
-	argv[1] = strdup(job->ckpt_dir);
-	argv[2] =  malloc(10 * sizeof(char));
-	snprintf(argv[2], sizeof(int)*5, "%d", job->jobid);
-	argv[3] = NULL;
+		/* jobid and stepid must NOT be spelled here,
+		 * since it is a new job/step */
+		if (job->batch) {
+			sprintf(context_file, "%s/script.ckpt", image_dir);
+		} else {
+			sprintf(context_file, "%s/task.%d.ckpt", image_dir, gtid);
+		}
 
-	execv(argv[0], argv);
 
-	error("execv failure: %m");
+		/* MULTICHECKPOINT */
+		//$1: process PID
+		//$2: context file
+		//$3: Slurm checkpoint image dir.
+		//$4: full job name
+
+		argv[0] = pid;
+		argv[1] = context_file;
+		argv[2] = image_dir;
+		argv[3]= strdup(job->argv[0]);
+		argv[4] = NULL;
+
+
+
+		execv(argv[0], argv);
+
+		error("execv failure: %m");
+	} // for task in job
 	return SLURM_ERROR;
 }
 

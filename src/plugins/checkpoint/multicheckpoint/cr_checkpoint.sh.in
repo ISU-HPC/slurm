@@ -1,3 +1,64 @@
 #!/bin/sh
+set -x
 
-echo "HI THIS IS MULTICHECKPOINT CHECKPOINT"
+#input parameters:
+#$1: process PID
+#$2: context file
+#$3: Slurm checkpoint image dir.
+
+#############################################
+##############################################
+####  CHECKPOINT JOB ######
+
+#Auxiliary functions. Each one creates a checkpoint with a certain lib
+checkpointBLCRJob(){
+  cr_checkpoint -T $jobPID -f $contextFile
+  return 0
+}
+checkpointDMTCPJob(){
+  cd $jobCheckpointFolder
+  dmtcp_coordinator="$jobCheckpointFolder/dmtcp_coordinator"
+  source $dmtcp_coordinator
+  dmtcp_command  bc
+  return 0
+}
+
+checkpointCRIUJob(){
+  sudo criu dump -vvvv -o $jobCheckpointFolder/checkpoint_create.log --shell-job -D $jobCheckpointFolder --leave-running -t $jobPID
+  return 0
+}
+
+
+#This is the main function
+#$1: name of the checkpoint library to use
+#returns: 0 on success, other if not
+checkpointJob(){
+  if [ "$1" = "BLCR" ]
+  then
+    checkpointBLCRJob $@
+    return 0
+  elif [ "$1" = "DMTCP" ]
+  then
+    checkpointDMTCPJob $@
+    return 0
+  elif [ "$1" = "CRIU" ]
+  then
+    checkpointCRIUJob $@
+    return 0
+  fi
+  return 1
+}
+
+
+#############################################
+##############################################
+####  MAIN: we start here ######
+jobPID=$1
+contextFile=$2
+checkpointDir=$3
+jobCheckpointFolder=$checkpointDir/$SLURM_JOB_ID
+
+checkpointLib=`more $jobCheckpointFolder/checkpoint_library`
+checkpointJob $checkpointLib
+
+exit 0

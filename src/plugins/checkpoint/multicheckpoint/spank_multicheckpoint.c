@@ -54,38 +54,45 @@ struct spank_option spank_options[] =
  */
 int slurm_spank_init (spank_t sp, int ac, char **av)
 {
-   //info("checkpoint/multicheckpoint_spank init");
+   info("checkpoint/multicheckpoint_spank init");
    spank_option_register (sp, spank_options);
    return (ESPANK_SUCCESS);
 }
 
 
  int slurm_spank_task_init(spank_t sp, int ac, char **av){
+   info("checkpoint/multicheckpoint_spank slurm_spank_task_init");
    if (multicheckpoint_enabled != 0)
     return (ESPANK_SUCCESS);
 
-    //we modify the application to be executed by including MULTICHECKPOINT wrapper.
+    //we modify the application to be executed by including a DMTCP wrapper.
   char **argv;
   char **newArgv;
+  uint32_t aux;
+  char numCPUs[16];
   uint32_t argc = 0;
   uint32_t cont = 0;
 
   spank_get_item (sp, S_JOB_ARGV, &argc,&argv);
+  spank_get_item (sp, S_JOB_NCPUS,aux);
 
-  argc += 1;
-  newArgv = xmalloc (sizeof(char*) * (argc + 1));
+  sprintf(numCPUs, "%u", aux);
+
+  argc += 2;
+  newArgv = xmalloc (sizeof(char*) * (argc + 2));
   newArgv[0] = strdup(cr_checkpoint_start);
+  newArgv[1] = numCPUs;
 
 
   //slurm_error("printing newArgv");
-  for (cont = 0; cont < argc-1; cont++) {
-    newArgv[cont+1] = strdup(argv[cont]);
+  for (cont = 0; cont < argc-2; cont++) {
+    newArgv[cont+2] = strdup(argv[cont]);
   //  slurm_error(newArgv[cont+1]);
   }
   //newArgv[argc] = NULL;
 
   if (spank_set_item(sp, S_JOB_ARGV, &argc,&newArgv) != ESPANK_SUCCESS) {
-    slurm_error("MULTICHECKPOINT Plugin could not be enabled");
+    slurm_error("DMTCP Plugin could not be enabled");
     return (ESPANK_ERROR);
 
   }
@@ -97,6 +104,7 @@ return (ESPANK_SUCCESS);
 
 int slurm_spank_task_exit(spank_t sp, int ac, char **av){
 
+  slurm_error("HI EVERYONE, I AM slurm_spank_task_exit");
 
   //job id, needed to access the rest of information
   uint32_t job_id;

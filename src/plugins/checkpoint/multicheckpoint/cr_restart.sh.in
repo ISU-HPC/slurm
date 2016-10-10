@@ -1,3 +1,83 @@
-#!/bin/bash
+#!/bin/sh
 
-echo "HI THIS IS MULTICHECKPOINT RESTART"
+echo "HI TIS IS CR_RESTAR"
+set -x
+env
+
+#input parameters:
+#$1: process PID
+#$2: context file
+#$3: Slurm checkpoint image dir.
+#$4: full job name
+
+
+#############################################
+##############################################
+####  CHECKPOINT JOB ######
+
+#Auxiliary functions. Each one creates a checkpoint with a certain lib
+restartBLCRJob(){
+  cr_restart $jobPID
+  return 0
+}
+restartDMTCPJob(){
+  cd $jobCheckpointFolder
+  dmtcp_coordinator="$jobCheckpointFolder/dmtcp_coordinator"
+  source $dmtcp_coordinator
+  dmtcp_restart ./ckpt_*
+  return 0
+}
+
+restartCRIUJob(){
+
+  #create string ins SED format
+  oldPath=$fullJobName
+  newPath="$checkpointDir/inputScript.sh"
+  oldPath="${oldPath//\//\\/}"
+  newPath="${newPath//\//\\/}"
+
+  # replace path of old script path by the new one"
+  crit decode -i $jobCheckpointFolder/reg-files.img | sed -e "s/$oldPath/$newPath/g" | crit encode -o $jobCheckpointFolder/reg-files-new.img
+  mv $jobCheckpointFolder/reg-files-new.img $jobCheckpointFolder/reg-files.img
+
+  #restore
+  sudo criu restore -vvvv -o $jobCheckpointFolder/checkpoint_restart.log --shell-job -D $jobCheckpointFolder
+  return 0
+}
+
+
+#This is the main function
+#$1: name of the checkpoint library to use
+#returns: 0 on success, other if not
+restartJob(){
+  if [ "$1" = "BLCR" ]
+  then
+    restartBLCRJob $@
+    return 0
+  elif [ "$1" = "DMTCP" ]
+  then
+    restartDMTCPJob $@
+    return 0
+  elif [ "$1" = "CRIU" ]
+  then
+    restartCRIUJob $@
+    return 0
+  fi
+  return 1
+}
+
+
+#############################################
+##############################################
+####  MAIN: we start here ######
+jobPID=$1
+contextFile=$2
+checkpointDir=$3
+fullJobName=$4
+
+jobCheckpointFolder=$checkpointDir/$SLURM_JOB_ID
+
+checkpointLib=`more $jobCheckpointFolder/checkpoint_library`
+restartJob $checkpointLib
+
+exit 0
