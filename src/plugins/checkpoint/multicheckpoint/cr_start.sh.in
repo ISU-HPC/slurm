@@ -1,2 +1,139 @@
 #!/bin/sh
+#input parameters:
+#$1: script to run in Slurm
+
 echo "HI THIS IS MULTICHECKPOINT START"
+##NOTA: Si arranco la aplicacion de esta manera, conozco su PID? Qué hay en
+# sprintf(pid, "%u", (unsigned int)job->task[i]->pid); (checkpoint_blcr.c, linea 477. )
+
+#################################
+#################################
+####  CONCURRENCY CONTROL #######
+
+#this makes sure that only a task (in case of multitask jobs) executes this script
+#$1: folder  where concurrence files will be stored. For convenience, here I will store checkpoint files too
+#returns: 0 if this was the first task, 1 if not
+semaphore(){
+  checkpoint_folder=$1
+  mkdir -p $checkpoint_folder
+  cd $checkpoint_folder
+
+  firstTask=1
+
+  lockdir=$checkpoint_folder"/$SLURM_JOB_ID.mutprueba.lock"
+
+  if mkdir "$lockdir"  &> /dev/null
+  then
+    checkpoint_library="$checkpoint_folder/checkpoint_library"
+
+    #if this is the first node, start coordinator
+    if [ ! -f $checkpoint_library ]; then
+      touch $checkpoint_library
+      firstTask=0
+     fi
+
+     # remove directory when script finishes
+     rm -rf "$lockdir"
+  fi
+  cd -  2>&1 >/dev/null  #this is for silent CD
+  return $firstTask
+}
+
+###########################################
+###########################################
+####  DECISION OF CHECKPOINT LIBRARY ######
+
+##TODO Manuel: OJOOOO esto hay que mejorarlo. Pensar cómo hacer que llame a BLCR sólo si hemos compilado el código con BLCR
+#TODO a parte hay que meter algún tipo de inteligencia aquí
+#decides which checkpoint library to use
+#return: Name of the checkpoint library to use (DMTCP, BLCR or CRIU).
+whichCheckpointLib(){
+
+  #BLCR
+  BLCR=true
+  type cr_run >/dev/null 2>&1 || BLCR=false
+
+  #DMTCP
+  DMTCP=true
+  type dmtcp_launch >/dev/null 2>&1 || DMTCP=false
+
+  #CRIU
+  CRIU=true
+  type criu >/dev/null 2>&1 || CRIU=false
+
+
+  if [ "$BLCR" = true ]
+  then
+    checkpointLib="BLCR"
+  elif [ "$DMTCP" = true ]
+  then
+    checkpointLib="DMTCP"
+  elif [ "$CRIU" = true ]
+  then
+    checkpointLib="CRIU"
+  fi
+  echo $checkpointLib
+  return 0
+}
+
+#############################################
+##############################################
+####  START JOB WITH CHECKPOINT SUPPORT ######
+
+#Auxiliary functions. Each one initializes a job using a certain checkpoint lib
+startBLCRCheckpointedJob(){
+  $@
+  return 0
+}
+startDMTCPCheckpointedJob(){
+  $@
+  return 0
+}
+startCRIUCheckpointedJob(){
+  $@
+  return 0
+}
+
+
+#This is the main function
+#$1: name of the checkpoint library to use
+#returns: 0 on success, other if not
+startCheckpointedJob(){
+  if [ "$1"="BLCR" ]
+  then
+    startBLCRCheckpointedJob $@
+    return 0
+  elif [ "$1"="DMTCP" ]
+  then
+    startDMTCPCheckpointedJob $@
+    return 0
+  elif [ "$1"="CRIU" ]
+  then
+    startCRIUCheckpointedJob $@
+    return 0
+  fi
+  return 1
+}
+
+
+#############################################
+##############################################
+####  MAIN: we start here ######
+
+#see who is the first task
+checkpoint_folder=$SLURM_CHECKPOINT_IMAGE_DIR/$SLURM_JOB_ID
+if ! semaphore $checkpoint_folder ;
+then
+  echo "lockdir $SLURM_CHECKPOINT_IMAGE_DIR/$SLURM_JOB_ID If you are debugging, yo probably want to delete it"
+  exit 0
+fi
+
+#see which checkpoint library we will be using
+checkpointLib=`whichCheckpointLib`
+
+
+echo $checkpointLib > $checkpoint_folder"/checkpoint_library"
+
+#start job with this checkpoint lib
+startCheckpointedJob $@
+exit 0

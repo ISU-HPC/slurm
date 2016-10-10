@@ -386,9 +386,9 @@ dnl
 X_AC_BLCR
 
 dnl
-dnl Check for compilation of SLURM with DMTCP support:
+dnl Check for compilation of SLURM with MULTICHECKPOINT support:
 dnl
-X_AC_DMTCP
+X_AC_MULTICHECKPOINT
 
 
 dnl
