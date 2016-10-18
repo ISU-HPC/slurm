@@ -1,7 +1,6 @@
 #!/bin/sh
 #input parameters:
-#$1: number of tasks used by the job
-#$2: script to run in Slurm
+#$1: script to run in Slurm
 
 echo "HI THIS IS MULTICHECKPOINT START"
 ##NOTA: Si arranco la aplicacion de esta manera, conozco su PID? Qué hay en
@@ -62,26 +61,17 @@ whichCheckpointLib(){
   CRIU=true
   type criu >/dev/null 2>&1 || CRIU=false
 
-###LOGIC HERE IS:
-#If CRIU is available and app is serial: use criu
-#else, if DMTCP is available: use DMTCP
-#else, if BLCR is avaibale: use BLCR
 
   if [ "$BLCR" = true ]
   then
     checkpointLib="BLCR"
-  fi
-
-  if [ "$DMTCP" = true ]
+  elif [ "$DMTCP" = true ]
   then
     checkpointLib="DMTCP"
-  fi
-
-  if [ "$CRIU" = true ] && [ "$jobToExecute" = 1 ]
+  elif [ "$CRIU" = true ]
   then
     checkpointLib="CRIU"
   fi
-
   echo $checkpointLib
   return 0
 }
@@ -129,10 +119,8 @@ startCheckpointedJob(){
 #############################################
 ##############################################
 ####  MAIN: we start here ######
-numberCPUs=$1
-jobToExecute="${@:2}" #all input parameters but the first one. Weiderst syntax ever
-env > /tmp/envOut
-#see who is the first task executing this script
+
+#see who is the first task
 checkpoint_folder=$SLURM_CHECKPOINT_IMAGE_DIR/$SLURM_JOB_ID
 if ! semaphore $checkpoint_folder ;
 then
@@ -147,5 +135,5 @@ checkpointLib=`whichCheckpointLib`
 echo $checkpointLib > $checkpoint_folder"/checkpoint_library"
 
 #start job with this checkpoint lib
-startCheckpointedJob $jobToExecute
+startCheckpointedJob $@
 exit 0

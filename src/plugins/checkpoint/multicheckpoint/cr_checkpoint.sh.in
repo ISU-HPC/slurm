@@ -4,7 +4,8 @@ set -x
 #input parameters:
 #$1: process PID
 #$2: context file
-#$3: Slurm checkpoint image dir.
+#TODO: hace falta esto?
+#$3: SLurm checkpoint image dir.
 
 #############################################
 ##############################################
@@ -33,15 +34,15 @@ checkpointCRIUJob(){
 #$1: name of the checkpoint library to use
 #returns: 0 on success, other if not
 checkpointJob(){
-  if [ "$1" = "BLCR" ]
+  if [ "$1"="BLCR" ]
   then
     checkpointBLCRJob $@
     return 0
-  elif [ "$1" = "DMTCP" ]
+  elif [ "$1"="DMTCP" ]
   then
     checkpointDMTCPJob $@
     return 0
-  elif [ "$1" = "CRIU" ]
+  elif [ "$1"="CRIU" ]
   then
     checkpointCRIUJob $@
     return 0
@@ -53,10 +54,13 @@ checkpointJob(){
 #############################################
 ##############################################
 ####  MAIN: we start here ######
-jobPID=$1
+
+
+pid=$jobPID
 contextFile=$2
 checkpointDir=$3
-jobCheckpointFolder=$checkpointDir/$SLURM_JOB_ID
+
+jobCheckpointFolder=checkpointDir/$SLURM_JOB_ID
 
 checkpointLib=`more $jobCheckpointFolder/checkpoint_library`
 checkpointJob $checkpointLib

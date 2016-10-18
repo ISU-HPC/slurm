@@ -1,13 +1,10 @@
 #!/bin/sh
 
-echo "HI TIS IS CR_RESTAR"
-set -x
-env
-
 #input parameters:
 #$1: process PID
 #$2: context file
-#$3: Slurm checkpoint image dir.
+#TODO: hace falta esto?
+#$3: SLurm checkpoint image dir.
 #$4: full job name
 
 
@@ -31,7 +28,7 @@ restartDMTCPJob(){
 restartCRIUJob(){
 
   #create string ins SED format
-  oldPath=$fullJobName
+  oldPath=$fullJobName #Revisar que pasa con esto. Ver nota en post-it. 
   newPath="$checkpointDir/inputScript.sh"
   oldPath="${oldPath//\//\\/}"
   newPath="${newPath//\//\\/}"
@@ -50,15 +47,15 @@ restartCRIUJob(){
 #$1: name of the checkpoint library to use
 #returns: 0 on success, other if not
 restartJob(){
-  if [ "$1" = "BLCR" ]
+  if [ "$1"="BLCR" ]
   then
-    restartBLCRJob $@
+    restarttBLCRJob $@
     return 0
-  elif [ "$1" = "DMTCP" ]
+  elif [ "$1"="DMTCP" ]
   then
     restartDMTCPJob $@
     return 0
-  elif [ "$1" = "CRIU" ]
+  elif [ "$1"="CRIU" ]
   then
     restartCRIUJob $@
     return 0
@@ -70,12 +67,12 @@ restartJob(){
 #############################################
 ##############################################
 ####  MAIN: we start here ######
-jobPID=$1
+pid=$jobPID
 contextFile=$2
 checkpointDir=$3
 fullJobName=$4
 
-jobCheckpointFolder=$checkpointDir/$SLURM_JOB_ID
+jobCheckpointFolder=checkpointDir/$SLURM_JOB_ID
 
 checkpointLib=`more $jobCheckpointFolder/checkpoint_library`
 restartJob $checkpointLib
