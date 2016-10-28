@@ -385,6 +385,16 @@ dnl Check for compilation of SLURM with BLCR support:
 dnl
 X_AC_BLCR
 
+dnl Check for compilation of SLURM with CRIU support:
+dnl
+X_AC_CRIU
+
+dnl
+dnl Check for compilation of SLURM with DMTCP support:
+dnl
+X_AC_DMTCP
+
+
 dnl
 dnl Check for compilation of SLURM with CRIU support:
 dnl
