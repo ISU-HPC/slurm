@@ -710,6 +710,8 @@ test -f $RPM_BUILD_ROOT/%{_libdir}/slurm/job_container_none.so       &&
    echo %{_libdir}/slurm/job_container_none.so       >> $LIST
 test -f $RPM_BUILD_ROOT/%{_libdir}/slurm/task_cray.so                &&
    echo %{_libdir}/slurm/task_cray.so                >> $LIST
+test -f $RPM_BUILD_ROOT/%{_libdir}/slurm/job_migration.so        &&
+	    echo %{_libdir}/slurm/job_migration.so        >> $LIST
 test -f $RPM_BUILD_ROOT/%{_libdir}/slurm/slurmctld_nonstop.so        &&
    echo %{_libdir}/slurm/slurmctld_nonstop.so        >> $LIST
 test -f $RPM_BUILD_ROOT/%{_libdir}/slurm/switch_cray.so              &&
@@ -934,6 +936,7 @@ rm -rf $RPM_BUILD_ROOT
 %{_libdir}/slurm/sched_backfill.so
 %{_libdir}/slurm/sched_builtin.so
 %{_libdir}/slurm/sched_hold.so
+%{_libdir}/slurm/sched_migration.so
 %{_libdir}/slurm/sched_wiki.so
 %{_libdir}/slurm/sched_wiki2.so
 %{_libdir}/slurm/select_alps.so

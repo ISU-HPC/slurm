@@ -13,7 +13,5 @@ pkglib_LTLIBRARIES = sched_migration.la
 sched_migration_la_SOURCES = migration_wrapper.c	\
 			migration.c	\
 			migration.h
-
-
+			
 sched_migration_la_LDFLAGS = $(SO_LDFLAGS) $(PLUGIN_FLAGS)
-sched_migration_la_LIBADD = ../../slurmctld/job_migration/libjob_migration.la

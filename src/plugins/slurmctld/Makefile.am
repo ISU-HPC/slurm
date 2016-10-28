@@ -1,3 +1,3 @@
 # Makefile for slurmctld plugins
 
-SUBDIRS = nonstop
+SUBDIRS = job_migration nonstop

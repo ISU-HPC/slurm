@@ -682,7 +682,7 @@ enum acct_energy_type {
  * Symbol format is SLURM_DIST_<node>_<socket>_<core>
  *
  * <node>   = Method for distributing tasks to nodes.
- *            This determines the order in which task ids are 
+ *            This determines the order in which task ids are
  *            distributed to the nodes selected for the job/step.
  * <socket> = Method for distributing allocated lllps across sockets.
  *            This determines the order in which allocated lllps are
@@ -723,9 +723,9 @@ typedef enum task_dist_states {
 	SLURM_DIST_BLOCK_CFULL_CYCLIC   = 0x0132,
 	SLURM_DIST_BLOCK_CFULL_BLOCK    = 0x0232,
 	SLURM_DIST_BLOCK_CFULL_CFULL    = 0x0332,
-	
+
 	SLURM_DIST_NODECYCLIC           = 0x0001,
-	SLURM_DIST_NODEBLOCK            = 0x0002,	
+	SLURM_DIST_NODEBLOCK            = 0x0002,
 	SLURM_DIST_SOCKCYCLIC           = 0x0010,
 	SLURM_DIST_SOCKBLOCK            = 0x0020,
 	SLURM_DIST_SOCKCFULL            = 0x0030,
@@ -987,6 +987,7 @@ enum ctx_keys {
 #define NODE_REBOOT        0x00000080	/* Waiting for node reboot */
 #define SPREAD_JOB         0x00000100	/* Spread job across max node count */
 #define USE_MIN_NODES      0x00000200	/* Prefer minimum node count */
+#define MIGRATION_TEST     0x00000400	/* Backfill test in progress */ //MANUEL: ESTO NO ES SEGURO!
 
 /*****************************************************************************\
  *      SLURM HOSTLIST FUNCTIONS
@@ -2494,6 +2495,8 @@ typedef struct reservation_name_msg {
 #define DEBUG_FLAG_ESEARCH      0x0000400000000000 /* Elasticsearch debug */
 #define DEBUG_FLAG_NODE_FEATURES 0x0000800000000000 /* Node Features debug */
 #define DEBUG_FLAG_FEDR         0x0001000000000000 /* Federation debug */
+#define DEBUG_FLAG_MIGRATION         0x0002000000000000 /* Migration debug */
+#define DEBUG_FLAG_MIGRATION_MAP     0x0004000000000000 /* Migration debug */
 
 #define GROUP_FORCE		0x8000	/* if set, update group membership
 					 * info even if no updates to
@@ -2882,6 +2885,10 @@ typedef struct stats_info_response_msg {
 	uint32_t bf_queue_len_sum;
 	time_t   bf_when_last_cycle;
 	uint32_t bf_active;
+
+	uint32_t mg_migrated_jobs;
+	uint32_t mg_last_migrated_jobs;
+  uint32_t mg_active;
 
 	uint32_t rpc_type_size;
 	uint16_t *rpc_type_id;
@@ -4100,7 +4107,7 @@ extern void slurm_print_topo_record(FILE *out,
 \*****************************************************************************/
 
 /*
- * slurm_load_powercap - issue RPC to get slurm powercapping details 
+ * slurm_load_powercap - issue RPC to get slurm powercapping details
  * IN powercap_info_msg_pptr - place to store a pointer to the result
  * RET 0 or a slurm error code
  * NOTE: free the response using slurm_free_powercap_info_msg
@@ -4127,7 +4134,7 @@ extern void slurm_print_powercap_info_msg(FILE *out,
 					  int one_liner);
 
 /*
- * slurm_update_powercap - issue RPC to update powercapping cap 
+ * slurm_update_powercap - issue RPC to update powercapping cap
  * IN powercap_msg - description of powercapping updates
  * RET 0 on success, otherwise return -1 and set errno to indicate the error
  */

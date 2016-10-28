@@ -1,18 +1,19 @@
 #
-AUTOMAKE_OPTIONS = foreign
-CLEANFILES = core.*
+# Makefile for smigrate
 
-AM_CPPFLAGS = -I$(top_srcdir) -I$(top_srcdir)/src/plugins/slurmctld/job_migration/
+AUTOMAKE_OPTIONS = foreign
+
+AM_CPPFLAGS = -I$(top_srcdir)
 
 bin_PROGRAMS = smigrate
 
-smigrate_SOURCES = smigrate.c opt.c opt.h
+smigrate_LDADD = 	$(top_builddir)/src/api/libslurm.o $(top_builddir)/src/plugins/slurmctld/job_migration/job_migration.o $(DL_LIBS)
 
-convenience_libs = $(top_builddir)/src/api/libslurm.o $(top_builddir)/src/plugins/slurmctld/job_migration/job_migration.o
-
-smigrate_LDADD =   $(convenience_libs) $(DL_LIBS)
-smigrate_LDFLAGS = -export-dynamic $(CMD_LDFLAGS)
+noinst_HEADERS = opt.h
+smigrate_SOURCES = smigrate.c  opt.c
 
 force:
-$(convenience_libs) : force
+$(smigrate_LDADD) : force
 	@cd `dirname $@` && $(MAKE) `basename $@`
+
+smigrate_LDFLAGS = -export-dynamic $(CMD_LDFLAGS)

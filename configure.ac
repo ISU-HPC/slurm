@@ -477,6 +477,7 @@ AC_CONFIG_FILES([Makefile
 		 src/slurmdbd/Makefile
 		 src/smap/Makefile
 		 src/smd/Makefile
+		 src/smigrate/Makefile
 		 src/sprio/Makefile
 		 src/squeue/Makefile
 		 src/srun/Makefile
@@ -608,6 +609,7 @@ AC_CONFIG_FILES([Makefile
 		 src/plugins/sched/backfill/Makefile
 		 src/plugins/sched/builtin/Makefile
 		 src/plugins/sched/hold/Makefile
+		 src/plugins/sched/migration/Makefile
 		 src/plugins/sched/wiki/Makefile
 		 src/plugins/sched/wiki2/Makefile
 		 src/plugins/select/Makefile
@@ -624,6 +626,7 @@ AC_CONFIG_FILES([Makefile
 		 src/plugins/select/other/Makefile
 		 src/plugins/select/serial/Makefile
 		 src/plugins/slurmctld/Makefile
+		 src/plugins/slurmctld/job_migration/Makefile
 		 src/plugins/slurmctld/nonstop/Makefile
 		 src/plugins/slurmd/Makefile
 		 src/plugins/switch/Makefile
