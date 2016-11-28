@@ -1,80 +1,21 @@
 #!/bin/sh
-#input parameters:
-#$1: script to run in Slurm
 
-echo "HI THIS IS MULTICHECKPOINT START"
-##NOTA: Si arranco la aplicacion de esta manera, conozco su PID? Qué hay en
-# sprintf(pid, "%u", (unsigned int)job->task[i]->pid); (checkpoint_blcr.c, linea 477. )
-
-#################################
-#################################
-####  CONCURRENCY CONTROL #######
-
-#this makes sure that only a task (in case of multitask jobs) executes this script
-#$1: folder  where concurrence files will be stored. For convenience, here I will store checkpoint files too
-#returns: 0 if this was the first task, 1 if not
-semaphore(){
-  checkpoint_folder=$1
-  mkdir -p $checkpoint_folder
-  cd $checkpoint_folder
-
-  firstTask=1
-
-  lockdir=$checkpoint_folder"/$SLURM_JOB_ID.mutprueba.lock"
-
-  if mkdir "$lockdir"  &> /dev/null
-  then
-    checkpoint_library="$checkpoint_folder/checkpoint_library"
-
-    #if this is the first node, start coordinator
-    if [ ! -f $checkpoint_library ]; then
-      touch $checkpoint_library
-      firstTask=0
-     fi
-
-     # remove directory when script finishes
-     rm -rf "$lockdir"
-  fi
-  cd -  2>&1 >/dev/null  #this is for silent CD
-  return $firstTask
-}
-
-###########################################
-###########################################
-####  DECISION OF CHECKPOINT LIBRARY ######
-
-##TODO Manuel: OJOOOO esto hay que mejorarlo. Pensar cómo hacer que llame a BLCR sólo si hemos compilado el código con BLCR
-#TODO a parte hay que meter algún tipo de inteligencia aquí
-#decides which checkpoint library to use
-#return: Name of the checkpoint library to use (DMTCP, BLCR or CRIU).
-whichCheckpointLib(){
-
-  #BLCR
-  BLCR=true
-  type cr_run >/dev/null 2>&1 || BLCR=false
-
-  #DMTCP
-  DMTCP=true
-  type dmtcp_launch >/dev/null 2>&1 || DMTCP=false
-
-  #CRIU
-  CRIU=true
-  type criu >/dev/null 2>&1 || CRIU=false
+source /etc/profile
+DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
+source $DIR/cr_common.sh
 
 
-  if [ "$BLCR" = true ]
-  then
-    checkpointLib="BLCR"
-  elif [ "$DMTCP" = true ]
-  then
-    checkpointLib="DMTCP"
-  elif [ "$CRIU" = true ]
-  then
-    checkpointLib="CRIU"
-  fi
-  echo $checkpointLib
-  return 0
-}
+#########GENERAL INFORMATION
+#SLURM_CHECKPOINT_IMAGE_DIR: path where slurm stores checkpoint images, as defined in slurm.conf . It contains many checkpoint_folder and some other stuff
+#SLURM_JOB_ID: the Id of the slurm job. Note that in this script it exists as environment var, but in other ones it comes as an input variable
+#checkpoint_folder: folder where we want to store the checkpoint information.
+#checkpoint_library: library employed to perform a given chekcpoint
+#checkpoint_info: file containing checkpoint information during its execution. It is also employed for concurency
+#   in case of DMTCP, port and host. It is stored in  SLURM_CHECKPOINT_IMAGE_DIR
+#  this file is called SLURM_CHECKPOINT_IMAGE_DIR/checkpoint_info.$SLURM_JOB_ID
+#
+
+
 
 #############################################
 ##############################################
@@ -85,10 +26,18 @@ startBLCRCheckpointedJob(){
   $@
   return 0
 }
+
 startDMTCPCheckpointedJob(){
-  $@
+
+
+  startDMTCPCoordinator $checkpoint_folder $checkpoint_info
+
+  #start app joining that coordinator
+  #TODO MANUEL: ESTO SOLO VALE PARA SERIAL. PARA PARALELO HACE FALTA DEBUG, ESTA EN ACME
+  dmtcp_launch --ib --rm --ckptdir $checkpoint_folder $@
   return 0
 }
+
 startCRIUCheckpointedJob(){
   $@
   return 0
@@ -99,17 +48,17 @@ startCRIUCheckpointedJob(){
 #$1: name of the checkpoint library to use
 #returns: 0 on success, other if not
 startCheckpointedJob(){
-  if [ "$1"="BLCR" ]
+  if [ "$1" == "BLCR" ]
   then
-    startBLCRCheckpointedJob $@
+    startBLCRCheckpointedJob $2
     return 0
-  elif [ "$1"="DMTCP" ]
+  elif [ "$1" == "DMTCP" ]
   then
-    startDMTCPCheckpointedJob $@
+    startDMTCPCheckpointedJob $2
     return 0
-  elif [ "$1"="CRIU" ]
+  elif [ "$1" == "CRIU" ]
   then
-    startCRIUCheckpointedJob $@
+    startCRIUCheckpointedJob $2
     return 0
   fi
   return 1
@@ -120,20 +69,24 @@ startCheckpointedJob(){
 ##############################################
 ####  MAIN: we start here ######
 
+#here we will store information about checkpoint
+checkpoint_info=$SLURM_CHECKPOINT_IMAGE_DIR"/checkpoint_info."$SLURM_JOB_ID
+checkpoint_folder=$SLURM_CHECKPOINT_IMAGE_DIR"/"$SLURM_JOB_ID
+
 #see who is the first task
-checkpoint_folder=$SLURM_CHECKPOINT_IMAGE_DIR/$SLURM_JOB_ID
-if ! semaphore $checkpoint_folder ;
+if ! semaphore $SLURM_CHECKPOINT_IMAGE_DIR $SLURM_JOB_ID;
 then
-  echo "lockdir $SLURM_CHECKPOINT_IMAGE_DIR/$SLURM_JOB_ID If you are debugging, yo probably want to delete it"
+  #this is not the first task
   exit 0
 fi
+#clean concurrency file at the end of execution
+trap 'rm -rf $checkpoint_info' SIGHUP SIGINT SIGTERM EXIT
+
 
 #see which checkpoint library we will be using
 checkpointLib=`whichCheckpointLib`
 
-
-echo $checkpointLib > $checkpoint_folder"/checkpoint_library"
-
 #start job with this checkpoint lib
-startCheckpointedJob $@
+startCheckpointedJob $checkpointLib $@
+
 exit 0

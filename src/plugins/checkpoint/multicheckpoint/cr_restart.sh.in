@@ -1,12 +1,15 @@
 #!/bin/sh
 
-#input parameters:
-#$1: process PID
-#$2: context file
-#TODO: hace falta esto?
-#$3: SLurm checkpoint image dir.
-#$4: full job name
+source /etc/profile
+DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
+source $DIR/cr_common.sh
 
+
+#input parameters:
+#$1: SLURM_JOB_ID
+#$2: jobPID
+#$3: contextFile
+#$5: full job name
 
 #############################################
 ##############################################
@@ -14,13 +17,17 @@
 
 #Auxiliary functions. Each one creates a checkpoint with a certain lib
 restartBLCRJob(){
-  cr_restart $jobPID
+  cr_restart $contextFile
   return 0
 }
+
 restartDMTCPJob(){
-  cd $jobCheckpointFolder
-  dmtcp_coordinator="$jobCheckpointFolder/dmtcp_coordinator"
-  source $dmtcp_coordinator
+  cd $checkpoint_folder
+
+  #checkpoint info is created in startDMTCPCoordinator function. It is different that in "cr_start", where it is created in the "sempahore" function
+  trap 'rm -rf $checkpoint_info' SIGHUP SIGINT SIGTERM EXIT
+
+  startDMTCPCoordinator $checkpoint_folder $checkpoint_info
   dmtcp_restart ./ckpt_*
   return 0
 }
@@ -28,17 +35,17 @@ restartDMTCPJob(){
 restartCRIUJob(){
 
   #create string ins SED format
-  oldPath=$fullJobName #Revisar que pasa con esto. Ver nota en post-it. 
-  newPath="$checkpointDir/inputScript.sh"
+  oldPath=$fullJobName
+  newPath="$checkpoint_folder/inputScript.sh"
   oldPath="${oldPath//\//\\/}"
   newPath="${newPath//\//\\/}"
 
   # replace path of old script path by the new one"
-  crit decode -i $jobCheckpointFolder/reg-files.img | sed -e "s/$oldPath/$newPath/g" | crit encode -o $jobCheckpointFolder/reg-files-new.img
-  mv $jobCheckpointFolder/reg-files-new.img $jobCheckpointFolder/reg-files.img
+  crit decode -i $checkpoint_folder/reg-files.img | sed -e "s/$oldPath/$newPath/g" | crit encode -o $checkpoint_folder/reg-files-new.img
+  mv $checkpoint_folder/reg-files-new.img $checkpoint_folder/reg-files.img
 
   #restore
-  sudo criu restore -vvvv -o $jobCheckpointFolder/checkpoint_restart.log --shell-job -D $jobCheckpointFolder
+  sudo criu restore -vvvv -o $checkpoint_folder/checkpoint_restart.log --shell-job -D $checkpoint_folder
   return 0
 }
 
@@ -47,15 +54,15 @@ restartCRIUJob(){
 #$1: name of the checkpoint library to use
 #returns: 0 on success, other if not
 restartJob(){
-  if [ "$1"="BLCR" ]
+  if [ "$checkpointLib" == "BLCR" ]
   then
-    restarttBLCRJob $@
+    restartBLCRJob $@
     return 0
-  elif [ "$1"="DMTCP" ]
+  elif [ "$checkpointLib" == "DMTCP" ]
   then
     restartDMTCPJob $@
     return 0
-  elif [ "$1"="CRIU" ]
+  elif [ "$checkpointLib" == "CRIU" ]
   then
     restartCRIUJob $@
     return 0
@@ -67,14 +74,28 @@ restartJob(){
 #############################################
 ##############################################
 ####  MAIN: we start here ######
-pid=$jobPID
-contextFile=$2
-checkpointDir=$3
+
+
+SLURM_JOB_ID=$1
+jobPID=$2
+contextFile=$3
 fullJobName=$4
 
-jobCheckpointFolder=checkpointDir/$SLURM_JOB_ID
+checkpoint_folder=`dirname $contextFile`
+SLURM_CHECKPOINT_IMAGE_DIR=`dirname $checkpoint_folder`
 
-checkpointLib=`more $jobCheckpointFolder/checkpoint_library`
-restartJob $checkpointLib
+checkpoint_info=$SLURM_CHECKPOINT_IMAGE_DIR"/checkpoint_info."$SLURM_JOB_ID
+checkpointLib=`cat $checkpoint_folder/checkpoint_library`
+
+
+trap 'rm -rf $checkpoint_folder' EXIT #SIGHUP SIGINT SIGTERM EXIT
+trap 'rm -rf $SLURM_CHECKPOINT_IMAGE_DIR/$SLURM_JOB_ID.ckpt' EXIT #SIGHUP SIGINT SIGTERM EXIT
+
+
+
+restartJob
+
+rm -rf $SLURM_CHECKPOINT_IMAGE_DIR/$SLURM_JOB_ID.ckpt
+rm -rf $checkpoint_folder
 
 exit 0

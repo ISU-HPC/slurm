@@ -1,6 +1,5 @@
 /*****************************************************************************\
- *  checkpoint_multicheckpoint.c - MULTICHECKPOINT slurm checkpoint plugin.
- *  $Id: checkpoint_multicheckpoint.c 0001 2008-12-29 16:50:11Z hjcao $
+ *  checkpoint_multicheckpoint.c - multicheckpoint slurm checkpoint plugin.
  *****************************************************************************
  *  Derived from checkpoint_aix.c
  *  Copyright (C) 2007-2009 National University of Defense Technology, China.
@@ -36,34 +35,24 @@
  *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301  USA.
 \*****************************************************************************/
 
-#ifdef HAVE_CONFIG_H
-#  include "config.h"
-#endif
-
-#if HAVE_STDINT_H
-#  include <stdint.h>
-#endif
-#if HAVE_INTTYPES_H
-#  include <inttypes.h>
-#endif
-#ifdef WITH_PTHREADS
-#  include <pthread.h>
-#endif
-
+#include <inttypes.h>
+#include <libgen.h>
+#include <pthread.h>
 #include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <sys/types.h>
+#include <sys/param.h>
+#include <sys/stat.h>
 #include <time.h>
 #include <unistd.h>
-#include <libgen.h>
-#include <sys/types.h>
-#include <sys/stat.h>
 
 #include "slurm/slurm.h"
 #include "slurm/slurm_errno.h"
 
 #include "src/common/list.h"
 #include "src/common/log.h"
+#include "src/common/macros.h"
 #include "src/common/pack.h"
 #include "src/common/xassert.h"
 #include "src/common/xstring.h"
@@ -84,8 +73,6 @@ void acct_policy_add_job_submit(struct job_record *job_ptr)
 #else
 void acct_policy_add_job_submit(struct job_record *job_ptr);
 #endif
-
-#define MAX_PATH_LEN 1024
 
 struct check_job_info {
 	uint16_t disabled;	/* counter, checkpointable only if zero */
@@ -111,15 +98,15 @@ static void _send_sig(uint32_t job_id, uint32_t step_id, uint16_t signal,
 		      char *nodelist);
 static void *_ckpt_agent_thr(void *arg);
 static void _ckpt_req_free(void *ptr);
-/* TODO maybe this can be removed
 static int _on_ckpt_complete(uint32_t group_id, uint32_t user_id,
 			     uint32_t job_id, uint32_t step_id,
 			     char *image_dir, uint32_t error_code);
-*/
+
 
 /* path to shell scripts */
 static const char cr_checkpoint_path[] = PKGLIBEXECDIR "/cr_checkpoint.sh";
 static const char cr_restart_path[] = PKGLIBEXECDIR "/cr_restart.sh";
+//static const char scch_path[] = SLURM_PREFIX "/sbin/scch";
 
 static uint32_t ckpt_agent_jobid = 0;
 static uint16_t ckpt_agent_count = 0;
@@ -153,10 +140,13 @@ static pthread_cond_t ckpt_agent_cond = PTHREAD_COND_INITIALIZER;
  */
 
  /*
-const char plugin_name[]       	= "MULTICHECKPOINT checkpoint plugin";
+//TODO MANUEL quiza este es el problema
+
+const char plugin_name[]       	= "multicheckpoint checkpoint plugin";
 const char plugin_type[]       	= "checkpoint/multicheckpoint";
 const uint32_t plugin_version	= SLURM_VERSION_NUMBER;
 */
+
 
 
 /*
@@ -419,14 +409,48 @@ extern check_jobinfo_t slurm_ckpt_copy_job(check_jobinfo_t jobinfo)
 
 extern int slurm_ckpt_stepd_prefork(stepd_step_rec_t *job)
 {
+	char *old_env = NULL, *new_env = NULL, *ptr = NULL, *save_ptr = NULL;
+
+	/*
+	 * I was thinking that a thread can be created here to
+	 * communicate with the tasks via sockets/pipes.
+	 * Maybe this is not needed - we can modify MVAPICH2
+	 */
+
+	/* set LD_PRELOAD for batch script shell */
+	//if (job->batch) {
+		old_env = getenvp(job->env, "LD_PRELOAD");
+		if (old_env) {
+			/* search and replace all libcr_run and libcr_omit
+			 * the old env value is messed up --
+			 * it will be replaced */
+			while ((ptr = strtok_r(old_env, " :", &save_ptr))) {
+				old_env = NULL;
+				if (!ptr)
+					break;
+				if (!xstrncmp(ptr, "libcr_run.so", 12) ||
+				    !xstrncmp(ptr, "libcr_omit.so", 13))
+					continue;
+				xstrcat(new_env, ptr);
+				xstrcat(new_env, ":");
+			}
+		}
+		ptr = xstrdup("libcr_run.so");
+		if (new_env)
+			xstrfmtcat(ptr, ":%s", new_env);
+		setenvf(&job->env, "LD_PRELOAD", ptr);
+		xfree(new_env);
+		xfree(ptr);
+		//}
 	return SLURM_SUCCESS;
 }
 
 extern int slurm_ckpt_signal_tasks(stepd_step_rec_t *job, char *image_dir)
 {
-	char *argv[4];
-	char context_file[MAX_PATH_LEN];
+	char *argv[2];
+	char context_file[MAXPATHLEN];
 	char pid[16];
+	char jobid[16];
 	int status;
 	pid_t *children = NULL;
 	int *fd = NULL;
@@ -434,7 +458,6 @@ extern int slurm_ckpt_signal_tasks(stepd_step_rec_t *job, char *image_dir)
 	int i;
 	char c;
 
-	image_dir = slurm_get_checkpoint_dir();
 	debug3("checkpoint/multicheckpoint: slurm_ckpt_signal_tasks: image_dir=%s",
 	       image_dir);
 	/*
@@ -454,13 +477,11 @@ extern int slurm_ckpt_signal_tasks(stepd_step_rec_t *job, char *image_dir)
 
 	for (i = 0; i < job->node_tasks; i ++) {
 		if (job->batch) {
-			sprintf(context_file, "%s/%d.ckpt", image_dir, job->jobid);
+			sprintf(context_file, "%s/script.ckpt", image_dir);
 		} else {
-			sprintf(context_file, "%s/%d/task.%d.ckpt",
-				image_dir, job->jobid, job->task[i]->gtid);
+			sprintf(context_file, "%s/task.%d.ckpt",
+				image_dir, job->task[i]->gtid);
 		}
-		error("context_file set to  %s", context_file);
-
 		sprintf(pid, "%u", (unsigned int)job->task[i]->pid);
 
 		if (pipe(&fd[i*2]) < 0) {
@@ -501,20 +522,33 @@ extern int slurm_ckpt_signal_tasks(stepd_step_rec_t *job, char *image_dir)
 				exit(errno);
 			}
 
-			/* MULTICHECKPOINT */
-			//1: process PID
-			//$2: context file
-			//$3: Slurm checkpoint image dir.
 
-			argv[0] = pid;
-			argv[1] = context_file;
-			argv[2] = image_dir;
+/*original
+			argv[0] = (char *)cr_checkpoint_path;
+			argv[1] = pid;
+			argv[2] = context_file;
 			argv[3] = NULL;
+
+*/
+
+			/* MULTICHECKPOINT */
+			//$1: job ID
+			//$1: process PID
+			//$2: context file
+			//$3: full job name
+			sprintf(jobid, "%d",job->jobid);
+			sprintf(pid, "%u", (unsigned int)job->task[i]->pid);
+
+			argv[0] = strdup(cr_checkpoint_path);
+			argv[1] = jobid;
+			argv[2] = pid;
+			argv[3] = context_file;
+			argv[4]= strdup(job->argv[0]);
+			argv[5] = NULL;
+
 
 			execv(argv[0], argv);
 			exit(errno);
-
-
 		}
 		close(fd[i*2]);
 	}
@@ -544,43 +578,43 @@ extern int slurm_ckpt_signal_tasks(stepd_step_rec_t *job, char *image_dir)
 extern int slurm_ckpt_restart_task(stepd_step_rec_t *job,
 				   char *image_dir, int gtid)
 {
-	char *argv[4];
+	char *argv[6];
 	char pid[16];
-	int i;
-	//TODO manuel: context_file aqui no sirve para nada, no?
+	char jobid[16];
+	char context_file[MAXPATHLEN];
 
-	char context_file[MAX_PATH_LEN];
-	for (i = 0; i < job->node_tasks; i ++) {
+	/* jobid and stepid must NOT be spelled here,
+	 * since it is a new job/step */
+	if (job->batch) {
+		sprintf(context_file, "%s/script.ckpt", image_dir);
+	} else {
+		sprintf(context_file, "%s/task.%d.ckpt", image_dir, gtid);
+	}
 
-		sprintf(pid, "%u", (unsigned int)job->task[i]->pid);
-
-		/* jobid and stepid must NOT be spelled here,
-		 * since it is a new job/step */
-		if (job->batch) {
-			sprintf(context_file, "%s/script.ckpt", image_dir);
-		} else {
-			sprintf(context_file, "%s/task.%d.ckpt", image_dir, gtid);
-		}
-
-
-		/* MULTICHECKPOINT */
-		//$1: process PID
-		//$2: context file
-		//$3: Slurm checkpoint image dir.
-		//$4: full job name
-
-		argv[0] = pid;
-		argv[1] = context_file;
-		argv[2] = image_dir;
-		argv[3]= strdup(job->argv[0]);
-		argv[4] = NULL;
+/* original
+	argv[0] = (char *)cr_restart_path;
+	argv[1] = context_file;
+	argv[2] = NULL;
+*/
 
 
+	/* MULTICHECKPOINT */
+	//$1: job ID
+	//$1: process PID
+	//$2: context file
+	//$3: full job name
+	sprintf(jobid, "%d",job->jobid);
 
-		execv(argv[0], argv);
+	argv[0] = strdup(cr_restart_path);
+	argv[1] = jobid;
+	argv[2] = pid;
+	argv[3] = context_file;
+	argv[4]= strdup(job->argv[1]);  //we have changed this before
+	argv[5] = NULL;
 
-		error("execv failure: %m");
-	} // for task in job
+	execv(argv[0], argv);
+
+	error("execv failure: %m");
 	return SLURM_ERROR;
 }
 
@@ -624,7 +658,7 @@ static void _requeue_when_finished(uint32_t job_id)
 {
 	/* Locks: read job */
 	slurmctld_lock_t job_write_lock = {
-		NO_LOCK, WRITE_LOCK, NO_LOCK, NO_LOCK };
+		NO_LOCK, WRITE_LOCK, NO_LOCK, NO_LOCK, NO_LOCK };
 	struct job_record *job_ptr;
 
 	while (1) {
@@ -654,7 +688,7 @@ static void *_ckpt_agent_thr(void *arg)
 	int rc;
 	/* Locks: write job */
 	slurmctld_lock_t job_write_lock = {
-		NO_LOCK, WRITE_LOCK, READ_LOCK, NO_LOCK };
+		NO_LOCK, WRITE_LOCK, READ_LOCK, NO_LOCK, NO_LOCK };
 	struct job_record *job_ptr;
 	struct step_record *step_ptr;
 	struct check_job_info *check_ptr;
@@ -662,7 +696,7 @@ static void *_ckpt_agent_thr(void *arg)
 	/* only perform ckpt operation of ONE JOB */
 	slurm_mutex_lock(&ckpt_agent_mutex);
 	while (ckpt_agent_jobid && ckpt_agent_jobid != req->job_id) {
-		pthread_cond_wait(&ckpt_agent_cond, &ckpt_agent_mutex);
+		slurm_cond_wait(&ckpt_agent_cond, &ckpt_agent_mutex);
 	}
 	ckpt_agent_jobid = req->job_id;
 	ckpt_agent_count ++;
@@ -710,11 +744,14 @@ static void *_ckpt_agent_thr(void *arg)
 	}
 	unlock_slurmctld(job_write_lock);
 
+	_on_ckpt_complete(req->gid, req->uid, req->job_id, req->step_id,
+			  req->image_dir, rc);
+
 	slurm_mutex_lock(&ckpt_agent_mutex);
 	ckpt_agent_count --;
 	if (ckpt_agent_count == 0) {
 		ckpt_agent_jobid = 0;
-		pthread_cond_broadcast(&ckpt_agent_cond);
+		slurm_cond_broadcast(&ckpt_agent_cond);
 	}
 	slurm_mutex_unlock(&ckpt_agent_mutex);
 	_ckpt_req_free(req);
@@ -732,3 +769,87 @@ static void _ckpt_req_free(void *ptr)
 		xfree(req);
 	}
 }
+
+
+static int _on_ckpt_complete(uint32_t group_id, uint32_t user_id,
+			     uint32_t job_id, uint32_t step_id,
+			     char *image_dir, uint32_t error_code)
+{
+
+	return SLURM_SUCCESS;
+}
+
+/*
+static int _on_ckpt_complete(uint32_t group_id, uint32_t user_id,
+			     uint32_t job_id, uint32_t step_id,
+			     char *image_dir, uint32_t error_code)
+{
+	int status;
+	pid_t cpid;
+
+	if (access(scch_path, R_OK | X_OK) < 0) {
+		if (errno == ENOENT)
+			debug("checkpoint/multicheckpoint: file %s not found", scch_path);
+		else
+			info("Access denied for %s: %m", scch_path);
+		return SLURM_ERROR;
+	}
+
+	if ((cpid = fork()) < 0) {
+		error ("_on_ckpt_complete: fork: %m");
+		return SLURM_ERROR;
+	}
+
+	if (cpid == 0) {
+
+		if ((cpid = fork()) < 0) {
+			error("_on_ckpt_complete: second fork: %m");
+			exit(127);
+		}
+		if (cpid == 0) {
+			char *args[6];
+			char str_job[11];
+			char str_step[11];
+			char str_err[11];
+
+
+			if (geteuid() == 0) {
+				if (setgid(group_id) < 0) {
+					error("_on_ckpt_complete: failed to "
+					      "setgid: %m");
+					exit(127);
+				}
+				if (setuid(user_id) < 0) {
+					error("_on_ckpt_complete: failed to "
+					      "setuid: %m");
+					exit(127);
+				}
+			}
+			snprintf(str_job,  sizeof(str_job),  "%u", job_id);
+			snprintf(str_step, sizeof(str_step), "%u", step_id);
+			snprintf(str_err,  sizeof(str_err),  "%u", error_code);
+
+			args[0] = (char *)scch_path;
+			args[1] = str_job;
+			args[2] = str_step;
+			args[3] = str_err;
+			args[4] = image_dir;
+			args[5] = NULL;
+
+			execv(scch_path, args);
+			error("execv failure: %m");
+			exit(127);
+		}
+		exit(0);
+	}
+
+	while(1) {
+		if (waitpid(cpid, &status, 0) < 0 && errno == EINTR)
+			continue;
+		break;
+	}
+
+	return SLURM_SUCCESS;
+}
+
+*/
