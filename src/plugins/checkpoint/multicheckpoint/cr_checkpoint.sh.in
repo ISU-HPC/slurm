@@ -1,11 +1,15 @@
 #!/bin/sh
-set -x
+
+source /etc/profile
+DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
+source $DIR/cr_common.sh
+
 
 #input parameters:
-#$1: process PID
-#$2: context file
-#TODO: hace falta esto?
-#$3: SLurm checkpoint image dir.
+#$1: slurm_job_id
+#$2: jobPID
+#$3: contextFile
+#$5: full job name
 
 #############################################
 ##############################################
@@ -13,19 +17,21 @@ set -x
 
 #Auxiliary functions. Each one creates a checkpoint with a certain lib
 checkpointBLCRJob(){
+  cd $checkpointDir
   cr_checkpoint -T $jobPID -f $contextFile
   return 0
 }
+
+#TODO MANUEL: VER QUE PASA CON LA CONCURRENCIA AQUI
 checkpointDMTCPJob(){
-  cd $jobCheckpointFolder
-  dmtcp_coordinator="$jobCheckpointFolder/dmtcp_coordinator"
-  source $dmtcp_coordinator
+  cd $checkpointDir
   dmtcp_command  bc
   return 0
 }
 
 checkpointCRIUJob(){
-  sudo criu dump -vvvv -o $jobCheckpointFolder/checkpoint_create.log --shell-job -D $jobCheckpointFolder --leave-running -t $jobPID
+  cp -u $fullJobName $checkpointDir"/inputScript.sh"
+  sudo criu dump -vvvv -o $checkpointDir/checkpoint_create.log --shell-job -D $checkpointDir --leave-running -t $jobPID
   return 0
 }
 
@@ -34,15 +40,15 @@ checkpointCRIUJob(){
 #$1: name of the checkpoint library to use
 #returns: 0 on success, other if not
 checkpointJob(){
-  if [ "$1"="BLCR" ]
+  if [ "$1" == "BLCR" ]
   then
     checkpointBLCRJob $@
     return 0
-  elif [ "$1"="DMTCP" ]
+  elif [ "$1" == "DMTCP" ]
   then
     checkpointDMTCPJob $@
     return 0
-  elif [ "$1"="CRIU" ]
+  elif [ "$1" == "CRIU" ]
   then
     checkpointCRIUJob $@
     return 0
@@ -55,14 +61,18 @@ checkpointJob(){
 ##############################################
 ####  MAIN: we start here ######
 
+slurm_job_id=$1
+jobPID=$2
+contextFile=$3
+checkpointDir=`dirname $contextFile`
+fullJobName=$4
 
-pid=$jobPID
-contextFile=$2
-checkpointDir=$3
+checkpointLib=`whichCheckpointLib`
 
-jobCheckpointFolder=checkpointDir/$SLURM_JOB_ID
+mkdir $checkpointDir
 
-checkpointLib=`more $jobCheckpointFolder/checkpoint_library`
+echo $checkpointLib > $checkpointDir"/checkpoint_library"
+
 checkpointJob $checkpointLib
 
 exit 0
