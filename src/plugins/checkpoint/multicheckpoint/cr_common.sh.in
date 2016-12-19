@@ -2,6 +2,12 @@
 ###########################################
 ###########################################
 ####  DECISION OF CHECKPOINT LIBRARY ######
+<<<<<<< HEAD
+=======
+
+##TODO Manuel: OJOOOO esto hay que mejorarlo. Pensar cómo hacer que llame a BLCR sólo si hemos compilado el código con BLCR
+#TODO a parte hay que meter algún tipo de inteligencia aquí
+>>>>>>> migration
 #decides which checkpoint library to use
 #return: Name of the checkpoint library to use (DMTCP, BLCR or CRIU).
 whichCheckpointLib(){
@@ -28,8 +34,11 @@ whichCheckpointLib(){
   then
     checkpointLib="CRIU"
   fi
+<<<<<<< HEAD
   #echo $checkpointLib
   echo "DMTCP"
+=======
+>>>>>>> migration
   return 0
 }
 
@@ -41,6 +50,7 @@ whichCheckpointLib(){
 #$1: folder  where concurrence files will be stored. For convenience, here I will store checkpoint files too
 #returns: 0 if this was the first task, 1 if not
 semaphore(){
+<<<<<<< HEAD
   SLURM_CHECKPOINT_IMAGE_DIR=$1
   SLURM_JOB_ID=$2
   firstTask=1
@@ -86,4 +96,29 @@ startDMTCPCoordinator(){
   done
 
 
+=======
+  checkpoint_folder=$1
+  mkdir -p $checkpoint_folder
+  cd $checkpoint_folder
+
+  firstTask=1
+
+  lockdir=$checkpoint_folder"/$SLURM_JOB_ID.mutprueba.lock"
+
+  if mkdir "$lockdir"  &> /dev/null
+  then
+    checkpoint_library="$checkpoint_folder/checkpoint_library"
+
+    #if this is the first node, start coordinator
+    if [ ! -f $checkpoint_library ]; then
+      touch $checkpoint_library
+      firstTask=0
+     fi
+
+     # remove directory when script finishes
+     rm -rf "$checkpoint_folder"
+  fi
+  cd -  2>&1 >/dev/null  #this is for silent CD
+  return $firstTask
+>>>>>>> migration
 }

@@ -6,7 +6,11 @@ source $DIR/cr_common.sh
 
 
 #input parameters:
+<<<<<<< HEAD
 #$1: SLURM_JOB_ID
+=======
+#$1: slurm_job_id
+>>>>>>> migration
 #$2: jobPID
 #$3: contextFile
 #$5: full job name
@@ -22,12 +26,16 @@ restartBLCRJob(){
 }
 
 restartDMTCPJob(){
+<<<<<<< HEAD
   cd $checkpoint_folder
 
   #checkpoint info is created in startDMTCPCoordinator function. It is different that in "cr_start", where it is created in the "sempahore" function
   trap 'rm -rf $checkpoint_info' SIGHUP SIGINT SIGTERM EXIT
 
   startDMTCPCoordinator $checkpoint_folder $checkpoint_info
+=======
+  cd $checkpointDir
+>>>>>>> migration
   dmtcp_restart ./ckpt_*
   return 0
 }
@@ -36,16 +44,28 @@ restartCRIUJob(){
 
   #create string ins SED format
   oldPath=$fullJobName
+<<<<<<< HEAD
   newPath="$checkpoint_folder/inputScript.sh"
+=======
+  newPath="$checkpointDir/inputScript.sh"
+>>>>>>> migration
   oldPath="${oldPath//\//\\/}"
   newPath="${newPath//\//\\/}"
 
   # replace path of old script path by the new one"
+<<<<<<< HEAD
   crit decode -i $checkpoint_folder/reg-files.img | sed -e "s/$oldPath/$newPath/g" | crit encode -o $checkpoint_folder/reg-files-new.img
   mv $checkpoint_folder/reg-files-new.img $checkpoint_folder/reg-files.img
 
   #restore
   sudo criu restore -vvvv -o $checkpoint_folder/checkpoint_restart.log --shell-job -D $checkpoint_folder
+=======
+  crit decode -i $checkpointDir/reg-files.img | sed -e "s/$oldPath/$newPath/g" | crit encode -o $checkpointDir/reg-files-new.img
+  mv $checkpointDir/reg-files-new.img $checkpointDir/reg-files.img
+
+  #restore
+  sudo criu restore -vvvv -o $checkpointDir/checkpoint_restart.log --shell-job -D $checkpointDir
+>>>>>>> migration
   return 0
 }
 
@@ -54,6 +74,7 @@ restartCRIUJob(){
 #$1: name of the checkpoint library to use
 #returns: 0 on success, other if not
 restartJob(){
+<<<<<<< HEAD
   if [ "$checkpointLib" == "BLCR" ]
   then
     restartBLCRJob $@
@@ -63,6 +84,17 @@ restartJob(){
     restartDMTCPJob $@
     return 0
   elif [ "$checkpointLib" == "CRIU" ]
+=======
+  if [ "$1" == "BLCR" ]
+  then
+    restartBLCRJob $@
+    return 0
+  elif [ "$1" == "DMTCP" ]
+  then
+    restartDMTCPJob $@
+    return 0
+  elif [ "$1" == "CRIU" ]
+>>>>>>> migration
   then
     restartCRIUJob $@
     return 0
@@ -76,6 +108,7 @@ restartJob(){
 ####  MAIN: we start here ######
 
 
+<<<<<<< HEAD
 SLURM_JOB_ID=$1
 jobPID=$2
 contextFile=$3
@@ -97,5 +130,22 @@ restartJob
 
 rm -rf $SLURM_CHECKPOINT_IMAGE_DIR/$SLURM_JOB_ID.ckpt
 rm -rf $checkpoint_folder
+=======
+slurm_job_id=$1
+jobPID=$2
+contextFile=$3
+checkpointDir=`dirname $contextFile`
+fullJobName=$4
+
+trap 'rm -rf $checkpointDir' SIGHUP SIGINT SIGTERM
+trap 'rm -rf $checkpointDir/../$slurm_job_id.ckpt' SIGHUP SIGINT SIGTERM
+
+checkpointLib=`cat $checkpointDir/checkpoint_library`
+restartJob $checkpointLib
+>>>>>>> migration
+
+rm -rf $checkpointDir/../$slurm_job_id.ckpt
+rm -rf $checkpointDir
+
 
 exit 0

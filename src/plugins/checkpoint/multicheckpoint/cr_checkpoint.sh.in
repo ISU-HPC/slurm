@@ -4,11 +4,17 @@ source /etc/profile
 DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 source $DIR/cr_common.sh
 
+<<<<<<< HEAD
 #echo "CHECKPOINT"
 #set -x
 
 #input parameters:
 #$1: SLURM_JOB_ID
+=======
+
+#input parameters:
+#$1: slurm_job_id
+>>>>>>> migration
 #$2: jobPID
 #$3: contextFile
 #$5: full job name
@@ -19,11 +25,16 @@ source $DIR/cr_common.sh
 
 #Auxiliary functions. Each one creates a checkpoint with a certain lib
 checkpointBLCRJob(){
+<<<<<<< HEAD
   cd $checkpoint_folder
+=======
+  cd $checkpointDir
+>>>>>>> migration
   cr_checkpoint -T $jobPID -f $contextFile
   return 0
 }
 
+<<<<<<< HEAD
 checkpointDMTCPJob(){
 
   SLURM_CHECKPOINT_IMAGE_DIR=`dirname $checkpoint_folder`
@@ -31,13 +42,23 @@ checkpointDMTCPJob(){
 
   source $checkpoint_info
   cd $checkpoint_folder
+=======
+#TODO MANUEL: VER QUE PASA CON LA CONCURRENCIA AQUI
+checkpointDMTCPJob(){
+  cd $checkpointDir
+>>>>>>> migration
   dmtcp_command  bc
   return 0
 }
 
 checkpointCRIUJob(){
+<<<<<<< HEAD
   cp -u $fullJobName $checkpoint_folder"/inputScript.sh"
   sudo criu dump -vvvv -o $checkpoint_folder/checkpoint_create.log --shell-job -D $checkpoint_folder --leave-running -t $jobPID
+=======
+  cp -u $fullJobName $checkpointDir"/inputScript.sh"
+  sudo criu dump -vvvv -o $checkpointDir/checkpoint_create.log --shell-job -D $checkpointDir --leave-running -t $jobPID
+>>>>>>> migration
   return 0
 }
 
@@ -67,6 +88,7 @@ checkpointJob(){
 ##############################################
 ####  MAIN: we start here ######
 
+<<<<<<< HEAD
 SLURM_JOB_ID=$1
 jobPID=$2
 contextFile=$3
@@ -78,6 +100,19 @@ mkdir -p $checkpoint_folder
 checkpointLib=`whichCheckpointLib`
 
 echo "$checkpointLib" >> $checkpoint_folder"/checkpoint_library"
+=======
+slurm_job_id=$1
+jobPID=$2
+contextFile=$3
+checkpointDir=`dirname $contextFile`
+fullJobName=$4
+
+checkpointLib=`whichCheckpointLib`
+
+mkdir $checkpointDir
+
+echo $checkpointLib > $checkpointDir"/checkpoint_library"
+>>>>>>> migration
 
 checkpointJob $checkpointLib
 

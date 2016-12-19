@@ -3,6 +3,7 @@
 source /etc/profile
 DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 source $DIR/cr_common.sh
+<<<<<<< HEAD
 
 
 #########GENERAL INFORMATION
@@ -16,6 +17,8 @@ source $DIR/cr_common.sh
 #
 
 
+=======
+>>>>>>> migration
 
 #############################################
 ##############################################
@@ -23,10 +26,11 @@ source $DIR/cr_common.sh
 
 #Auxiliary functions. Each one initializes a job using a certain checkpoint lib
 startBLCRCheckpointedJob(){
-  $@
+  exec $@
   return 0
 }
 
+<<<<<<< HEAD
 startDMTCPCheckpointedJob(){
 
 
@@ -35,11 +39,25 @@ startDMTCPCheckpointedJob(){
   #start app joining that coordinator
   #TODO MANUEL: ESTO SOLO VALE PARA SERIAL. PARA PARALELO HACE FALTA DEBUG, ESTA EN ACME
   dmtcp_launch --ib --rm --ckptdir $checkpoint_folder $@
+=======
+#TODO MANUEL: VER Q ESTO VALE PARA VARIOS TRABAJOS EN EL MISMO NODO!
+startDMTCPCheckpointedJob(){
+  #start coordinator
+  dmtcp_coordinator --daemon --exit-on-last --ckptdir $checkpoint_folder  #this dir will be created prior to checkpoint request
+  if [ $? -ne 0 ]
+  then
+    echo "A coordinator was already running"
+  fi
+
+  #start app joining that coordinator
+  #TODO MANUEL: ESTO SOLO VALE PARA SERIAL. PARA PARALELO HACE FALTA DEBUG, ESTA EN ACME
+   exec dmtcp_launch --ib --rm --ckptdir $checkpoint_folder $@
+>>>>>>> migration
   return 0
 }
 
 startCRIUCheckpointedJob(){
-  $@
+  exec $@
   return 0
 }
 
@@ -88,5 +106,8 @@ checkpointLib=`whichCheckpointLib`
 
 #start job with this checkpoint lib
 startCheckpointedJob $checkpointLib $@
+<<<<<<< HEAD
 
+=======
+>>>>>>> migration
 exit 0

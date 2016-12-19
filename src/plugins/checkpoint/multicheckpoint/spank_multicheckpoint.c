@@ -32,7 +32,10 @@ SPANK_PLUGIN(multicheckpoint_spank, 3);
  */
 
 static int multicheckpoint_enabled=1;
+<<<<<<< HEAD
 static char *optargs;
+=======
+>>>>>>> migration
 static const char cr_checkpoint_start[] = PKGLIBEXECDIR "/cr_start.sh";
 
 static int _enable_multicheckpoint (int val, const char *optarg, int remote);
@@ -116,6 +119,7 @@ return (ESPANK_SUCCESS);
 
 
 
+<<<<<<< HEAD
 
 static int _enable_multicheckpoint (int val, const char *optarg, int remote)
 {
@@ -152,10 +156,13 @@ int _export_env_vars(spank_t sp,char *optarg){
 
   return (ESPANK_SUCCESS);
 }
+=======
+>>>>>>> migration
 
 
 char** _str_split(char* a_str, const char a_delim)
 {
+<<<<<<< HEAD
     char** result    = 0;
     size_t count     = 0;
     char* tmp        = a_str;
@@ -200,4 +207,8 @@ char** _str_split(char* a_str, const char a_delim)
     }
 
     return result;
+=======
+    multicheckpoint_enabled=0;
+    return (ESPANK_SUCCESS);
+>>>>>>> migration
 }
