@@ -1,0 +1,54 @@
+
+#################################
+#################################
+####  CONCURRENCY CONTROL #######
+
+#this makes sure that only a task (in case of multitask jobs) executes this script
+#$1: folder  where concurrence files will be stored. For convenience, here I will store checkpoint files too
+#returns: 0 if this was the first task, 1 if not
+semaphore(){
+  SLURM_CHECKPOINT_IMAGE_DIR=$1
+  SLURM_JOB_ID=$2
+  firstTask=1
+
+  lockdir=$SLURM_CHECKPOINT_IMAGE_DIR"/lock."$SLURM_JOB_ID
+  checkpoint_info=$SLURM_CHECKPOINT_IMAGE_DIR"/checkpoint_info."$SLURM_JOB_ID
+
+  if mkdir "$lockdir"  &> /dev/null
+  then
+    #is this the first task?
+     if [ ! -f $checkpoint_info ]; then
+      touch $checkpoint_info
+      firstTask=0
+     fi
+  fi
+  rmdir $lockdir
+  return $firstTask
+}
+
+
+startDMTCPCoordinator(){
+  checkpoint_folder=$1
+  checkpoint_info=$2
+
+  if [ -z "$DMTCP_COORD_PORT" ]; then
+    echo "DMTPC_COORD_PORT was not present, setting the default value of 7779"
+    export DMTCP_COORD_PORT=7779
+  fi
+
+  max_coordinators=`nproc`
+  i=0
+  while [[ "$i" -le "$max_coordinators" ]]; do
+    @DMTCP_HOME@/dmtcp_coordinator --daemon --exit-on-last --ckptdir $checkpoint_folder -q -q
+    if [ $? -eq 0 ]
+    then
+      echo "export DMTCP_COORD_HOST=`hostname`" >> $checkpoint_info
+      echo "export DMTCP_COORD_PORT=$DMTCP_COORD_PORT" >> $checkpoint_info
+      break
+    fi
+    i=$(($i + 1))
+    DMTCP_COORD_PORT=$(($DMTCP_COORD_PORT + 1))
+    export DMTCP_COORD_PORT=$DMTCP_COORD_PORT
+  done
+
+}

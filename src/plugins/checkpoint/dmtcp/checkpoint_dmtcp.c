@@ -165,14 +165,14 @@ const uint32_t plugin_version	= SLURM_VERSION_NUMBER;
  */
 extern int init ( void )
 {
-	info("checkpoint/dmtcp init");
+//	info("checkpoint/dmtcp init");
 	return SLURM_SUCCESS;
 }
 
 
 extern int fini ( void )
 {
-	info("checkpoint/dmtcp fini");
+//	info("checkpoint/dmtcp fini");
 	return SLURM_SUCCESS;
 }
 
@@ -542,12 +542,9 @@ extern int slurm_ckpt_signal_tasks(stepd_step_rec_t *job, char *image_dir)
 extern int slurm_ckpt_restart_task(stepd_step_rec_t *job,
 				   char *image_dir, int gtid)
 {
-	char *argv[4];
-
-	//TODO manuel: context_file aqui no sirve para nada, no?
+	char *argv[11];
 
 	char context_file[MAX_PATH_LEN];
-
 	/* jobid and stepid must NOT be spelled here,
 	 * since it is a new job/step */
 	if (job->batch) {
@@ -560,7 +557,16 @@ extern int slurm_ckpt_restart_task(stepd_step_rec_t *job,
 	argv[1] = strdup(job->ckpt_dir);
 	argv[2] =  malloc(10 * sizeof(char));
 	snprintf(argv[2], sizeof(int)*5, "%d", job->jobid);
-	argv[3] = NULL;
+	argv[3] = strdup(getenvp(job->env, "SLURM_JOB_NODELIST"));
+	argv[4] = strdup(getenvp(job->env, "SLURM_TASKS_PER_NODE"));
+	argv[5] = strdup(getenvp(job->env, "SLURM_JOB_CPUS_PER_NODE"));
+	argv[6] = strdup(getenvp(job->env, "SLURM_LOCALID"));
+	//argv[7] = strdup(getenvp(job->env, "SLURM_SRUN_COMM_HOST"));
+	argv[7] = strdup("NONE");
+	argv[8] = strdup(getenvp(job->env, "SLURM_NNODES"));
+	argv[9] = strdup(getenvp(job->env, "TMPDIR"));
+
+	argv[10] = NULL;
 
 	execv(argv[0], argv);
 
