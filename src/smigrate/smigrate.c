@@ -109,7 +109,7 @@ int main(int argc, char *argv[])
 	}
 
   //_slurm_checkpoint_migrate (opt.jobid, opt.stepid, opt.nodes);
-  slurm_checkpoint_migrate ( opt.jobid, opt.stepid, opt.nodes);
+  slurm_checkpoint_migrate ( opt.jobid, opt.stepid, opt.nodes, opt.shared, opt.spread, opt.test_only);
 
   return (0);
 }

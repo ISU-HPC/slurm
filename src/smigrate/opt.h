@@ -61,11 +61,13 @@
 
 
 typedef struct smigrate_options {
+	uint16_t shared; /* --exclusive, -e */
 	bool hold;		/* --hold, -H			*/
 	unsigned int jobid;     /* --jobid=jobid                */
 	char* nodes; /* comma-separated list of nodes to allocate the job in */
 	unsigned int  priority;	/* --priority                   */
 	int  quiet;
+	bool spread;		/* --spread-job			*/
 	unsigned int stepid; /*- job step on which to perform operation*/
 	bool test_only;		/* --test-only			*/
 	int  verbose;
