@@ -19,11 +19,10 @@ char** str_split(char* a_str, const char a_delim);
 static int _print_existing_jobs (void);
 static int _job_info_to_job_desc (job_info_t job_info, job_desc_msg_t *job_desc_msg);
 
-
-
-
-extern int slurm_checkpoint_migrate (uint32_t job_id, uint32_t step_id, char *destination_nodes, int shared, int spread, bool test_only)
+extern int slurm_checkpoint_migrate (uint32_t job_id, uint32_t step_id, char *destination_nodes, char *excluded_nodes,  int shared, int spread, bool test_only)
 {
+
+	printf("\n\n\n job_id=%u,\nstep_id=%u,\ndestination_nodes=%s,\nexcluded_nodes=%s,\nshared=%u,\nspread=%u\n\n\n",job_id, step_id, destination_nodes, excluded_nodes, shared, spread);
 
 	int error = 0;
 
@@ -71,6 +70,11 @@ extern int slurm_checkpoint_migrate (uint32_t job_id, uint32_t step_id, char *de
 		if (destination_nodes[0] != '\0' )
 			job_desc_msg_test.req_nodes = destination_nodes;
 
+	 if (excluded_nodes[0] != '\0' )
+			job_desc_msg_test.exc_nodes = excluded_nodes;
+		else
+			debug("Excluded nodes is empty");
+
 		if (spread)
 			job_desc_msg_test.bitflags |= SPREAD_JOB;
 
@@ -79,9 +83,12 @@ extern int slurm_checkpoint_migrate (uint32_t job_id, uint32_t step_id, char *de
 			slurm_perror("Error: job will not run");
 			return(EMIGRATION_ERROR);
 			}
+			debug ("BEFORE TEST_ONLY");
+
 		if (test_only)
 			return (EMIGRATION_SUCCESS);
 
+	debug ("ABOUT TO CHECKPOINT");
 /*checkpoint*/
 	char* checkpoint_directory = slurm_get_checkpoint_dir();
 
@@ -134,6 +141,9 @@ extern int slurm_checkpoint_migrate (uint32_t job_id, uint32_t step_id, char *de
 	if (destination_nodes[0] != '\0' )
 		job_desc_msg.req_nodes = destination_nodes;
 
+	if (excluded_nodes[0] != '\0' )
+		job_desc_msg.exc_nodes = excluded_nodes;
+
 	if (shared != (uint16_t)NO_VAL)
 		job_desc_msg.shared = shared;
 
@@ -144,6 +154,17 @@ extern int slurm_checkpoint_migrate (uint32_t job_id, uint32_t step_id, char *de
 		slurm_perror("Error setting migration requirements for job");
 		return(EMIGRATION_ERROR);
 		}
+
+
+//DEBUG: see if every
+	if ((error = slurm_load_job (&job_ptr, job_id, show_flags)) != SLURM_SUCCESS ){
+		printf("Error is %d\n", error);
+		slurm_perror ("Specified ID does not correspond to an existing Slurm task");
+	//	_print_existing_jobs();
+		return (EMIGRATION_NOT_JOB);
+	}
+
+
 
 
 	return (EMIGRATION_SUCCESS);

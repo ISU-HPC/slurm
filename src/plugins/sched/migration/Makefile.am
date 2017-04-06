@@ -2,11 +2,11 @@
 
 AUTOMAKE_OPTIONS = foreign
 
-AM_CXXFLAGS = -fexceptions
+AM_CXXFLAGS = -fexceptions 
+
+AM_CFLAGS = $(top_srcdir)/src/plugins/slurmctld/job_migration/job_migration.la
 
 PLUGIN_FLAGS = -module -avoid-version --export-dynamic
-
-AM_CPPFLAGS = -I$(top_srcdir) -I$(top_srcdir)/src/common
 
 pkglib_LTLIBRARIES = sched_migration.la
 

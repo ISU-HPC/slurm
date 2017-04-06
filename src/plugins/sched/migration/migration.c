@@ -91,7 +91,6 @@
 #include "src/slurmctld/slurmctld.h"
 #include "src/slurmctld/srun_comm.h"
 #include "src/plugins/slurmctld/job_migration/job_migration.h"
-
 #include "migration.h"
 
 
@@ -103,7 +102,6 @@
 
 #define SLURMCTLD_THREAD_LIMIT	5
 #define SCHED_TIMEOUT		2000000	/* time in micro-seconds */
-#define YIELD_SLEEP		500000;	/* time in micro-seconds */
 
 typedef struct node_space_map {
 	time_t begin_time;
@@ -137,14 +135,13 @@ static int max_migration_jobs_start = 0;
 static bool migration_continue = false;
 static int defer_rpc_cnt = 0;
 static int sched_timeout = SCHED_TIMEOUT;
-static int yield_sleep   = YIELD_SLEEP;
 
 /*********************** local functions *********************/
 static void _add_reservation(uint32_t start_time, uint32_t end_reserve,
 			     bitstr_t *res_bitmap,
 			     node_space_map_t *node_space,
 			     int *node_space_recs);
-static int  _attempt_migration(void);
+static void *_attempt_migration(void *dummyArg);
 extern List _build_running_job_queue();
 static bool _can_be_allocated(struct job_record *job_ptr);
 static bool _can_be_migrated(struct job_record *job_ptr);
@@ -161,101 +158,6 @@ static int  _try_sched(struct job_record *job_ptr, bitstr_t **avail_bitmap,
 		       uint32_t req_nodes, bitstr_t *exc_core_bitmap);
 void _printBitStr(void *data, int size);
 
-/* funciones que he quitado */
-/*
-static void _clear_job_start_times(void);
-
-static bool _job_part_valid(struct job_record *job_ptr,
-			    struct part_record *part_ptr);
-
-static void _reset_job_time_limit(struct job_record *job_ptr, time_t now,
-					node_space_map_t *node_space);
-
-static int  _start_job(struct job_record *job_ptr, bitstr_t *avail_bitmap);
-
-static bool _test_resv_overlap(node_space_map_t *node_space,
-			       bitstr_t *use_bitmap, uint32_t start_time,
-			       uint32_t end_reserve);
-
-static int  _yield_locks(int usec);
-*/
-
-
-/* Log resources to be allocated to a pending job */
-
-/* MANUEL: ESTO NO SE USABA, FUERA
-static void _dump_job_sched(struct job_record *job_ptr, time_t end_time,
-			    bitstr_t *avail_bitmap)
-{
-	char begin_buf[32], end_buf[32], *node_list;
-
-	slurm_make_time_str(&job_ptr->start_time, begin_buf, sizeof(begin_buf));
-	slurm_make_time_str(&end_time, end_buf, sizeof(end_buf));
-	node_list = bitmap2node_name(avail_bitmap);
-	info("Job %u to start at %s, end at %s on %s",
-	     job_ptr->job_id, begin_buf, end_buf, node_list);
-	xfree(node_list);
-}
-
-
-*/
-
-
-/* MANUEL: ESTO NO SE USABA, FUERA
-static void _dump_job_test(struct job_record *job_ptr, bitstr_t *avail_bitmap,
-			   time_t start_time)
-{
-	char begin_buf[32], *node_list;
-
-	if (start_time == 0)
-		strcpy(begin_buf, "NOW");
-	else
-		slurm_make_time_str(&start_time, begin_buf, sizeof(begin_buf));
-	node_list = bitmap2node_name(avail_bitmap);
-	info("Test job %u at %s on %s", job_ptr->job_id, begin_buf, node_list);
-	xfree(node_list);
-}
-*/
-
-/* Log resource allocate table */
-
-/*  MANUEL: ESTO NO SE USABA, FUERA
-static void _dump_node_space_table(node_space_map_t *node_space_ptr)
-{
-	int i = 0;
-	char begin_buf[32], end_buf[32], *node_list;
-
-	info("=========================================");
-	while (1) {
-		slurm_make_time_str(&node_space_ptr[i].begin_time,
-				    begin_buf, sizeof(begin_buf));
-		slurm_make_time_str(&node_space_ptr[i].end_time,
-				    end_buf, sizeof(end_buf));
-		node_list = bitmap2node_name(node_space_ptr[i].avail_bitmap);
-		info("Begin:%s End:%s Nodes:%s",
-		     begin_buf, end_buf, node_list);
-		xfree(node_list);
-		if ((i = node_space_ptr[i].next) == 0)
-			break;
-	}
-	info("=========================================");
-}
-*/
-
-/* MANUEL: ESTO NO SE USABA, FUERA
-static void _set_job_time_limit(struct job_record *job_ptr, uint32_t new_limit)
-{
-	job_ptr->time_limit = new_limit;
-	if (job_ptr->time_limit == NO_VAL)
-		job_ptr->limit_set.time = 0;
-
-}
-*/
-/*
- * _many_pending_rpcs - Determine if slurmctld is busy with many active RPCs
- * RET - True if slurmctld currently has more than SLURMCTLD_THREAD_LIMIT
- *	 active RPCs
- */
 static bool _many_pending_rpcs(void)
 {
 	//info("thread_count = %u", slurmctld_config.server_thread_count);
@@ -296,7 +198,9 @@ static int _num_feature_count(struct job_record *job_ptr, bool *has_xor)
  */
 
 
-//MANUEL esto puede ser importante para la migracion
+//MANUEL in backfill, this is called in "attempt_backfill". Im this simple algorithm we are not using it
+//i removed the comments, they can be seen in backfill.
+/*
 static int  _try_sched(struct job_record *job_ptr, bitstr_t **avail_bitmap,
 		       uint32_t min_nodes, uint32_t max_nodes,
 		       uint32_t req_nodes, bitstr_t *exc_core_bitmap)
@@ -312,17 +216,9 @@ static int  _try_sched(struct job_record *job_ptr, bitstr_t **avail_bitmap,
 	job_feature_t *feat_ptr;
 
 	if (feat_cnt) {
-		/* Ideally schedule the job feature by feature,
-		 * but I don't want to add that complexity here
-		 * right now, so clear the feature counts and try
-		 * to schedule. This will work if there is only
-		 * one feature count. It should work fairly well
-		 * in cases where there are multiple feature
-		 * counts. */
+
 		int i = 0, list_size;
 		uint16_t *feat_cnt_orig = NULL, high_cnt = 0;
-
-		/* Clear the feature counts */
 		list_size = list_count(detail_ptr->feature_list);
 		feat_cnt_orig = xmalloc(sizeof(uint16_t) * list_size);
 		feat_iter = list_iterator_create(detail_ptr->feature_list);
@@ -348,8 +244,6 @@ static int  _try_sched(struct job_record *job_ptr, bitstr_t **avail_bitmap,
 					       exc_core_bitmap);
 			FREE_NULL_LIST(preemptee_job_list);
 		}
-
-		/* Restore the feature counts */
 		i = 0;
 		feat_iter = list_iterator_create(detail_ptr->feature_list);
 		while ((feat_ptr = (job_feature_t *) list_next(feat_iter))) {
@@ -358,8 +252,6 @@ static int  _try_sched(struct job_record *job_ptr, bitstr_t **avail_bitmap,
 		list_iterator_destroy(feat_iter);
 		xfree(feat_cnt_orig);
 	} else if (has_xor) {
-		/* Cache the feature information and test the individual
-		 * features, one at a time */
 		job_feature_t feature_base;
 		List feature_cache = detail_ptr->feature_list;
 		time_t low_start = 0;
@@ -407,8 +299,6 @@ static int  _try_sched(struct job_record *job_ptr, bitstr_t **avail_bitmap,
 			rc = ESLURM_NODES_BUSY;
 			FREE_NULL_BITMAP(low_bitmap);
 		}
-
-		/* Restore the original feature information */
 		list_destroy(detail_ptr->feature_list);
 		detail_ptr->feature_list = feature_cache;
 	} else if (detail_ptr->feature_list) {
@@ -428,8 +318,7 @@ static int  _try_sched(struct job_record *job_ptr, bitstr_t **avail_bitmap,
 			FREE_NULL_LIST(preemptee_job_list);
 		}
 	} else {
-		/* Try to schedule the job. First on dedicated nodes
-		 * then on shared nodes (if so configured). */
+
 		uint16_t orig_shared;
 		time_t now = time(NULL);
 		char str[100];
@@ -472,6 +361,8 @@ static int  _try_sched(struct job_record *job_ptr, bitstr_t **avail_bitmap,
 	FREE_NULL_LIST(preemptee_candidates);
 	return rc;
 }
+
+*/
 
 /* Terminate migration_agent */
 extern void stop_migration_agent(void)
@@ -680,18 +571,6 @@ static void _load_config(void)
 		sched_timeout = SCHED_TIMEOUT;
 	}
 
-	if (sched_params &&
-	    (tmp_ptr = strstr(sched_params, "bf_yield_sleep="))) {
-		yield_sleep = atoi(tmp_ptr + 15);
-		if (yield_sleep <= 0) {
-			error("Invalid migration scheduler bf_yield_sleep: %d",
-			      yield_sleep);
-			yield_sleep = YIELD_SLEEP;
-		}
-	} else {
-		yield_sleep = YIELD_SLEEP;
-	}
-
 	if (sched_params && (tmp_ptr = strstr(sched_params, "max_rpc_cnt=")))
 		defer_rpc_cnt = atoi(tmp_ptr + 12);
 	else if (sched_params &&
@@ -747,6 +626,7 @@ static void _do_diag_stats(struct timeval *tv1, struct timeval *tv2)
 
 
 /* migration_agent - detached thread periodically attempts to migration jobs */
+//MANUEL this wakes up every minute or so, and then calls _attempt_migration
 extern void *migration_agent(void *args)
 {
 	time_t now;
@@ -758,11 +638,11 @@ extern void *migration_agent(void *args)
 	bool load_config;
 	bool short_sleep = false;
 
-#if HAVE_SYS_PRCTL_H
-	if (prctl(PR_SET_NAME, "bckfl", NULL, NULL, NULL) < 0) {
-		error("%s: cannot set my name to %s %m", __func__, "migration");
-	}
-#endif
+	#if HAVE_SYS_PRCTL_H
+		if (prctl(PR_SET_NAME, "mgtn", NULL, NULL, NULL) < 0) {
+			error("%s: cannot set my name to %s %m", __func__, "migration");
+		}
+	#endif
 	_load_config();
 	last_migration_time = time(NULL);
 	while (!stop_migration) {
@@ -792,18 +672,10 @@ extern void *migration_agent(void *args)
 		}
 		lock_slurmctld(all_locks);
 
-		//MANUEL: AQUI ES EL PARALELISMO. A VER QUE PASA
-		//(void) _attempt_migration();
-
-
 		pthread_t inc_x_thread;
-		/* create a second thread which executes inc_x(&x) */
 		if(pthread_create(&inc_x_thread, NULL, _attempt_migration, NULL)) {
 			debug ("MANUEL I broke it LOL");
 			return NULL;
-		}
-		else{
-			debug ("MANUEL it seems we have created a migration thread, now what? what happens with concurrency? clean after thread???");
 		}
 
 		last_migration_time = time(NULL);
@@ -814,258 +686,82 @@ extern void *migration_agent(void *args)
 	return NULL;
 }
 
-/* Clear the start_time for all pending jobs. This is used to ensure that a job which
- * can run in multiple partitions has its start_time set to the smallest
- * value in any of those partitions. */
-/*MANUEL: ESTO NO SE USABA, FUERA
-static void _clear_job_start_times(void)
-{
-	ListIterator job_iterator;
-	struct job_record *job_ptr;
-
-	job_iterator = list_iterator_create(job_list);
-	while ((job_ptr = (struct job_record *) list_next(job_iterator))) {
-		if (IS_JOB_PENDING(job_ptr))
-			job_ptr->start_time = 0;
-	}
-	list_iterator_destroy(job_iterator);
-}
-
-*/
-
-/* Return non-zero to break the migration loop if change in job, node or
- * partition state or the migration scheduler needs to be stopped. */
-static int _yield_locks(int usec)
-{
-	slurmctld_lock_t all_locks = {
-		READ_LOCK, WRITE_LOCK, WRITE_LOCK, READ_LOCK, NO_LOCK };
-	time_t job_update, node_update, part_update;
-	bool load_config = false;
-	int max_rpc_cnt;
-
-	max_rpc_cnt = MAX((defer_rpc_cnt / 10), 20);
-	job_update  = last_job_update;
-	node_update = last_node_update;
-	part_update = last_part_update;
-
-	unlock_slurmctld(all_locks);
-	while (!stop_migration) {
-		bf_sleep_usec += _my_sleep(usec);
-		if ((defer_rpc_cnt == 0) ||
-		    (slurmctld_config.server_thread_count <= max_rpc_cnt))
-			break;
-		verbose("migration: continuing to yield locks, %d RPCs pending",
-			slurmctld_config.server_thread_count);
-	}
-	lock_slurmctld(all_locks);
-	slurm_mutex_lock(&config_lock);
-	if (config_flag)
-		load_config = true;
-	slurm_mutex_unlock(&config_lock);
-
-	if ((last_job_update  == job_update)  &&
-	    (last_node_update == node_update) &&
-	    (last_part_update == part_update) &&
-	    (! stop_migration) && (! load_config))
-		return 0;
-	else
-		return 1;
-}
-
-/* Test if this job still has access to the specified partition. The job's
- * available partitions may have changed when locks were released */
-/*
-static bool _job_part_valid(struct job_record *job_ptr,
-			    struct part_record *part_ptr)
-{
-	struct part_record *avail_part_ptr;
-	ListIterator part_iterator;
-	bool rc = false;
-
-	if (job_ptr->part_ptr_list) {
-		part_iterator = list_iterator_create(job_ptr->part_ptr_list);
-		while ((avail_part_ptr = (struct part_record *)
-				list_next(part_iterator))) {
-			if (avail_part_ptr == part_ptr) {
-				rc = true;
-				break;
-			}
-		}
-		list_iterator_destroy(part_iterator);
-	} else if (job_ptr->part_ptr == part_ptr) {
-		rc = true;
-	}
-
-	return rc;
-}
-*/
-
-/*
-	Restrictions for the job migration.
-
-	Here, the main objective is to concentrate multi-task jobs on as little nodes as
-	possible. This way we minimize communication and reduce the execution time.
-
-	So far, limitations are:
-	- only perform job migration if node shraing (slots or cores) is enabled. If node
-	sharing is not available, and thus jobs received full nodes, then migration makes no sense
-	- only migrate multi-task jobs, not serial ones
-	- do not migrate jobs where the user has specified number of nodes and tasks per node,
-	only jobs where "number of tasks" was specified
-	- do not migrate jobs where the node was a requirement
-	- do not migrate jobs where user demanded exclusive use ofe the node
-	- MANUEL Still not decided what to do when user asked for contiguous nodes
-*/
-
+//here we decide if a given job can be migrated or not
 static bool _can_be_migrated(struct job_record *job_ptr){
-		if (job_ptr->cpu_cnt <2){
-			debug ("Job %u is not multi-core, not migrating this job", job_ptr->job_id);
-			return false;
-		}
-		if (job_ptr->details->ntasks_per_node > 0) {
-			debug ("User has specified tasks per node for job %u, not migrating this job",job_ptr->job_id);
-			return false;
-		}
-		if (job_ptr->details->min_nodes > 1) {
-			debug ("User has specified number of nodes for job %u, not migrating this job", job_ptr->job_id);
-			return false;
-		}
-		if (job_ptr->details->req_nodes != NULL ) {
-			debug ("User has specified required nodes for job %u, not migrating this job", job_ptr->job_id);
-			return false;
-		}
-		if (job_ptr->details->whole_node == 1 ) {
-			debug ("User has specified whole node for job %u, not migrating this job", job_ptr->job_id);
-			return false;
-		}
-		if (job_ptr->details->contiguous >0 ) {
-			debug ("User has specified contiguous for job %u, I don't know what to do, not migrating this job", job_ptr->job_id);
-			return false;
-		}
-		return true;
-
-}
-
-
-/*
-we want to see whether all the tasks are concentrated in the minnimal possible ammount of nodes,
-or there could be better solutions.
-
-Complete information about node_bitmap is can be found in /src/common/job_resources.h
-
-* Sample layout of core_bitmap:
-*   |               Node_0              |               Node_1              |
-*   |      Sock_0     |      Sock_1     |      Sock_0     |      Sock_1     |
-*   | Core_0 | Core_1 | Core_0 | Core_1 | Core_0 | Core_1 | Core_0 | Core_1 |
-*   | Bit_0  | Bit_1  | Bit_2  | Bit_3  | Bit_4  | Bit_5  | Bit_6  | Bit_7  |
-*/
-
-/*
-			////////////////////////////////////////////////////////////////
-			///////////////////NODE INFORMATION ////////////////////////////
-
-			/////ALL NODES
-			avail_node_bitmap: bitmap of available nodes, state not DOWN, DRAIN or FAILING
-			idle_node_bitmap;	bitmap of idle nodes
-			share_node_bitmap: Si se puede compartir con mas trabajos o no. TODO MANUEL: ver valores a ver como funciona.
-			Se puede ver con algo como
-
-			debug ("content of avail_node_bitmap, with lenght %u",bit_size(avail_node_bitmap) );
-			for(i=0; i < bit_size(avail_node_bitmap); i++)
-				debug ("%u %u",  i, bit_test(avail_node_bitmap, i));
-
-			//// NODES FOR EACH JOB
-			job_ptr->job_resrcs->node_bitmap  : nodos que emplea ese trabajo
-			job_ptr->job_resrcs->core_bitmap	: cores de esos nodos que emplea el trabajo. DEBUG: VER COMO VA ESTO EN DISTINTOS CASOS
-			job_ptr->job_resrcs->core_bitmap_used: NI IDEA
-
-			Se ven con algo como:
-			for(i=0; i < bit_size(job_ptr->job_resrcs->node_bitmap); i++)
-				debug ("%u %u",  i, bit_test(job_ptr->job_resrcs->node_bitmap, i));
-			*/
-
-static bool _can_be_allocated(struct job_record *job_ptr){
-	int number_of_nodes = bit_set_count(job_ptr->job_resrcs->node_bitmap);
-	if ( number_of_nodes < 2){
-		debug ("job %u is running in a sigle node, no need to migrate", job_ptr->job_id);
+	///job_ptr is declared in /slurm/src/slurmctld/slurmctld.h
+	if (job_ptr->details->req_nodes != NULL ) {
+		debug ("User has specified required nodes for job %u, not migrating this job", job_ptr->job_id);
 		return false;
 	}
 
-	//MANUEL PROBLEMA: clusters heterogéneos con CPUs de distintos tamaños
-	int avg_node_size = cluster_cpus / bit_size(avail_node_bitmap);
+//as a proof of concept, we are migrating jobs from odd nodes to pair ones. if it is pair, we do NOT migrate it
+if (!strcmp(&job_ptr->nodes[strlen(job_ptr->nodes)-1], "2") ||
+		!strcmp(&job_ptr->nodes[strlen(job_ptr->nodes)-1], "4") ||
+		!strcmp(&job_ptr->nodes[strlen(job_ptr->nodes)-1], "6") ||
+		!strcmp(&job_ptr->nodes[strlen(job_ptr->nodes)-1], "8") ||
+		!strcmp(&job_ptr->nodes[strlen(job_ptr->nodes)-1], "10"))
+	return false;
+
+debug ("We are migratig job with id %u and node %s", job_ptr->job_id, job_ptr->nodes);
+	return true;
+}
+
+
+
+static bool _migration_will_save_time(struct job_record *job_ptr){
+	//it makes no sense to migrate a job employing a whole node
+	//note that this is called "exclusive" in some other places
+	if (job_ptr->details->whole_node == 1 ) {
+		debug ("User has specified whole node for job %u, not migrating this job", job_ptr->job_id);
+		return false;
+	}
+
+//////THIS WORKS BUT KEEPS SERIAL JOBS TO BE MIGRATED, SO I AM COMMENTING IT
+/*
+	//as an extension to that,  we are not migrating jobs using the minnimum posible number of nodes
+	int avg_node_size = cluster_cpus / bit_size(avail_node_bitmap); //problem: clusters heterogéneos con CPUs de distintos tamaños
 
 	//home-made CEIL implementation for positive integers
+	int number_of_nodes = bit_set_count(job_ptr->job_resrcs->node_bitmap);
 	int minimal_number_of_nodes = (int)(job_ptr->cpu_cnt / avg_node_size);
 	if (minimal_number_of_nodes * avg_node_size < job_ptr->cpu_cnt)
 			minimal_number_of_nodes += 1;
+
 	if (number_of_nodes <= minimal_number_of_nodes){
 		debug ("job %u is running in the minnimum posible number of nodes, no need to migrate", job_ptr->job_id);
 		return false;
 	}
 
-	int available_node_count=bit_set_count(idle_node_bitmap);
-
-	//MANUEL esto es una simplificacion problematica.
-	//ejepmplo: 2 cores / nodo. Trabajo de 2 tareas. Esta corriendo 1 tarea en nodo1, 1 tarea en nodo 2. Lo ideal sería
-	//migrarlo todo a nodo1, pero con esta aproximación no se puede. Hay que mejorarlo.
-	if (available_node_count < minimal_number_of_nodes){
-		debug ("job %u has no free space. %u nodes required, %u available ones", job_ptr->job_id, minimal_number_of_nodes, available_node_count);
-		return false;
-	}
+	*/
 	return true;
 }
 
-static bool _migration_will_save_time(struct job_record *job_ptr){
-
-	return true;
-}
-
-
-static int _attempt_migration(void)
+//MANUEL this is called every minute. Here we decide whether to migrate each task or not.
+//it is called by  *migration_agent(void *args)
+//this uses to be "int"
+static void *_attempt_migration(void *dummyArg)
 {
 	DEF_TIMERS;
-//	bool filter_root = false;
 	List job_queue;
 	job_queue_rec_t *job_queue_rec;
-	//slurmdb_qos_rec_t *qos_ptr = NULL;
-//	int bb, i, j, node_space_recs, mcs_select = 0;
 	struct job_record *job_ptr;
-//	struct part_record *part_ptr, **bf_part_ptr = NULL;
-//	uint32_t end_time, end_reserve, deadline_time_limit;
-	//uint32_t time_limit, comp_time_limit, orig_time_limit, part_time_limit;
-	//uint32_t min_nodes, max_nodes, req_nodes;
 	bitstr_t  *avail_bitmap = NULL; //*active_bitmap = NULL,
 	bitstr_t *exc_core_bitmap = NULL, *resv_bitmap = NULL;
 	time_t now, sched_start; // later_start, start_res, resv_end, window_end;
 	time_t orig_sched_start = (time_t) 0; //, orig_start_time
-//	node_space_map_t *node_space;
 	struct timeval bf_time1, bf_time2;
 	int rc = 0;
 	int job_test_count = 0, test_time_count = 0; //, pend_time;
 	uint32_t *uid = NULL,  *bf_part_jobs = NULL; //nuser = 0, bf_parts = 0,
 	uint16_t *njobs = NULL;
-//	bool already_counted;
-	//uint32_t reject_array_job_id = 0;
-//	struct part_record *reject_array_part = NULL;
-//	uint32_t job_start_cnt = 0, start_time;
 	time_t config_update = slurmctld_conf.last_update;
 	time_t part_update = last_part_update;
 	struct timeval start_tv;
-//	uint32_t test_array_job_id = 0;
-//	uint32_t test_array_count = 0;
-	//uint32_t acct_max_nodes, wait_reason = 0, job_no_reserve;
-//	bool resv_overlap = false;
-//	uint8_t save_share_res, save_whole_node;
-//	int test_fini;
 
 	bf_sleep_usec = 0;
 	#ifdef HAVE_ALPS_CRAY
-		/*
-		* Run a Basil Inventory immediately before setting up the schedule
-		* plan, to avoid race conditions caused by ALPS node state change.
-		* Needs to be done with the node-state lock taken.
-		*/
-		START_TIMER;
+
+	START_TIMER;
 		if (select_g_update_block(NULL)) {
 			debug4("migration: not scheduling due to ALPS");
 			return SLURM_SUCCESS;
@@ -1073,11 +769,8 @@ static int _attempt_migration(void)
 		END_TIMER;
 		if (debug_flags & DEBUG_FLAG_MIGRATION)
 			info("migration: ALPS inventory completed, %s", TIME_STR);
-
-		/* The Basil inventory can take a long time to complete. Process
-		* pending RPCs before starting the migration scheduling logic */
-		_yield_locks(1000000);
 	#endif
+
 	(void) bb_g_load_state(false);
 
 	START_TIMER;
@@ -1087,12 +780,6 @@ static int _attempt_migration(void)
 		debug("\n\n\n\n\nmigration: beginning");
 	sched_start = orig_sched_start = now = time(NULL);
 	gettimeofday(&start_tv, NULL);
-
-
-/*
-	if (slurm_get_root_filter())
-		filter_root = true;
-*/
 
 	//MANUEL
 	job_queue = _build_running_job_queue();
@@ -1114,21 +801,18 @@ static int _attempt_migration(void)
 	sort_job_queue(job_queue);
 
 	while (1) {
-//		debug ("MANUEL 1");
 		job_queue_rec = (job_queue_rec_t *) list_pop(job_queue);
 		if (!job_queue_rec) {
 			if (debug_flags & DEBUG_FLAG_MIGRATION)
 			info("migration: reached end of job queue");
 			break;
 		}
-//		debug ("MANUEL 2");
-		//MANUEL: esto CREO que significa que si han dado a "apagar",  cieerres todo y a casa.
 		if (slurmctld_config.shutdown_time ||
 			(difftime(time(NULL),orig_sched_start)>=migration_interval)){
 				xfree(job_queue_rec);
 				break;
 			}
-//			debug ("MANUEL 3");
+
 		//Esto son cosas de la configuración que intuyo que es mejor no tocar
 		if (((defer_rpc_cnt > 0) &&
 		(slurmctld_config.server_thread_count >= defer_rpc_cnt)) ||
@@ -1140,7 +824,7 @@ static int _attempt_migration(void)
 				slurmctld_diag_stats.bf_last_depth,
 				job_test_count, TIME_STR);
 			}
-			if ((_yield_locks(yield_sleep) && !migration_continue) ||
+		if ((!migration_continue) ||
 			(slurmctld_conf.last_update != config_update) ||
 			(last_part_update != part_update)) {
 				if (debug_flags & DEBUG_FLAG_MIGRATION) {
@@ -1161,218 +845,67 @@ static int _attempt_migration(void)
 			test_time_count = 0;
 			START_TIMER;
 		}
-//		debug ("MANUEL 4");
 		//ESTE ES EL TRABAJO EN EJECUCION QUE PODEMOS MIGRAR
 		//vamos a ver que este todo bien
+
 		job_ptr  = job_queue_rec->job_ptr;
-//		debug ("MANUEL 5");
 		if (!job_ptr)	/* All task array elements started */
 			continue;
-//			debug ("MANUEL 6");
 		if (!IS_JOB_RUNNING(job_ptr))	/* Something happened while getting here */
 			continue;
-//		debug ("MANUEL 7");
 
-/*
 		if (!_can_be_migrated(job_ptr))
 			continue;
-			debug ("MANUEL 7.1");
-
-		if (!_can_be_allocated(job_ptr))
-			continue;
-		debug ("MANUEL 7.2");
-
-*/
-
 
 		if (!_migration_will_save_time(job_ptr))
 			continue;
-//		debug ("MANUEL 8");
 
+	//debug ("migration for sched algorithm disabled");
+	//continue;
 
-		if (job_ptr->details->req_nodes != NULL ) {
-			debug ("User has specified required nodes for job %u, not migrating this job", job_ptr->job_id);
-			continue;
-		}
-
-		//////////////////////////////
-		//////////////////////////////
-		/////////JOB MIGRATION
-
-//MANUEL: hay que poner los nodos aqui. Pensar formato y demás
-  	slurm_checkpoint_migrate (job_ptr->job_id, NO_VAL, "slurm-compute3");
-
-
-		debug ("End of migration for job %u", job_ptr->job_id);
+		//debug ("MANUEL 8");
+	//extern int slurm_checkpoint_migrate (uint32_t job_id, uint32_t step_id,char *destination_nodes, char *excluded_nodes, int shared, int spread, bool test_only);
+	slurm_checkpoint_migrate (job_ptr->job_id, NO_VAL, "", "slurmDev[1,3,5,7,9]", NO_VAL, NO_VAL, false);
+	debug ("End of migration for job %u", job_ptr->job_id);
+	debug ("We only migrate a job per call. Exiting...");
+	break;
 	} //while recorrer todos los trabajos running
 
+	//DESDE AQUI, LIMPIEZA
+	xfree(bf_part_jobs);
+	xfree(uid);
+	xfree(njobs);
+	FREE_NULL_BITMAP(avail_bitmap);
+	FREE_NULL_BITMAP(exc_core_bitmap);
+	FREE_NULL_BITMAP(resv_bitmap);
 
-//		debug ("MANUEL CLEAN 1");
-		//DESDE AQUI, LIMPIEZA
-		xfree(bf_part_jobs);
-		//xfree(bf_part_ptr);
-		xfree(uid);
-		xfree(njobs);
-		FREE_NULL_BITMAP(avail_bitmap);
-		FREE_NULL_BITMAP(exc_core_bitmap);
-		FREE_NULL_BITMAP(resv_bitmap);
-
-		//MANUEL esto lo mismo hay que liberarlo! Lo he quitado de momento
-//		debug ("MANUEL CLEAN 2");
-		/*
-		for (i=0; ; ) {
-			FREE_NULL_BITMAP(node_space[i].avail_bitmap);
-			if ((i = node_space[i].next) == 0)
-			break;
-		}
-*/
-//		debug ("MANUEL CLEAN 3");
-		//MANUEL esto lo mismo hay que liberarlo! Lo he quitado de momento
-
-	//	xfree(node_space);
-//		debug ("MANUEL CLEAN 3.1");
-
-		FREE_NULL_LIST(job_queue);
-//		debug ("MANUEL CLEAN 3.2");
-		gettimeofday(&bf_time2, NULL);
-		_do_diag_stats(&bf_time1, &bf_time2);
-//		debug ("MANUEL CLEAN 3.3");
-
-
-		if (debug_flags & DEBUG_FLAG_MIGRATION) {
-			END_TIMER;
-			info("migration: completed testing %u(%d) jobs, %s",
-			slurmctld_diag_stats.bf_last_depth,
-			job_test_count, TIME_STR);
-		}
-
-//		debug ("MANUEL CLEAN 4");
-		if (slurmctld_config.server_thread_count >= 150) {
-			info("migration: %d pending RPCs at cycle end, consider "
-			"configuring max_rpc_cnt",
-			slurmctld_config.server_thread_count);
-		}
-//		debug ("MANUEL CLEAN 5, just before exit");
-		return rc;
+	//TODO MANUEL esto lo mismo hay que liberarlo! Lo he quitado de momento
+	/*
+	for (i=0; ; ) {
+		FREE_NULL_BITMAP(node_space[i].avail_bitmap);
+		if ((i = node_space[i].next) == 0)
+		break;
 	}
+	xfree(node_space);
+	*/
+	FREE_NULL_LIST(job_queue);
+	gettimeofday(&bf_time2, NULL);
+	_do_diag_stats(&bf_time1, &bf_time2);
 
-/* Try to start the job on any non-reserved nodes */
-
-
-/* MANUEL: ESTO NO SE USABA, FUERA
-static int _start_job(struct job_record *job_ptr, bitstr_t *resv_bitmap)
-{
-	int rc;
-	bitstr_t *orig_exc_nodes = NULL;
-	bool is_job_array_head = false;
-	static uint32_t fail_jobid = 0;
-
-	if (job_ptr->details->exc_node_bitmap) {
-		orig_exc_nodes = bit_copy(job_ptr->details->exc_node_bitmap);
-		bit_or(job_ptr->details->exc_node_bitmap, resv_bitmap);
-	} else
-		job_ptr->details->exc_node_bitmap = bit_copy(resv_bitmap);
-	if (job_ptr->array_recs)
-		is_job_array_head = true;
-	rc = select_nodes(job_ptr, false, NULL, NULL, NULL);
-	if (is_job_array_head && job_ptr->details) {
-		struct job_record *base_job_ptr;
-		base_job_ptr = find_job_record(job_ptr->array_job_id);
-		if (base_job_ptr && base_job_ptr != job_ptr
-				 && base_job_ptr->array_recs) {
-			FREE_NULL_BITMAP(
-					base_job_ptr->details->exc_node_bitmap);
-			if (orig_exc_nodes)
-				base_job_ptr->details->exc_node_bitmap =
-					bit_copy(orig_exc_nodes);
-		}
+	if (debug_flags & DEBUG_FLAG_MIGRATION) {
+		END_TIMER;
+		info("migration: completed testing %u(%d) jobs, %s",
+		slurmctld_diag_stats.bf_last_depth,
+		job_test_count, TIME_STR);
 	}
-	if (job_ptr->details) {
-		FREE_NULL_BITMAP(job_ptr->details->exc_node_bitmap);
-		job_ptr->details->exc_node_bitmap = orig_exc_nodes;
-	} else
-		FREE_NULL_BITMAP(orig_exc_nodes);
-	if (rc == SLURM_SUCCESS) {
-		last_job_update = time(NULL);
-		if (job_ptr->array_task_id == NO_VAL) {
-			info("migration: Started JobId=%u in %s on %s",
-			     job_ptr->job_id, job_ptr->part_ptr->name,
-			     job_ptr->nodes);
-		} else {
-			info("migration: Started JobId=%u_%u (%u) in %s on %s",
-			     job_ptr->array_job_id, job_ptr->array_task_id,
-			     job_ptr->job_id, job_ptr->part_ptr->name,
-			     job_ptr->nodes);
-		}
-		power_g_job_start(job_ptr);
-		if (job_ptr->batch_flag == 0)
-			srun_allocate(job_ptr->job_id);
-		else if ((job_ptr->details == NULL) ||
-			 (job_ptr->details->prolog_running == 0))
-			launch_job(job_ptr);
-		slurmctld_diag_stats.migrated_jobs++;
-		slurmctld_diag_stats.last_migrated_jobs++;
-		if (debug_flags & DEBUG_FLAG_MIGRATION) {
-			info("migration: Jobs migrated since boot: %u",
-			     slurmctld_diag_stats.migrated_jobs);
-		}
-	} else if ((job_ptr->job_id != fail_jobid) &&
-		   (rc != ESLURM_ACCOUNTING_POLICY)) {
-		char *node_list;
-		bit_not(resv_bitmap);
-		node_list = bitmap2node_name(resv_bitmap);
-		verbose("migration: Failed to start JobId=%u with %s avail: %s",
-			job_ptr->job_id, node_list, slurm_strerror(rc));
-		xfree(node_list);
-		fail_jobid = job_ptr->job_id;
-	} else {
-		debug3("migration: Failed to start JobId=%u: %s",
-		       job_ptr->job_id, slurm_strerror(rc));
+	if (slurmctld_config.server_thread_count >= 150) {
+		info("migration: %d pending RPCs at cycle end, consider "
+		"configuring max_rpc_cnt",
+		slurmctld_config.server_thread_count);
 	}
-
-	return rc;
+//	return rc;
+	return NULL;
 }
-
-*/
-/* Reset a job's time limit (and end_time) as high as possible
- *	within the range job_ptr->time_min and job_ptr->time_limit.
- *	Avoid using resources reserved for pending jobs or in resource
- *	reservations */
-
-/* MANUEL: ESTO NO SE USABA, FUERA
-static void _reset_job_time_limit(struct job_record *job_ptr, time_t now,
-				  node_space_map_t *node_space)
-{
-	int32_t j, resv_delay;
-	uint32_t orig_time_limit = job_ptr->time_limit;
-	uint32_t new_time_limit;
-
-	for (j=0; ; ) {
-		if ((node_space[j].begin_time != now) &&
-		    (node_space[j].begin_time < job_ptr->end_time) &&
-		    (!bit_super_set(job_ptr->node_bitmap,
-				    node_space[j].avail_bitmap))) {
-			resv_delay = difftime(node_space[j].begin_time, now);
-			resv_delay /= 60;
-			if (resv_delay < job_ptr->time_limit)
-				job_ptr->time_limit = resv_delay;
-		}
-		if ((j = node_space[j].next) == 0)
-			break;
-	}
-	new_time_limit = MAX(job_ptr->time_min, job_ptr->time_limit);
-	acct_policy_alter_job(job_ptr, new_time_limit);
-	job_ptr->time_limit = new_time_limit;
-	job_ptr->end_time = job_ptr->start_time + (job_ptr->time_limit * 60);
-
-	job_time_adj_resv(job_ptr);
-
-	if (orig_time_limit != job_ptr->time_limit) {
-		info("migration: job %u time limit changed from %u to %u",
-		     job_ptr->job_id, orig_time_limit, job_ptr->time_limit);
-	}
-}
-*/
 
 
 /* Report if any changes occurred to job, node or partition information */
@@ -1396,20 +929,9 @@ static void _add_reservation(uint32_t start_time, uint32_t end_reserve,
 			     bitstr_t *res_bitmap,
 			     node_space_map_t *node_space,
 			     int *node_space_recs)
-{
+	{
 	bool placed = false;
 	int i, j;
-
-#if 0
-	info("add job start:%u end:%u", start_time, end_reserve);
-	for (j = 0; ; ) {
-		info("node start:%u end:%u",
-		     (uint32_t) node_space[j].begin_time,
-		     (uint32_t) node_space[j].end_time);
-		if ((j = node_space[j].next) == 0)
-			break;
-	}
-#endif
 
 	start_time = MAX(start_time, node_space[0].begin_time);
 	for (j = 0; ; ) {
@@ -1483,36 +1005,6 @@ static void _add_reservation(uint32_t start_time, uint32_t end_reserve,
 	}
 }
 
-/*
- * Determine if the resource specification for a new job overlaps with a
- *	reservation that the migration scheduler has made for a job to be
- *	started in the future.
- * IN use_bitmap - nodes to be allocated
- * IN start_time - start time of job
- * IN end_reserve - end time of job
- */
-
- /* MANUEL: ESTO NO SE USABA, FUERA
-static bool _test_resv_overlap(node_space_map_t *node_space,
-			       bitstr_t *use_bitmap, uint32_t start_time,
-			       uint32_t end_reserve)
-{
-	bool overlap = false;
-	int j;
-
-	for (j=0; ; ) {
-		if ((node_space[j].end_time   > start_time) &&
-		    (node_space[j].begin_time < end_reserve) &&
-		    (!bit_super_set(use_bitmap, node_space[j].avail_bitmap))) {
-			overlap = true;
-			break;
-		}
-		if ((j = node_space[j].next) == 0)
-			break;
-	}
-	return overlap;
-}
-*/
 
 
 static void _job_queue_rec_del(void *x)
@@ -1545,7 +1037,7 @@ extern List _build_running_job_queue()
 			job_queue_rec->array_task_id = job_ptr->array_task_id;
 			job_queue_rec->job_id   = job_ptr->job_id;
 			job_queue_rec->job_ptr  = job_ptr;
-			job_queue_rec->priority = job_ptr->priority; //MANUEL: estyo es importante, si aqui damos una prioridad distinta eso quizá afecte a la migración
+			job_queue_rec->priority = job_ptr->priority;
 			list_append(job_queue, job_queue_rec);
 		}
 	}
