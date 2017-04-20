@@ -193,12 +193,13 @@ static void argerror(const char *msg, ...)
  */
 static void _opt_default()
 {
-  opt.shared = (uint16_t)NO_VAL;
+  opt.excluded_nodes = "";
   opt.hold	    = false;
 	opt.jobid    = NO_VAL;
 	opt.nodes = "";
 	opt.priority = 0;
   opt.quiet = 0;
+  opt.shared = (uint16_t)NO_VAL;
   opt.spread = false;
   opt.stepid    = NO_VAL;
 	opt.test_only   = false;
@@ -213,10 +214,11 @@ static void _opt_default()
 //TODO anadir NODENAME y los demas que faltan
 static struct option long_options[] = {
 
+  {"excluded_nodes", required_argument, 0, 'x'},
   {"exclusive",     optional_argument, 0, 'e'},
 	{"help",          no_argument,       0, 'h'},
 	{"hold",          no_argument,       0, 'H'}, /* undocumented */
-	{"nodelist",     required_argument, 0, 'w'},
+	{"nodelist",      required_argument, 0, 'w'},
 	{"priority",      required_argument, 0, LONG_OPT_PRIORITY},
 	{"quiet",         no_argument,       0, 'Q'},
   {"spread-job",    no_argument,       0, LONG_OPT_SPREAD_JOB},
@@ -346,6 +348,9 @@ static void _set_options(int argc, char **argv)
 			error("Try \"smigrate --help\" for more information");
 			exit(error_exit);
 			break;
+    case 'x':
+        opt.excluded_nodes = optarg;
+        break;
     case 'e':
       if (optarg == NULL) {
         opt.shared = JOB_SHARED_NONE;
@@ -453,6 +458,7 @@ static void _opt_list(void)
 
 	info("defined options for program `%i'", opt.jobid);
 	info("----------------- ---------------------");
+  info("excluded_nodes  : %s", opt.excluded_nodes);
   info("exclusive      : %s", opt.shared ? "True" : "False" );
 	info("hold           : %s", opt.hold ? "True" : "False" );
 	info("nodelist       : %s", opt.nodes);
@@ -474,6 +480,7 @@ static void _help(void)
 "Run options:\n"
 "  -e, --exclusive             exclusive usage of the nodes\n"
 "  -w, --nodelist=hosts...     request a specific list of hosts\n"
+"  -x, --exclude=hosts...      exclude a specific list of hosts\n"
 "  -Q, --quiet                 quiet mode (suppress informational messages)\n"
 "  -v, --verbose               verbose mode (multiple -v's increase verbosity)\n"
 "  -H, --hold                  submit job in held state\n"
