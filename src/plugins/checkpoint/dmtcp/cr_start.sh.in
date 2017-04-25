@@ -1,10 +1,7 @@
 #!/bin/sh
 
-source /etc/profile
-set -x
 DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 source $DIR/cr_common.sh
-
 
 #########GENERAL INFORMATION
 #SLURM_CHECKPOINT_IMAGE_DIR: path where slurm stores checkpoint images, as defined in slurm.conf . It contains many checkpoint_folder and some other stuff
@@ -74,5 +71,5 @@ trap 'rm -rf $checkpoint_info' SIGHUP SIGINT SIGTERM EXIT
 
 
 #start job with DMTCP support
-startDMTCPCheckpointedJob $1
+startDMTCPCheckpointedJob $@
 exit 0

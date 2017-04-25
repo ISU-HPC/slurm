@@ -1,26 +1,18 @@
 #!/bin/sh
+set -x
 
-source /etc/profile
 DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 source $DIR/cr_common.sh
-
-
-#jiajun
-export PATH=/home/dmtcpuser/dmtcp/bin:$PATH
-export LD_LIBRARY_PATH=/home/dmtcpuser/dmtcp/lib/dmtcp:$LD_LIBRARY_PATH
-
-
 
 export SLURM_CHECKPOINT_IMAGE_DIR=$1
 export SLURM_JOB_ID=$2
 export SLURM_JOB_NODELIST=$3
 export SLURM_TASKS_PER_NODE=$4
+export SLURM_NTASKS_PER_NODE=`echo $4 | awk '{split($0, a, "("); print a[1]}'`
 export SLURM_JOB_CPUS_PER_NODE=$5
-#export SLURM_LOCALID=$6
-export SLURM_SRUN_COMM_HOST=$7
-export SLURM_NNODES=$8
-export TMPDIR=$9
-
+export SLURM_SRUN_COMM_HOST=$6
+export SLURM_NNODES=$7
+export TMPDIR=$8
 
 #here we will store information about checkpoint
 checkpoint_info=$SLURM_CHECKPOINT_IMAGE_DIR"/checkpoint_info."$SLURM_JOB_ID
