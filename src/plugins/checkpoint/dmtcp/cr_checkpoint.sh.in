@@ -1,7 +1,4 @@
 #!/bin/sh
-set -x
-
-source /etc/profile
 
 SLURM_CHECKPOINT_IMAGE_DIR=$1
 SLURM_JOB_ID=$2
