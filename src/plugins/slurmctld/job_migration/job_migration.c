@@ -18,157 +18,257 @@
 char** str_split(char* a_str, const char a_delim);
 static int _print_existing_jobs (void);
 static int _job_info_to_job_desc (job_info_t job_info, job_desc_msg_t *job_desc_msg);
+extern int _migrate_job(uint32_t job_id, uint32_t step_id, char *destination_nodes, char *excluded_nodes, int shared, int spread, bool test_only);
+extern int _drain_node( char *destination_nodes, char *excluded_nodes, char *drain_node, int shared, int spread, bool test_only);
 
-extern int slurm_checkpoint_migrate (uint32_t job_id, uint32_t step_id, char *destination_nodes, char *excluded_nodes,  int shared, int spread, bool test_only)
+extern int slurm_checkpoint_migrate (uint32_t job_id, uint32_t step_id, char *destination_nodes, char *excluded_nodes, char *drain_node,  int shared, int spread, bool test_only)
 {
 
-	printf("\n\n\n job_id=%u,\nstep_id=%u,\ndestination_nodes=%s,\nexcluded_nodes=%s,\nshared=%u,\nspread=%u\n\n\n",job_id, step_id, destination_nodes, excluded_nodes, shared, spread);
+	printf("\n\n\njob_id=%u,\nstep_id=%u,\ndestination_nodes=%s,\nexcluded_nodes=%s, \ndrain_node=%s,\nshared=%u,\nspread=%u\n\n\n",job_id, step_id, destination_nodes, excluded_nodes, drain_node, shared, spread);
+	if (drain_node[0] == '\0' )
+		return _migrate_job(job_id, step_id, destination_nodes, excluded_nodes, shared, spread, test_only);
 
-	int error = 0;
-
-	/*VERIFICATION OF INPUT DATA */
-	job_info_msg_t * job_ptr;
-	uint16_t show_flags = 0;
-
-	if ((error = slurm_load_job (&job_ptr, job_id, show_flags)) != SLURM_SUCCESS ){
-		printf("Error is %d\n", error);
-		slurm_perror ("Specified ID does not correspond to an existing Slurm task");
-	//	_print_existing_jobs();
-		return (EMIGRATION_NOT_JOB);
-	}
-
-	slurm_job_info_t job_info = job_ptr->job_array[job_ptr->record_count-1];
-	if (job_info.job_state  != JOB_RUNNING) {
-		slurm_perror ("Jobs must be RUNNING to be migrated");
+	else if ((drain_node[0] == '\0' ) && (job_id != 0)){
+		slurm_perror ("drain-node and a job id are incompatible");
 		return (EMIGRATION_JOB_ERROR);
 	}
+	else if (drain_node[0] != '\0' )
+		return _drain_node(destination_nodes, excluded_nodes, drain_node, shared, spread, test_only);
 
-	time_t start_time;
+	else {
+		slurm_perror ("No Job ID and no node to drain specified, exiting");
+		return (EMIGRATION_JOB_ERROR);
 
-	//TODO aqui el segundo parametro, NO_VAl, deberia ser step_id. Por algun motivo casca asi que pongo esto.
-	if (( error = slurm_checkpoint_able( job_id, NO_VAL, &start_time)) != SLURM_SUCCESS){
-		slurm_perror ("Job is not checkpointable");
-		return(EMIGRATION_JOB_ERROR);
 	}
 
-	if ((job_info.req_nodes  != '\0') && (destination_nodes[0] != '\0' )){
-			slurm_perror ("User specified a different destination resource on original job submission");
+}
+
+
+extern int _migrate_job(uint32_t job_id, uint32_t step_id, char *destination_nodes, char *excluded_nodes, int shared, int spread, bool test_only){
+
+		int error = 0;
+
+		/*VERIFICATION OF INPUT DATA */
+		job_info_msg_t * job_ptr;
+		uint16_t show_flags = 0;
+
+		if ((error = slurm_load_job (&job_ptr, job_id, show_flags)) != SLURM_SUCCESS ){
+			printf("Error is %d\n", error);
+			slurm_perror ("Specified ID does not correspond to an existing Slurm task");
+		//	_print_existing_jobs();
+			return (EMIGRATION_NOT_JOB);
+		}
+
+		slurm_job_info_t job_info = job_ptr->job_array[job_ptr->record_count-1];
+		if (job_info.job_state  != JOB_RUNNING) {
+			slurm_perror ("Jobs must be RUNNING to be migrated");
 			return (EMIGRATION_JOB_ERROR);
 		}
 
-		//this whole copy thing is required because certain tests cannot be performed otherwise
-		job_desc_msg_t job_desc_msg_test;
-		slurm_init_job_desc_msg(&job_desc_msg_test);
-		_job_info_to_job_desc (job_info, &job_desc_msg_test);
+		time_t start_time;
 
-		job_desc_msg_test.job_id = NO_VAL;
-		job_desc_msg_test.priority = NO_VAL - 1;
+		//TODO aqui el segundo parametro, NO_VAl, deberia ser step_id. Por algun motivo casca asi que pongo esto.
+		if (( error = slurm_checkpoint_able( job_id, NO_VAL, &start_time)) != SLURM_SUCCESS){
+			slurm_perror ("Job is not checkpointable");
+			return(EMIGRATION_JOB_ERROR);
+		}
 
-		if (shared != (uint16_t)NO_VAL)
-			job_desc_msg_test.shared = shared;
-
-		if (destination_nodes[0] != '\0' )
-			job_desc_msg_test.req_nodes = destination_nodes;
-
-	 if (excluded_nodes[0] != '\0' )
-			job_desc_msg_test.exc_nodes = excluded_nodes;
-		else
-			debug("Excluded nodes is empty");
-
-		if (spread)
-			job_desc_msg_test.bitflags |= SPREAD_JOB;
-
-		will_run_response_msg_t *will_run_resp = NULL;
-		if (slurm_job_will_run2(&job_desc_msg_test, &will_run_resp) != SLURM_SUCCESS) {
-			slurm_perror("Error: job will not run");
-			return(EMIGRATION_ERROR);
+		if ((job_info.req_nodes  != '\0') && (destination_nodes[0] != '\0' )){
+				slurm_perror ("User specified a different destination resource on original job submission");
+				return (EMIGRATION_JOB_ERROR);
 			}
-			debug ("BEFORE TEST_ONLY");
 
-		if (test_only)
-			return (EMIGRATION_SUCCESS);
+			//this whole copy thing is required because certain tests cannot be performed otherwise
+			job_desc_msg_t job_desc_msg_test;
+			slurm_init_job_desc_msg(&job_desc_msg_test);
+			_job_info_to_job_desc (job_info, &job_desc_msg_test);
 
-	debug ("ABOUT TO CHECKPOINT");
-/*checkpoint*/
-	char* checkpoint_directory = slurm_get_checkpoint_dir();
+			job_desc_msg_test.job_id = NO_VAL;
+			job_desc_msg_test.priority = NO_VAL - 1;
 
-	if (( error = slurm_checkpoint_vacate (job_id, step_id, 0,checkpoint_directory )) != 0){
-		slurm_perror ("there was an error calling slurm_checkpoint_create.");
-		return(EMIGRATION_ERROR);
-	 }
-	 printf("Checkpoint has been created! \n");
+			if (shared != (uint16_t)NO_VAL)
+				job_desc_msg_test.shared = shared;
 
+			if (destination_nodes[0] != '\0' )
+				job_desc_msg_test.req_nodes = destination_nodes;
 
-	//TODO MANUEL. this can take some time. Should be performed in a different thread or something?
-	while (job_info.job_state  == JOB_RUNNING){
-		if (slurm_load_job (&job_ptr, job_id, show_flags) != SLURM_SUCCESS ){
-			slurm_perror ("there was an error loading job info.");
+		 if (excluded_nodes[0] != '\0' )
+				job_desc_msg_test.exc_nodes = excluded_nodes;
+			else
+				debug("Excluded nodes is empty");
+
+			if (spread)
+				job_desc_msg_test.bitflags |= SPREAD_JOB;
+
+			will_run_response_msg_t *will_run_resp = NULL;
+			if (slurm_job_will_run2(&job_desc_msg_test, &will_run_resp) != SLURM_SUCCESS) {
+				slurm_perror("Error: job will not run");
+				return(EMIGRATION_ERROR);
+				}
+				debug ("BEFORE TEST_ONLY");
+
+			if (test_only)
+				return (EMIGRATION_SUCCESS);
+
+		debug ("ABOUT TO CHECKPOINT");
+	/*checkpoint*/
+		char* checkpoint_directory = slurm_get_checkpoint_dir();
+
+		if (( error = slurm_checkpoint_vacate (job_id, step_id, 0,checkpoint_directory )) != 0){
+			slurm_perror ("there was an error calling slurm_checkpoint_create.");
 			return(EMIGRATION_ERROR);
 		 }
-		sleep(1);
-		job_info = job_ptr->job_array[job_ptr->record_count-1];
-	}
+		 printf("Checkpoint has been created! \n");
 
-	if (job_info.job_state != JOB_COMPLETE){
-		slurm_perror("Job is a wrong status for checkpoint, aborting\n");
-		return(EMIGRATION_ERROR);
-		}
 
-		printf("Job is finally finallized. Now we'll wait for it to be deleted from the system (this might take a while)\n");
-
-		while (slurm_load_job (&job_ptr, job_id, show_flags) == SLURM_SUCCESS ){
-			printf ("still exists LOL\n");
+		//TODO MANUEL. this can take some time. Should be performed in a different thread or something?
+		while (job_info.job_state  == JOB_RUNNING){
+			if (slurm_load_job (&job_ptr, job_id, show_flags) != SLURM_SUCCESS ){
+				slurm_perror ("there was an error loading job info.");
+				return(EMIGRATION_ERROR);
+			 }
 			sleep(1);
-		}
-		printf("it should be deleted by now\n");
-
-
-		/*restart checkpoint */
-	if (slurm_checkpoint_restart(job_id, step_id, 0,  checkpoint_directory) != 0) {
-		slurm_perror("Error restarting job\n");
-		return(EMIGRATION_ERROR);
-		}
-	printf("Job %d has been restarted! \n", job_id);
-
-	/*Change job atributes while in queue*/
-
-	job_desc_msg_t job_desc_msg;
-	slurm_init_job_desc_msg(&job_desc_msg);
-
-	job_desc_msg.job_id = job_info.job_id;
-	job_desc_msg.priority = NO_VAL - 1;
-
-	if (destination_nodes[0] != '\0' )
-		job_desc_msg.req_nodes = destination_nodes;
-
-	if (excluded_nodes[0] != '\0' )
-		job_desc_msg.exc_nodes = excluded_nodes;
-
-	if (shared != (uint16_t)NO_VAL)
-		job_desc_msg.shared = shared;
-
-		if (spread)
-			job_desc_msg.bitflags |= SPREAD_JOB;
-
-	if (slurm_update_job(&job_desc_msg) != 0) {
-		slurm_perror("Error setting migration requirements for job");
-		return(EMIGRATION_ERROR);
+			job_info = job_ptr->job_array[job_ptr->record_count-1];
 		}
 
+		if (job_info.job_state != JOB_COMPLETE){
+			slurm_perror("Job is a wrong status for checkpoint, aborting\n");
+			return(EMIGRATION_ERROR);
+			}
 
-//DEBUG: see if every
-	if ((error = slurm_load_job (&job_ptr, job_id, show_flags)) != SLURM_SUCCESS ){
-		printf("Error is %d\n", error);
-		slurm_perror ("Specified ID does not correspond to an existing Slurm task");
-	//	_print_existing_jobs();
-		return (EMIGRATION_NOT_JOB);
+			printf("Job is finally finallized. Now we'll wait for it to be deleted from the system (this might take a while)\n");
+
+			while (slurm_load_job (&job_ptr, job_id, show_flags) == SLURM_SUCCESS ){
+				printf ("still exists LOL\n");
+				sleep(1);
+			}
+			printf("it should be deleted by now\n");
+
+
+			/*restart checkpoint */
+		if (slurm_checkpoint_restart(job_id, step_id, 0,  checkpoint_directory) != 0) {
+			slurm_perror("Error restarting job\n");
+			return(EMIGRATION_ERROR);
+			}
+		printf("Job %d has been restarted! \n", job_id);
+
+		/*Change job atributes while in queue*/
+
+		job_desc_msg_t job_desc_msg;
+		slurm_init_job_desc_msg(&job_desc_msg);
+
+		job_desc_msg.job_id = job_info.job_id;
+
+		//we know this DOES work, but it is not so elegant
+		//job_desc_msg.priority = NO_VAL - 1;
+		printf("See what happens with priority. Did it go first?");
+		char job_id_str[15];
+		sprintf(job_id_str, "%d", job_info.job_id);
+		slurm_top_job(job_id_str);
+
+		if (destination_nodes[0] != '\0' )
+			job_desc_msg.req_nodes = destination_nodes;
+
+		if (excluded_nodes[0] != '\0' )
+			job_desc_msg.exc_nodes = excluded_nodes;
+
+		if (shared != (uint16_t)NO_VAL)
+			job_desc_msg.shared = shared;
+
+			if (spread)
+				job_desc_msg.bitflags |= SPREAD_JOB;
+
+		if (slurm_update_job(&job_desc_msg) != 0) {
+			slurm_perror("Error setting migration requirements for job");
+			return(EMIGRATION_ERROR);
+			}
+
+		if ((error = slurm_load_job (&job_ptr, job_id, show_flags)) != SLURM_SUCCESS ){
+			slurm_perror ("Specified ID does not correspond to an existing Slurm task");
+			return (EMIGRATION_NOT_JOB);
+		}
+
+
+		return (EMIGRATION_SUCCESS);
+}
+
+
+extern int _drain_node(char *destination_nodes, char *excluded_nodes, char *drain_node, int shared, int spread, bool test_only){
+
+	printf ("DRAIN NODE\n");
+
+
+	node_info_msg_t *node_info;
+	if (slurm_load_node_single(&node_info, drain_node, 0) != 0) {
+		slurm_perror ("Could not get info from node %s\n", drain_node);
+		return (EMIGRATION_ERROR);
+	}
+	if (node_info->record_count ==0) {
+		slurm_perror ("No nodes with id %s were found\n", drain_node);
+		return (EMIGRATION_ERROR);
 	}
 
+	//PRINT NODE INFO (JUST DEBUGGING)
+	FILE* pFileHandle;
+	// Saves the file in the EXE folder.
+	char Filename[] = "/root/out.txt";
+	// Open file for writing.
+	pFileHandle = fopen(Filename, "w");
+	slurm_print_node_info_msg(pFileHandle, node_info, 0);
+
+	//HERE I MIGRATE ALL THE JOBS RUNNING ON THE NODE
 
 
+	job_info_msg_t *job_buffer_ptr = NULL;
+	job_resources_t *job_resrcs_ptr;
+	int numberOfCPUS, i = 0;
+	update_node_msg_t node_msg;
+
+  if (slurm_load_jobs(0, &job_buffer_ptr, SHOW_DETAIL) != 0) {
+		 slurm_perror ("slurm_load_jobs error");
+		 return SLURM_ERROR;
+	 }
+
+	 for (i = 0; i < job_buffer_ptr->record_count; i++){
+		 numberOfCPUS = slurm_job_cpus_allocated_on_node(job_buffer_ptr->job_array[i].job_resrcs, drain_node);
+		 if (numberOfCPUS > 0){
+		 	printf ("number of cpus in node %s is %d\n", drain_node, numberOfCPUS);
+		 	//_migrate_job(job_buffer_ptr->job_array[i].job_id, 0, destination_nodes, excluded_nodes, shared, spread, true); //TODO: step_id?
+
+			if (_migrate_job(job_buffer_ptr->job_array[i].job_id, 0, destination_nodes, excluded_nodes, shared, spread, true) ==0){
+				printf ("job would have been migrated");
+			}
+			else{
+				printf ("Job could not be migrated, aborting. ");
+				return SLURM_ERROR;
+
+
+			}
+			}
+
+	 }
+
+	slurm_free_job_info_msg(job_buffer_ptr);
+
+
+	slurm_init_update_node_msg(&node_msg);
+	node_msg.node_names=drain_node;
+	printf ("Disabled DRAIN mode\n");
+
+	//node_msg.node_state = NODE_STATE_DRAIN;
+
+	if (slurm_update_node(&node_msg)) {
+		printf ("Could not set node %s into DRAIN status\n",drain_node );
+		return (EMIGRATION_ERROR);
+	}
+	printf ("Node should be in drain status now\n");
+
+	slurm_free_node_info_msg(node_info);
 
 	return (EMIGRATION_SUCCESS);
+
 }
+
 
 
 

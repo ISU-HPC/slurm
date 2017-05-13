@@ -94,7 +94,6 @@ MANUEL: quito esto, habra que sustituirlo por algo imagino...
 
 #include "src/smigrate/opt.h"
 
-//TODO: limpiar esta lista
 /* generic OPT_ definitions -- mainly for use with env vars  */
 #define OPT_NONE        0x00
 #define OPT_INT         0x01
@@ -127,11 +126,6 @@ MANUEL: quito esto, habra que sustituirlo por algo imagino...
 #define OPT_HINT	  0x22
 
 /* generic getopt_long flags, integers and *not* valid characters */
-
-
-//TODO last three have been redefined to keep the numbering secuential It might be a problem
-//if declared with a different value somewhere else... we'll see
-
 #define LONG_OPT_JOBID       0x105
 #define LONG_OPT_PRIORITY        0x106
 #define LONG_OPT_SPREAD_JOB      0x107
@@ -193,6 +187,7 @@ static void argerror(const char *msg, ...)
  */
 static void _opt_default()
 {
+  opt.drain_node = "";
   opt.excluded_nodes = "";
   opt.hold	    = false;
 	opt.jobid    = NO_VAL;
@@ -204,6 +199,7 @@ static void _opt_default()
   opt.stepid    = NO_VAL;
 	opt.test_only   = false;
 	opt.verbose = 0;
+
 }
 
 
@@ -213,8 +209,8 @@ static void _opt_default()
 
 //TODO anadir NODENAME y los demas que faltan
 static struct option long_options[] = {
-
-  {"excluded_nodes", required_argument, 0, 'x'},
+  {"drain-node", required_argument, 0, 'd'},
+  {"excluded-nodes", required_argument, 0, 'x'},
   {"exclusive",     optional_argument, 0, 'e'},
 	{"help",          no_argument,       0, 'h'},
 	{"hold",          no_argument,       0, 'H'}, /* undocumented */
@@ -348,6 +344,9 @@ static void _set_options(int argc, char **argv)
 			error("Try \"smigrate --help\" for more information");
 			exit(error_exit);
 			break;
+      case 'd':
+          opt.drain_node = optarg;
+          break;
     case 'x':
         opt.excluded_nodes = optarg;
         break;
@@ -458,14 +457,15 @@ static void _opt_list(void)
 
 	info("defined options for program `%i'", opt.jobid);
 	info("----------------- ---------------------");
-  info("excluded_nodes  : %s", opt.excluded_nodes);
+  info("drain-node  : %s", opt.drain_node);
+  info("excluded-nodes  : %s", opt.excluded_nodes);
   info("exclusive      : %s", opt.shared ? "True" : "False" );
 	info("hold           : %s", opt.hold ? "True" : "False" );
 	info("nodelist       : %s", opt.nodes);
 	info("priority       : %u", opt.priority);
 	info("quiet          : %s", opt.quiet ? "True" : "False" );
 	info("stepid         : %u", opt.stepid);
-	info("test_only      : %s", opt.test_only ? "True" : "False" );
+	info("test-only      : %s", opt.test_only ? "True" : "False" );
 	info("verbose        : %s", opt.verbose ? "True" : "False" );
 
 	xfree(str);
@@ -478,6 +478,7 @@ static void _help(void)
 "Usage: smigrate [OPTIONS...] [job_id]\n"
 "\n"
 "Run options:\n"
+"  -d, --drain-node=host       migrate all tasks from a node and put it in drain status\n"
 "  -e, --exclusive             exclusive usage of the nodes\n"
 "  -w, --nodelist=hosts...     request a specific list of hosts\n"
 "  -x, --exclude=hosts...      exclude a specific list of hosts\n"

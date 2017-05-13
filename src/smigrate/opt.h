@@ -61,6 +61,7 @@
 
 
 typedef struct smigrate_options {
+	char* drain_node;
 	char* excluded_nodes; /* comma-separated list of nodes to exclude in the job allocation */
 	bool hold;		/* --hold, -H			*/
 	unsigned int jobid;     /* --jobid=jobid                */
@@ -72,8 +73,6 @@ typedef struct smigrate_options {
 	unsigned int stepid; /*- job step on which to perform operation*/
 	bool test_only;		/* --test-only			*/
 	int  verbose;
-
-
 } opt_t;
 
 extern opt_t opt;
@@ -106,7 +105,6 @@ int process_options_second_pass(int argc, char *argv[], const char *file,
 				const void *script_body, int script_size);
 
 
-//TODO esto hace falta ahora, o con el checkpoint/restart no?
 /* external functions available for SPANK plugins to modify the environment
  * exported to the SLURM Prolog and Epilog programs */
 extern char *spank_get_job_env(const char *name);
