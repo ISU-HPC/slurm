@@ -39,7 +39,7 @@ startDMTCPCoordinator(){
   max_coordinators=`nproc`
   i=0
   while [[ "$i" -le "$max_coordinators" ]]; do
-    @DMTCP_HOME@/dmtcp_coordinator --daemon --exit-on-last --ckptdir $checkpoint_folder -q -q
+    @DMTCP_HOME@/dmtcp_coordinator --daemon --exit-on-last --ckptdir $checkpoint_folder -q 
     if [ $? -eq 0 ]
     then
       echo "export DMTCP_COORD_HOST=`hostname`" >> $checkpoint_info

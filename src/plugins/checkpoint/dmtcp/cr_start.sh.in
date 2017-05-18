@@ -28,6 +28,7 @@ startDMTCPCheckpointedJob(){
 
   #Serial application
   if [ $? -ne 0 ]; then
+    echo "APP_TYPE=SERIAL" >> $checkpoint_info
     @DMTCP_HOME@/dmtcp_launch --ib --rm $@
   #MPI application
   else
@@ -43,7 +44,7 @@ startDMTCPCheckpointedJob(){
     sed -E 's!^[ ]*(mpirun|srun|mpiexec)!srun @DMTCP_HOME@/dmtcp_launch --ib --rm!g' $1 > $SLURM_CHECKPOINT_IMAGE_DIR/tmp.sh.$SLURM_JOB_ID
     cat $SLURM_CHECKPOINT_IMAGE_DIR/tmp.sh.$SLURM_JOB_ID > $1
     rm $SLURM_CHECKPOINT_IMAGE_DIR/tmp.sh.$SLURM_JOB_ID
-
+    echo "APP_TYPE=MPI" >> $checkpoint_info
     $@
   fi
 
@@ -69,7 +70,6 @@ then
 fi
 #clean concurrency file at the end of execution
 trap 'rm -rf $checkpoint_info' SIGHUP SIGINT SIGTERM EXIT
-
 
 #start job with DMTCP support
 startDMTCPCheckpointedJob $@
