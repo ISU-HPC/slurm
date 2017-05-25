@@ -32,14 +32,14 @@ startDMTCPCoordinator(){
   checkpoint_info=$2
 
   if [ -z "$DMTCP_COORD_PORT" ]; then
-    echo "DMTPC_COORD_PORT was not present, setting the default value of 7779"
+    #echo "DMTPC_COORD_PORT was not present, setting the default value of 7779"
     export DMTCP_COORD_PORT=7779
   fi
 
   max_coordinators=`nproc`
   i=0
   while [[ "$i" -le "$max_coordinators" ]]; do
-    @DMTCP_HOME@/dmtcp_coordinator --daemon --exit-on-last --ckptdir $checkpoint_folder -q 
+    @DMTCP_HOME@/dmtcp_coordinator --daemon --exit-on-last --ckptdir $checkpoint_folder -q &> /dev/null
     if [ $? -eq 0 ]
     then
       echo "export DMTCP_COORD_HOST=`hostname`" >> $checkpoint_info

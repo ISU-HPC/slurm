@@ -42,6 +42,11 @@ startDMTCPCheckpointedJob(){
 
 	#note that sed uses ! as separator because DMTCP_HOME contains "/"
     sed -E 's!^[ ]*(mpirun|srun|mpiexec)!srun @DMTCP_HOME@/dmtcp_launch --ib --rm!g' $1 > $SLURM_CHECKPOINT_IMAGE_DIR/tmp.sh.$SLURM_JOB_ID
+
+    #clean tmp files after succesful execution
+    echo "rm -rf $checkpoint_folder" >> $SLURM_CHECKPOINT_IMAGE_DIR/tmp.sh.$SLURM_JOB_ID
+    echo "rm -rf $SLURM_CHECKPOINT_IMAGE_DIR/$SLURM_JOB_ID.ckpt" >> $SLURM_CHECKPOINT_IMAGE_DIR/tmp.sh.$SLURM_JOB_ID
+
     cat $SLURM_CHECKPOINT_IMAGE_DIR/tmp.sh.$SLURM_JOB_ID > $1
     rm $SLURM_CHECKPOINT_IMAGE_DIR/tmp.sh.$SLURM_JOB_ID
     echo "APP_TYPE=MPI" >> $checkpoint_info

@@ -1710,6 +1710,7 @@ static int _valid_in_local_context (spank_item_t item)
 	case S_JOB_ID:
 	case S_JOB_STEPID:
 	case S_JOB_ARGV:
+	case S_JOB_CHECKPOINTABLE:
 	case S_JOB_ENV:
 	case S_JOB_TOTAL_TASK_COUNT:
 	case S_JOB_NNODES:
@@ -2160,6 +2161,14 @@ spank_err_t spank_get_item(spank_t spank, spank_item_t item, ...)
 		p2str = va_arg(vargs, char  **);
 		*p2str = slurmd_job->ckpt_dir;
  		break;
+	case S_JOB_CHECKPOINTABLE:
+		p2uint32 = va_arg(vargs, uint32_t *);
+		time_t start_time;
+		if (slurmd_job)
+                	*p2uint32 = slurm_checkpoint_able(slurmd_job->jobid, slurmd_job->stepid,&start_time);
+                else
+                        *p2uint32 = 0;
+		break;
 	default:
 		rc = ESPANK_BAD_ARG;
 		break;
@@ -2209,8 +2218,6 @@ spank_err_t spank_set_item(spank_t spank, spank_item_t item, ...)
 		char** argv = *p2argv;
 		uint32_t argc = *p2int;
 
-
-
 		//This modifies both spank->job and spank->task.
 		if (spank->stack->type == S_TYPE_LOCAL) {
 			launcher_job->argc = argc;
@@ -2237,6 +2244,15 @@ spank_err_t spank_set_item(spank_t spank, spank_item_t item, ...)
 
 		task->argv[task->argc] = NULL;
 		break;
+
+        case S_JOB_CHECKPOINTABLE:
+		p2int = va_arg(vargs, int *);
+		if (p2int == 0)
+                	rc = slurm_checkpoint_enable(slurmd_job->jobid, slurmd_job->stepid);
+		else
+			rc = slurm_checkpoint_disable(slurmd_job->jobid, slurmd_job->stepid);
+		break;
+
 	default:
 		rc = ESPANK_ERROR;
 		break;

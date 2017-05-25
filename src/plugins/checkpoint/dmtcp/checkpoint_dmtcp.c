@@ -459,8 +459,6 @@ extern int slurm_ckpt_signal_tasks(stepd_step_rec_t *job, char *image_dir)
 			sprintf(context_file, "%s/%d/task.%d.ckpt",
 				image_dir, job->jobid, job->task[i]->gtid);
 		}
-		error("context_file set to  %s", context_file);
-
 		sprintf(pid, "%u", (unsigned int)job->task[i]->pid);
 
 		if (pipe(&fd[i*2]) < 0) {
