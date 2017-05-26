@@ -1710,6 +1710,7 @@ static int _valid_in_local_context (spank_item_t item)
 	case S_JOB_ID:
 	case S_JOB_STEPID:
 	case S_JOB_ARGV:
+	case S_JOB_CHECKPOINTABLE:
 	case S_JOB_ENV:
 	case S_JOB_TOTAL_TASK_COUNT:
 	case S_JOB_NNODES:
@@ -2157,9 +2158,17 @@ spank_err_t spank_get_item(spank_t spank, spank_item_t item, ...)
 		*p2vers = SLURM_MICRO;
 		break;
 	case S_CHECKPOINT_DIR:
-		p2str = va_arg(vargs, char  **);
-		*p2str = slurmd_job->ckpt_dir;
-		break;
+                p2str = va_arg(vargs, char  **);
+                *p2str = slurmd_job->ckpt_dir;
+                break;
+	case S_JOB_CHECKPOINTABLE:
+                p2uint32 = va_arg(vargs, uint32_t *);
+                time_t start_time;
+                if (slurmd_job)
+                        *p2uint32 = slurm_checkpoint_able(slurmd_job->jobid, slurmd_job->stepid,&start_time);
+                else
+                        *p2uint32 = 0;
+                break;
 	default:
 		rc = ESPANK_BAD_ARG;
 		break;
@@ -2211,32 +2220,40 @@ spank_err_t spank_set_item(spank_t spank, spank_item_t item, ...)
 
 
 
-    //This modifies both spank->job and spank->task.
-    if (spank->stack->type == S_TYPE_LOCAL) {
-      launcher_job->argc = argc;
-      launcher_job->argv = xmalloc (sizeof(char*) * (launcher_job->argc + 1));
-      for (count = 0; count < launcher_job->argc; count ++)
-        launcher_job->argv[count] = strdup(argv[count]);
+	    //This modifies both spank->job and spank->task.
+	    if (spank->stack->type == S_TYPE_LOCAL) {
+	      launcher_job->argc = argc;
+	      launcher_job->argv = xmalloc (sizeof(char*) * (launcher_job->argc + 1));
+	      for (count = 0; count < launcher_job->argc; count ++)
+		launcher_job->argv[count] = strdup(argv[count]);
 
-    } else if (slurmd_job) {
-      slurmd_job->argc = argc;
-      slurmd_job->argv = xmalloc (sizeof(char*) * (slurmd_job->argc + 1));
-      for (count = 0; count < slurmd_job->argc; count ++)
-        slurmd_job->argv[count] = strdup( argv[count]);
+	    } else if (slurmd_job) {
+	      slurmd_job->argc = argc;
+	      slurmd_job->argv = xmalloc (sizeof(char*) * (slurmd_job->argc + 1));
+	      for (count = 0; count < slurmd_job->argc; count ++)
+		slurmd_job->argv[count] = strdup( argv[count]);
 
-		} else {
-			rc=ESPANK_ERROR;
-		}
+			} else {
+				rc=ESPANK_ERROR;
+			}
 
-    task = spank->task;
-    task->argc = argc;
-    task->argv = xmalloc (sizeof(char*) * (task->argc + 1));
-    for (count = 0; count < task->argc; count ++)
-      task->argv[count] =strdup(argv[count]);
+	    task = spank->task;
+	    task->argc = argc;
+	    task->argv = xmalloc (sizeof(char*) * (task->argc + 1));
+	    for (count = 0; count < task->argc; count ++)
+	      task->argv[count] =strdup(argv[count]);
 
 
-    task->argv[task->argc] = NULL;
-    break;
+	    task->argv[task->argc] = NULL;
+	    break;
+      case S_JOB_CHECKPOINTABLE:
+            p2int = va_arg(vargs, int *);
+            if (p2int == 0)
+                    rc = slurm_checkpoint_enable(slurmd_job->jobid, slurmd_job->stepid);
+            else
+                    rc = slurm_checkpoint_disable(slurmd_job->jobid, slurmd_job->stepid);
+            break;
+
   default:
     rc = ESPANK_ERROR;
     break;

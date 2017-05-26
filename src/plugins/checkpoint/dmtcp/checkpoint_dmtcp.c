@@ -165,12 +165,14 @@ const uint32_t plugin_version	= SLURM_VERSION_NUMBER;
  */
 extern int init ( void )
 {
+//	info("checkpoint/dmtcp init");
 	return SLURM_SUCCESS;
 }
 
 
 extern int fini ( void )
 {
+//	info("checkpoint/dmtcp fini");
 	return SLURM_SUCCESS;
 }
 
@@ -457,8 +459,6 @@ extern int slurm_ckpt_signal_tasks(stepd_step_rec_t *job, char *image_dir)
 			sprintf(context_file, "%s/%d/task.%d.ckpt",
 				image_dir, job->jobid, job->task[i]->gtid);
 		}
-		error("context_file set to  %s", context_file);
-
 		sprintf(pid, "%u", (unsigned int)job->task[i]->pid);
 
 		if (pipe(&fd[i*2]) < 0) {
@@ -540,7 +540,7 @@ extern int slurm_ckpt_signal_tasks(stepd_step_rec_t *job, char *image_dir)
 extern int slurm_ckpt_restart_task(stepd_step_rec_t *job,
 				   char *image_dir, int gtid)
 {
-	char *argv[11];
+	char *argv[10];
 
 	char context_file[MAX_PATH_LEN];
 	/* jobid and stepid must NOT be spelled here,
@@ -558,13 +558,10 @@ extern int slurm_ckpt_restart_task(stepd_step_rec_t *job,
 	argv[3] = strdup(getenvp(job->env, "SLURM_JOB_NODELIST"));
 	argv[4] = strdup(getenvp(job->env, "SLURM_TASKS_PER_NODE"));
 	argv[5] = strdup(getenvp(job->env, "SLURM_JOB_CPUS_PER_NODE"));
-	argv[6] = strdup(getenvp(job->env, "SLURM_LOCALID"));
-	//argv[7] = strdup(getenvp(job->env, "SLURM_SRUN_COMM_HOST"));
-	argv[7] = strdup("NONE");
-	argv[8] = strdup(getenvp(job->env, "SLURM_NNODES"));
-	argv[9] = strdup(getenvp(job->env, "TMPDIR"));
-
-	argv[10] = NULL;
+	argv[6] = strdup("NONE");
+	argv[7] = strdup(getenvp(job->env, "SLURM_NNODES"));
+	argv[8] = strdup(getenvp(job->env, "TMPDIR"));
+	argv[9] = NULL;
 
 	execv(argv[0], argv);
 

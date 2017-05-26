@@ -6,16 +6,16 @@ AM_CXXFLAGS = -fexceptions
 
 PLUGIN_FLAGS = -module -avoid-version --export-dynamic
 
-sched_migration_LDADD = $(top_builddir)/src/plugins/slurmctld/job_migration/libjob_migration.la $(DL_LIBS)
+libsched_migration_LDADD = $(top_builddir)/src/plugins/slurmctld/job_migration/libjob_migration.la $(DL_LIBS)
 
-pkglib_LTLIBRARIES = sched_migration.la
+pkglib_LTLIBRARIES = libsched_migration.la
 
-sched_migration_la_SOURCES = migration_wrapper.c	\
+libsched_migration_la_SOURCES = migration_wrapper.c	\
 			migration.c	\
 			migration.h
 
-sched_migration_la_LDFLAGS = $(SO_LDFLAGS) $(PLUGIN_FLAGS)
+libsched_migration_la_LDFLAGS = $(SO_LDFLAGS) $(PLUGIN_FLAGS)
 
 force:
-$(sched_migration_LDADD) : force
+$(libsched_migration_LDADD) : force
 	 @cd `dirname $@` && $(MAKE) `basename $@`

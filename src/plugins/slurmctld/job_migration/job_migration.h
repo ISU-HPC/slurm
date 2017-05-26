@@ -34,7 +34,7 @@ enum migration_err {
     EMIGRATION_ERROR       = 1, /* Generic error.                             */
     EMIGRATION_BAD_ARG     = 2, /* Bad argument.                              */
     EMIGRATION_NOT_JOB	   = 3, /* Job does not exist.                        */
-		EMIGRATION_JOB_ERROR	 = 4, /* Error on job																*/
+    EMIGRATION_JOB_ERROR   = 4, /* Error on job                               */
     EMIGRATION_DEST_ERROR  = 5, /* Error on destination nodes                 */
 };
 

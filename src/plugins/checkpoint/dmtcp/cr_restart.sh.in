@@ -1,50 +1,48 @@
-#!/bin/bash
-source /etc/profile
+#!/bin/sh
 
-startDMTCP(){
-  folder=$1
-  firstTask=1
-  cd $folder
+DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
+source $DIR/cr_common.sh
 
-  lockdir=$folder"/$SLURM_JOB_ID.mutprueba.lock"
+export SLURM_CHECKPOINT_IMAGE_DIR=$1
+export SLURM_JOB_ID=$2
+export SLURM_JOB_NODELIST=$3
+export SLURM_TASKS_PER_NODE=$4
+export SLURM_NTASKS_PER_NODE=`echo $4 | awk '{split($0, a, "("); print a[1]}'`
+export SLURM_JOB_CPUS_PER_NODE=$5
+export SLURM_SRUN_COMM_HOST=$6
+export SLURM_NNODES=$7
+export TMPDIR=$8
 
-  if mkdir "$lockdir"  &> /dev/null
-  then
-    dmtcp_coordinator="$folder/dmtcp_coordinator"
+#here we will store information about checkpoint
+checkpoint_info=$SLURM_CHECKPOINT_IMAGE_DIR"/checkpoint_info."$SLURM_JOB_ID
+checkpoint_folder=$SLURM_CHECKPOINT_IMAGE_DIR"/"$SLURM_JOB_ID
 
-    #if this is the first node, start coordinator
-    if [ ! -f $dmtcp_coordinator ]; then
-
-      #tell the rest of nodes where the coordinator is
-      echo "export DMTCP_COORD_HOST=`hostname`" >> $dmtcp_coordinator
-      echo "export DMTCP_COORD_PORT=7779" >> $dmtcp_coordinator
-
-      @DMTCP_HOME@/dmtcp_coordinator --daemon --exit-on-last
-      source $dmtcp_coordinator
-      firstTask=0
-     fi
-
-     # remove directory when script finishes
-     rm -rf "$lockdir"
-     trap 'rm $dmtcp_coordinator' KILL
-  fi
-  return $firstTask
-}
-
-SLURM_CHECKPOINT_IMAGE_DIR=$1
-SLURM_JOB_ID=$2
-folder=$SLURM_CHECKPOINT_IMAGE_DIR/$SLURM_JOB_ID
-
-#The basic idea is that a task starts controller and runs the MPI application. The rest do nothing
-if  ! startDMTCP $folder ;
+#see who is the first task
+if ! semaphore $SLURM_CHECKPOINT_IMAGE_DIR $SLURM_JOB_ID;
 then
+  #this is not the first task
   exit 0
 fi
 
-#elegant solution, somewhat buggy
-#/bin/bash $folder/dmtcp_restart_script.sh
+startDMTCPCoordinator $checkpoint_folder $checkpoint_info
+
+source  $checkpoint_info
+
+#checkpoint info is created in startDMTCPCoordinator function. It is different that in "cr_start", where it is created in the "sempahore" function
+trap 'rm -rf $checkpoint_info' SIGHUP SIGINT SIGTERM EXIT
+
+#restart job
+cd $checkpoint_folder
+source  $checkpoint_folder/app_type
+if [ "$APP_TYPE" == "SERIAL" ] 
+then
+	@DMTCP_HOME@/dmtcp_restart *dmtcp
+elif [ "$APP_TYPE" == "MPI" ] 
+then
+	/bin/sh $checkpoint_folder/dmtcp_restart_script.sh
+fi
 
 
-#not so elegant but robust
-cd $folder
-@DMTCP_HOME@/dmtcp_restart ./ckpt_*
+#clean tmp files after a successful execution
+rm -rf $SLURM_CHECKPOINT_IMAGE_DIR/$SLURM_JOB_ID.ckpt
+rm -rf $checkpoint_folder

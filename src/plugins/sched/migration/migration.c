@@ -865,7 +865,8 @@ static void *_attempt_migration(void *dummyArg)
 
 		//debug ("MANUEL 8");
 	//extern int slurm_checkpoint_migrate (uint32_t job_id, uint32_t step_id,char *destination_nodes, char *excluded_nodes, int shared, int spread, bool test_only);
-	slurm_checkpoint_migrate (job_ptr->job_id, NO_VAL, "", "slurmDev[1,3,5,7,9]", NO_VAL, NO_VAL, false);
+       //slurm_checkpoint_migrate (uint32_t job_id, uint32_t step_id, char *destination_nodes, char *excluded_nodes, char *drain_node,  int shared, int spread, bool test_only)
+	slurm_checkpoint_migrate (job_ptr->job_id, NO_VAL, "", "slurmDev[1,3,5,7,9]", "", NO_VAL, NO_VAL, false);
 	debug ("End of migration for job %u", job_ptr->job_id);
 	debug ("We only migrate a job per call. Exiting...");
 	break;

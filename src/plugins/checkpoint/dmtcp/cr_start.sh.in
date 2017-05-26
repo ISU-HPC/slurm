@@ -1,126 +1,81 @@
 #!/bin/sh
 
+DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
+source $DIR/cr_common.sh
 
-###############################################################
-###############################################################
-####  VARIABLE INICIALIZATION #######
-
-
-source /etc/profile
-source  /etc/bashrc
-
-export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/home/localsoft/dmtcp/lib/dmtcp/:/home/localsoft/mvapich2/lib
-
-
-
-
-###############################################################
-###############################################################
-####  CONCURRENCY & INICIALIZATION OF DMTCP COORDINATOR #######
+#########GENERAL INFORMATION
+#SLURM_CHECKPOINT_IMAGE_DIR: path where slurm stores checkpoint images, as defined in slurm.conf . It contains many checkpoint_folder and some other stuff
+#SLURM_JOB_ID: the Id of the slurm job. Note that in this script it exists as environment var, but in other ones it comes as an input variable
+#checkpoint_folder: folder where we want to store the checkpoint information.
+#checkpoint_library: library employed to perform a given chekcpoint
+#checkpoint_info: file containing checkpoint information during its execution. It is also employed for concurency
+#   in case of DMTCP, port and host. It is stored in  SLURM_CHECKPOINT_IMAGE_DIR
+#  this file is called SLURM_CHECKPOINT_IMAGE_DIR/checkpoint_info.$SLURM_JOB_ID
+#
 
 
-startDMTCP(){
-  folder=$1
-  mkdir -p $folder
-  cd $folder
+#############################################
+##############################################
+####  START JOB WITH CHECKPOINT SUPPORT ######
 
-  firstTask=1
+startDMTCPCheckpointedJob(){
+  startDMTCPCoordinator $checkpoint_folder $checkpoint_info
+  source $checkpoint_info
 
-  lockdir=$folder"/$SLURM_JOB_ID.mutprueba.lock"
+  export DMTCP_CHECKPOINT_DIR=$checkpoint_folder
 
-  if mkdir "$lockdir"  &> /dev/null
-  then
-    dmtcp_coordinator="$folder/dmtcp_coordinator"
+  grep -E '^[ ]*(mpirun|srun|mpiexec)' $1 > /dev/null 2>&1
 
-    #if this is the first node, start coordinator
-    if [ ! -f $dmtcp_coordinator ]; then
+  #Serial application
+  if [ $? -ne 0 ]; then
+    echo "APP_TYPE=SERIAL" >> $checkpoint_info
+    @DMTCP_HOME@/dmtcp_launch --ib --rm $@
+  #MPI application
+  else
+    #Permision fix
+    chmod 700 $1
 
-      #tell the rest of nodes where the coordinator is
-      echo "export DMTCP_COORD_HOST=`hostname`" >> $dmtcp_coordinator
-      echo "export DMTCP_COORD_PORT=7779" >> $dmtcp_coordinator
+    grep -e 'mpirun \+-' -e 'mpiexec \+-' -e 'srun \+-' $1 > /dev/null 2>&1 && \
+      echo "Currently no options to mpirun/mpiexec/srun are supported,
+    please use environment variables instead."
+    grep -e 'mpirun \+-' -e 'mpiexec \+-' -e 'srun \+-' $1 > /dev/null 2>&1 && exit 1
 
-      @DMTCP_HOME@/dmtcp_coordinator --daemon --exit-on-last
-      source $dmtcp_coordinator
-      firstTask=0
-     fi
+	#note that sed uses ! as separator because DMTCP_HOME contains "/"
+    sed -E 's!^[ ]*(mpirun|srun|mpiexec)!srun @DMTCP_HOME@/dmtcp_launch --ib --rm!g' $1 > $SLURM_CHECKPOINT_IMAGE_DIR/tmp.sh.$SLURM_JOB_ID
 
-     # remove directory when script finishes
-     rm -rf "$lockdir"
-     trap 'rm $dmtcp_coordinator' KILL
+    #clean tmp files after succesful execution
+    echo "rm -rf $checkpoint_folder" >> $SLURM_CHECKPOINT_IMAGE_DIR/tmp.sh.$SLURM_JOB_ID
+    echo "rm -rf $SLURM_CHECKPOINT_IMAGE_DIR/$SLURM_JOB_ID.ckpt" >> $SLURM_CHECKPOINT_IMAGE_DIR/tmp.sh.$SLURM_JOB_ID
+
+    cat $SLURM_CHECKPOINT_IMAGE_DIR/tmp.sh.$SLURM_JOB_ID > $1
+    rm $SLURM_CHECKPOINT_IMAGE_DIR/tmp.sh.$SLURM_JOB_ID
+    echo "APP_TYPE=MPI" >> $checkpoint_info
+    $@
   fi
-  cd -
-  return $firstTask
+
+  return 0
 }
 
 
-folder=$SLURM_CHECKPOINT_IMAGE_DIR/$SLURM_JOB_ID
+#############################################
+##############################################
+####  MAIN: we start here ######
 
-#The basic idea is that a task starts controller and runs the MPI application. The rest do nothing
-if  ! startDMTCP  $folder ;
+#only input parameter: script to be executed
+
+#here we will store information about checkpoint
+checkpoint_info=$SLURM_CHECKPOINT_IMAGE_DIR"/checkpoint_info."$SLURM_JOB_ID
+checkpoint_folder=$SLURM_CHECKPOINT_IMAGE_DIR"/"$SLURM_JOB_ID
+
+#see who is the first task
+if ! semaphore $SLURM_CHECKPOINT_IMAGE_DIR $SLURM_JOB_ID;
 then
-  echo "lockdir $SLURM_CHECKPOINT_IMAGE_DIR/$SLURM_JOB_ID If you are debugging, yo probably want to delete it"
+  #this is not the first task
   exit 0
 fi
+#clean concurrency file at the end of execution
+trap 'rm -rf $checkpoint_info' SIGHUP SIGINT SIGTERM EXIT
 
-
-#############################
-#############################
-####  JOB EXECUTION   #######
-
-
-# This is what should be executed the Slurm + DMTCP + MPI integration worked.
-# DMTCP executes the script specified as input parameter. Note that slurm inputs are allways scripts, not applications.
-@DMTCP_HOME@/dmtcp_launch --ckptdir $folder --ib $@
-
-
-#############################
-#############################
-####  DEBUGGING CODE  #######
-
-
-#This makes su sure that the environment is correct and all the required libraries and paths exist.
-#pwd
-#env
-#whoami
-
-##################
-#### Some tests testing for partial things.
-
-#echo "First test: Slurm executing an MPI task without DMTCP"
-#works as expected
-#mpiexec ./helloWorldMPI
-
-#echo "Second test: Slurm executing DMTCP on a serial task, without MPI"
-#works as expected
-#dmtcp_launch ./helloWorld
-
-#echo "Third test: DMTCP + MPI. mpiexec not called"
-#works as expected
-# (although it does not make much sense)
-#dmtcp_launch --ib  ./helloWorldMPI
-
-#echo "sixth test: mpirun_rsh"
-#suceeds
-#mpirun_rsh -np 2 acme11 acme13 /home/dmtcpuser/manuelTests/helloWorldMPI
-
-#echo "seventh test: mpirun_rsh + DMTCP"
-#suceeds, but has no stdout
-#dmtcp_launch --ib mpirun_rsh -np 2 acme11 acme13 /home/dmtcpuser/manuelTest/helloWorldMPI
-
-
-
-##################
-#### Some tests testing DMTCP+MPI+Slurm.
-
-
-#echo "forth test: DMTCP + MPI. mpiexec called"
-#fails
-#dmtcp_launch --ib mpiexec ./helloWorldMPI
-
-#echo "fifth test: DMTCP + MPI + Resource Manager plugin"
-#fails
-#dmtcp_launch --ib --rm mpiexec ./helloWorldMPI
-
-
-
-exit $?
+#start job with DMTCP support
+startDMTCPCheckpointedJob $@
+exit 0

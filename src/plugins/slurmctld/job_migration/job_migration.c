@@ -200,11 +200,11 @@ extern int _drain_node(char *destination_nodes, char *excluded_nodes, char *drai
 
 	node_info_msg_t *node_info;
 	if (slurm_load_node_single(&node_info, drain_node, 0) != 0) {
-		slurm_perror ("Could not get info from node %s\n", drain_node);
+		slurm_perror ("Could not get info from node");
 		return (EMIGRATION_ERROR);
 	}
 	if (node_info->record_count ==0) {
-		slurm_perror ("No nodes with id %s were found\n", drain_node);
+		slurm_perror ("No nodes with that id were found");
 		return (EMIGRATION_ERROR);
 	}
 
