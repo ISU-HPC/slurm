@@ -24,12 +24,10 @@ then
   exit 0
 fi
 
-startDMTCPCoordinator $checkpoint_folder $checkpoint_info
+source  $checkpoint_folder/app_type
+startDMTCPCoordinator $checkpoint_folder $checkpoint_info $APP_TYPE
 
 source  $checkpoint_info
-#echo "DMTCP_COORD_HOST=$DMTCP_COORD_HOST"
-#echo "DMTCP_COORD_PORT=$DMTCP_COORD_PORT"
-
 
 #checkpoint info is created in startDMTCPCoordinator function. It is different that in "cr_start", where it is created in the "sempahore" function
 trap 'rm -rf $checkpoint_info' SIGHUP SIGINT SIGTERM EXIT
@@ -45,7 +43,4 @@ then
 	/bin/sh $checkpoint_folder/dmtcp_restart_script.sh
 fi
 
-
-#clean tmp files after a successful execution
-rm -rf $SLURM_CHECKPOINT_IMAGE_DIR/$SLURM_JOB_ID.ckpt
-rm -rf $checkpoint_folder
+exit 0

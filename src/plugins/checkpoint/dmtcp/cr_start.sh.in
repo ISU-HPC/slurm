@@ -19,7 +19,15 @@ source $DIR/cr_common.sh
 ####  START JOB WITH CHECKPOINT SUPPORT ######
 
 startDMTCPCheckpointedJob(){
-  startDMTCPCoordinator $checkpoint_folder $checkpoint_info
+
+ grep -E '^[ ]*(mpirun|srun|mpiexec)' $1 > /dev/null 2>&1
+ if [ $? -ne 0 ]; then
+   APP_TYPE="SERIAL"
+ else
+   APP_TYPE="MPI"
+ fi
+
+  startDMTCPCoordinator $checkpoint_folder $checkpoint_info $APP_TYPE
   source $checkpoint_info
 
   export DMTCP_CHECKPOINT_DIR=$checkpoint_folder
@@ -28,7 +36,6 @@ startDMTCPCheckpointedJob(){
 
   #Serial application
   if [ $? -ne 0 ]; then
-    echo "APP_TYPE=SERIAL" >> $checkpoint_info
     @DMTCP_HOME@/dmtcp_launch --ib --rm $@
   #MPI application
   else
@@ -49,7 +56,6 @@ startDMTCPCheckpointedJob(){
 
     cat $SLURM_CHECKPOINT_IMAGE_DIR/tmp.sh.$SLURM_JOB_ID > $1
     rm $SLURM_CHECKPOINT_IMAGE_DIR/tmp.sh.$SLURM_JOB_ID
-    echo "APP_TYPE=MPI" >> $checkpoint_info
     $@
   fi
 

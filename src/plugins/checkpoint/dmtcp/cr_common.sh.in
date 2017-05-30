@@ -30,6 +30,7 @@ semaphore(){
 startDMTCPCoordinator(){
   checkpoint_folder=$1
   checkpoint_info=$2
+  APP_TYPE=$3
 
   if [ -z "$DMTCP_COORD_PORT" ]; then
     #echo "DMTPC_COORD_PORT was not present, setting the default value of 7779"
@@ -50,5 +51,5 @@ startDMTCPCoordinator(){
     DMTCP_COORD_PORT=$(($DMTCP_COORD_PORT + 1))
     export DMTCP_COORD_PORT=$DMTCP_COORD_PORT
   done
-
+  echo "export APP_TYPE=$APP_TYPE" >> $checkpoint_info
 }
