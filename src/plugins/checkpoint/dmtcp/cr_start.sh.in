@@ -50,7 +50,6 @@ startDMTCPCheckpointedJob(){
 
 	#note that sed uses ! as separator because DMTCP_HOME contains "/"
     sed -E 's!^[ ]*(mpirun|srun|mpiexec)!srun @DMTCP_HOME@/dmtcp_launch --ib --rm!g' $1 >  $tmpFile
-
     cat $tmpFile > $1
     rm $tmpFile
     $@
