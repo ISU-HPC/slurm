@@ -36,11 +36,12 @@ startDMTCPCheckpointedJob(){
 
   #Serial application
   if [ $? -ne 0 ]; then
-    @DMTCP_HOME@/dmtcp_launch --ib --rm $@
+    @DMTCP_HOME@/bin/dmtcp_launch --ib --rm $@
   #MPI application
   else
     #Permision fix
     chmod 700 $1
+    tmpFile=$SLURM_CHECKPOINT_IMAGE_DIR/tmp.sh.$SLURM_JOB_ID
 
     grep -e 'mpirun \+-' -e 'mpiexec \+-' -e 'srun \+-' $1 > /dev/null 2>&1 && \
       echo "Currently no options to mpirun/mpiexec/srun are supported,
@@ -48,18 +49,14 @@ startDMTCPCheckpointedJob(){
     grep -e 'mpirun \+-' -e 'mpiexec \+-' -e 'srun \+-' $1 > /dev/null 2>&1 && exit 1
 
 	#note that sed uses ! as separator because DMTCP_HOME contains "/"
-    sed -E 's!^[ ]*(mpirun|srun|mpiexec)!srun @DMTCP_HOME@/dmtcp_launch --ib --rm!g' $1 > $SLURM_CHECKPOINT_IMAGE_DIR/tmp.sh.$SLURM_JOB_ID
+    sed -E 's!^[ ]*(mpirun|srun|mpiexec)!srun @DMTCP_HOME@/bin/dmtcp_launch --ib --rm!g' $1 >  $tmpFile
 
-    #clean tmp files after succesful execution
-    echo "rm -rf $checkpoint_folder" >> $SLURM_CHECKPOINT_IMAGE_DIR/tmp.sh.$SLURM_JOB_ID
-    echo "rm -rf $SLURM_CHECKPOINT_IMAGE_DIR/$SLURM_JOB_ID.ckpt" >> $SLURM_CHECKPOINT_IMAGE_DIR/tmp.sh.$SLURM_JOB_ID
-
-    cat $SLURM_CHECKPOINT_IMAGE_DIR/tmp.sh.$SLURM_JOB_ID > $1
-    rm $SLURM_CHECKPOINT_IMAGE_DIR/tmp.sh.$SLURM_JOB_ID
+    cat $tmpFile > $1
+    rm $tmpFile
     $@
   fi
 
-  return 0
+  return $?
 }
 
 
@@ -82,6 +79,15 @@ fi
 #clean concurrency file at the end of execution
 trap 'rm -rf $checkpoint_info' SIGHUP SIGINT SIGTERM EXIT
 
+#scancel (and svacate) first send SIGTERM, and if jobs have not terminated send a SIGKILL
+#in this case we want to cancel the execution of this script, so checkpoint files are not deleted
+trap 'exit 0' SIGTERM SIGKILL
+
 #start job with DMTCP support
 startDMTCPCheckpointedJob $@
+
+#remove files after execution, if job was NOT cancelled.
+#note that if job was cancelled, these files do not exist
+rm -rf $checkpoint_folder
+rm -f $SLURM_CHECKPOINT_IMAGE_DIR/$SLURM_JOB_ID".ckpt"
 exit 0
