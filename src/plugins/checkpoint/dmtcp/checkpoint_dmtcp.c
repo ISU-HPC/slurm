@@ -111,6 +111,9 @@ static void _send_sig(uint32_t job_id, uint32_t step_id, uint16_t signal,
 		      char *nodelist);
 static void *_ckpt_agent_thr(void *arg);
 static void _ckpt_req_free(void *ptr);
+
+//static char *_read_job_ckpt_file(char *ckpt_file, int *size_ptr);
+
 /* TODO maybe this can be removed
 static int _on_ckpt_complete(uint32_t group_id, uint32_t user_id,
 			     uint32_t job_id, uint32_t step_id,
@@ -453,12 +456,18 @@ extern int slurm_ckpt_signal_tasks(stepd_step_rec_t *job, char *image_dir)
 	}
 
 	for (i = 0; i < job->node_tasks; i ++) {
+
+		/*
 		if (job->batch) {
 			sprintf(context_file, "%s/%d.ckpt", image_dir, job->jobid);
 		} else {
 			sprintf(context_file, "%s/%d/task.%d.ckpt",
 				image_dir, job->jobid, job->task[i]->gtid);
 		}
+
+		*/
+
+
 		sprintf(pid, "%u", (unsigned int)job->task[i]->pid);
 
 		if (pipe(&fd[i*2]) < 0) {
@@ -542,14 +551,66 @@ extern int slurm_ckpt_restart_task(stepd_step_rec_t *job,
 {
 	char *argv[10];
 
-	char context_file[MAX_PATH_LEN];
 	/* jobid and stepid must NOT be spelled here,
 	 * since it is a new job/step */
+	 /*
+  char context_file[MAX_PATH_LEN];
 	if (job->batch) {
 		sprintf(context_file, "%s/script.ckpt", image_dir);
 	} else {
 		sprintf(context_file, "%s/task.%d.ckpt", image_dir, gtid);
 	}
+*/
+
+//LIMPIAR
+/*
+char  *ckpt_file, *data, *ver_str = NULL;
+char *alloc_nodes = NULL;
+int data_size = 0;
+Buf buffer;
+uint32_t tmp_uint32;
+slurm_msg_t msg, resp_msg;
+job_desc_msg_t *job_desc = NULL;
+uint16_t ckpt_version = (uint16_t) NO_VAL;
+
+
+
+	ckpt_file = xstrdup(image_dir); //TODO this is a hack. It crashes if image_dir ends with / . Ideally, parse image_dir and remove last item
+	xstrfmtcat(ckpt_file, ".ckpt");
+
+	error ("Trying to open checkpoint file: %s", ckpt_file);
+	data = _read_job_ckpt_file(ckpt_file, &data_size);
+	xfree(ckpt_file);
+
+
+	buffer = create_buf(data, data_size);
+
+	safe_unpackstr_xmalloc(&ver_str, &tmp_uint32, buffer);
+	debug3("Version string in job_ckpt header is %s", ver_str);
+	safe_unpack16(&ckpt_version, buffer);
+
+	safe_unpackstr_xmalloc(&image_dir, &tmp_uint32, buffer);
+	safe_unpackstr_xmalloc(&alloc_nodes, &tmp_uint32, buffer);
+	msg.msg_type = REQUEST_SUBMIT_BATCH_JOB;
+	msg.protocol_version = ckpt_version;
+	if (unpack_msg(&msg, buffer) != SLURM_SUCCESS)
+		error ("Error en checkpoint_dmtcp, llamando a unpack_msg");
+
+	job_desc = msg.data;
+	char* script = job_desc->script;
+	error ("SCRIPT: %s", script);
+	xstrfmtcat(script, "echo HOLA");
+	error ("NEW SCRIPT: %s", script);
+
+	slurm_init_job_desc_msg(job_desc);
+	job_desc->job_id = job->jobid;
+
+job_array_resp_msg_t *resp;
+	if (slurm_update_job2(job_desc, &resp) != 0) {
+		error("Error updating job");
+		}
+
+*/
 
 	argv[0] = strdup(cr_restart_path);
 	argv[1] = strdup(job->ckpt_dir);
@@ -567,6 +628,18 @@ extern int slurm_ckpt_restart_task(stepd_step_rec_t *job,
 
 	error("execv failure: %m");
 	return SLURM_ERROR;
+/*
+
+   unpack_error:
+  	free_buf(buffer);
+  	xfree(ver_str);
+  	xfree(image_dir);
+  	xfree(alloc_nodes);
+  	xfree(ckpt_file);
+
+   reply:
+  	return SLURM_ERROR;
+*/
 }
 
 
@@ -717,3 +790,49 @@ static void _ckpt_req_free(void *ptr)
 		xfree(req);
 	}
 }
+
+
+/*
+static char *
+_read_job_ckpt_file(char *ckpt_file, int *size_ptr)
+{
+	int ckpt_fd, error_code = 0;
+	int data_allocated, data_read, data_size = 0;
+	char *data = NULL;
+
+	ckpt_fd = open(ckpt_file, O_RDONLY);
+	if (ckpt_fd < 0) {
+		info("No job ckpt file (%s) to read", ckpt_file);
+		error_code = ENOENT;
+	} else {
+		data_allocated = BUF_SIZE;
+		data = xmalloc(data_allocated);
+		while (1) {
+			data_read = read(ckpt_fd, &data[data_size],
+					 BUF_SIZE);
+			if (data_read < 0) {
+				if (errno == EINTR)
+					continue;
+				else {
+					error("Read error on %s: %m",
+					      ckpt_file);
+					error_code = errno;
+					break;
+				}
+			} else if (data_read == 0)	// eof
+				break;
+			data_size      += data_read;
+			data_allocated += data_read;
+			xrealloc(data, data_allocated);
+		}
+		close(ckpt_fd);
+	}
+
+	if (error_code) {
+		xfree(data);
+		return NULL;
+	}
+	*size_ptr = data_size;
+	return data;
+}
+*/

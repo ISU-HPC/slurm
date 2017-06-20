@@ -32,15 +32,22 @@ source  $checkpoint_info
 #checkpoint info is created in startDMTCPCoordinator function. It is different that in "cr_start", where it is created in the "sempahore" function
 trap 'rm -rf $checkpoint_info' SIGHUP SIGINT SIGTERM EXIT
 
+#scancel (and svacate) first send SIGTERM, and if jobs have not terminated send a SIGKILL
+#in this case we want to cancel the execution of this script, so checkpoint files are not deleted
+trap 'exit 0' SIGTERM SIGKILL
+
 #restart job
 cd $checkpoint_folder
 source  $checkpoint_folder/app_type
-if [ "$APP_TYPE" == "SERIAL" ] 
+if [ "$APP_TYPE" == "SERIAL" ]
 then
 	@DMTCP_HOME@/dmtcp_restart *dmtcp
-elif [ "$APP_TYPE" == "MPI" ] 
+elif [ "$APP_TYPE" == "MPI" ]
 then
 	/bin/sh $checkpoint_folder/dmtcp_restart_script.sh
 fi
+#remove files after execution, if job was NOT cancelled.
+rm -rf $checkpoint_folder
+rm -f $SLURM_CHECKPOINT_IMAGE_DIR/$SLURM_JOB_ID".ckpt"
 
 exit 0
