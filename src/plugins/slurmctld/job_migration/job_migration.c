@@ -15,7 +15,7 @@
 #include "src/common/slurm_protocol_api.h"
 #include "src/plugins/slurmctld/job_migration/job_migration.h"
 
-char** str_split(char* a_str, const char a_delim);
+char** _str_split(char* a_str, const char a_delim);
 static int _print_existing_jobs (void);
 static int _job_info_to_job_desc (job_info_t job_info, job_desc_msg_t *job_desc_msg);
 extern int _migrate_job(uint32_t job_id, uint32_t step_id, char *destination_nodes, char *excluded_nodes, int shared, int spread, bool test_only);
@@ -24,7 +24,7 @@ extern int _drain_node( char *destination_nodes, char *excluded_nodes, char *dra
 extern int slurm_checkpoint_migrate (uint32_t job_id, uint32_t step_id, char *destination_nodes, char *excluded_nodes, char *drain_node,  int shared, int spread, bool test_only)
 {
 
-	printf("\n\n\njob_id=%u,\nstep_id=%u,\ndestination_nodes=%s,\nexcluded_nodes=%s, \ndrain_node=%s,\nshared=%u,\nspread=%u\n\n\n",job_id, step_id, destination_nodes, excluded_nodes, drain_node, shared, spread);
+	// printf("\n\n\njob_id=%u,\nstep_id=%u,\ndestination_nodes=%s,\nexcluded_nodes=%s, \ndrain_node=%s,\nshared=%u,\nspread=%u\n\n\n",job_id, step_id, destination_nodes, excluded_nodes, drain_node, shared, spread);
 	if (drain_node[0] == '\0' )
 		return _migrate_job(job_id, step_id, destination_nodes, excluded_nodes, shared, spread, test_only);
 
@@ -45,6 +45,7 @@ extern int slurm_checkpoint_migrate (uint32_t job_id, uint32_t step_id, char *de
 
 
 extern int _migrate_job(uint32_t job_id, uint32_t step_id, char *destination_nodes, char *excluded_nodes, int shared, int spread, bool test_only){
+		//printf("\n\n\njob_id=%u,\nstep_id=%u,\ndestination_nodes=%s,\nexcluded_nodes=%s, \nshared=%u,\nspread=%u\n\n\n",job_id, step_id, destination_nodes, excluded_nodes, shared, spread);
 
 		int error = 0;
 
@@ -59,12 +60,6 @@ extern int _migrate_job(uint32_t job_id, uint32_t step_id, char *destination_nod
 			return (EMIGRATION_NOT_JOB);
 		}
 
-		slurm_job_info_t job_info = job_ptr->job_array[job_ptr->record_count-1];
-		if (job_info.job_state  != JOB_RUNNING) {
-			slurm_perror ("Jobs must be RUNNING to be migrated");
-			return (EMIGRATION_JOB_ERROR);
-		}
-
 		time_t start_time;
 
 		//TODO aqui el segundo parametro, NO_VAl, deberia ser step_id. Por algun motivo casca asi que pongo esto.
@@ -72,6 +67,13 @@ extern int _migrate_job(uint32_t job_id, uint32_t step_id, char *destination_nod
 			slurm_perror ("Job is not checkpointable");
 			return(EMIGRATION_JOB_ERROR);
 		}
+
+		slurm_job_info_t job_info = job_ptr->job_array[job_ptr->record_count-1];
+		if (job_info.job_state  != JOB_RUNNING) {
+			slurm_perror ("Jobs must be RUNNING to be migrated");
+			return (EMIGRATION_JOB_ERROR);
+		}
+
 
 		if ((job_info.req_nodes  != '\0') && (destination_nodes[0] != '\0' )){
 				slurm_perror ("User specified a different destination resource on original job submission");
@@ -195,10 +197,18 @@ extern int _migrate_job(uint32_t job_id, uint32_t step_id, char *destination_nod
 
 extern int _drain_node(char *destination_nodes, char *excluded_nodes, char *drain_node, int shared, int spread, bool test_only){
 
+	job_info_msg_t *job_ptr = NULL;
+	node_info_msg_t *node_info;
+	slurm_job_info_t job_info;
+	update_node_msg_t node_msg;
+	slurm_job_info_t *jobs_running_in_node;
+	int i, error, cont = 0;
+	hostlist_t hl;
+	uint32_t old_node_state;
+
+
 	printf ("DRAIN NODE\n");
 
-
-	node_info_msg_t *node_info;
 	if (slurm_load_node_single(&node_info, drain_node, 0) != 0) {
 		slurm_perror ("Could not get info from node");
 		return (EMIGRATION_ERROR);
@@ -208,71 +218,92 @@ extern int _drain_node(char *destination_nodes, char *excluded_nodes, char *drai
 		return (EMIGRATION_ERROR);
 	}
 
-	//PRINT NODE INFO (JUST DEBUGGING)
-	FILE* pFileHandle;
-	// Saves the file in the EXE folder.
-	char Filename[] = "/root/out.txt";
-	// Open file for writing.
-	pFileHandle = fopen(Filename, "w");
-	slurm_print_node_info_msg(pFileHandle, node_info, 0);
+	//avoid race conditions by avoiding new jobs to be asigned to the node being drained
+	printf("Setting the node in DRAIN status\n");
+	slurm_init_update_node_msg(&node_msg);
+	node_msg.node_names=drain_node;
+	old_node_state = node_msg.node_state;
+	node_msg.node_state = NODE_STATE_DRAIN;
+	if (slurm_update_node(&node_msg)) {
+	 printf ("Could not set node %s into DRAIN status\n",drain_node );
+	 return (EMIGRATION_ERROR);
+	}
 
-	//HERE I MIGRATE ALL THE JOBS RUNNING ON THE NODE
-
-
-	job_info_msg_t *job_buffer_ptr = NULL;
-	job_resources_t *job_resrcs_ptr;
-	int numberOfCPUS, i = 0;
-	update_node_msg_t node_msg;
-
-  if (slurm_load_jobs(0, &job_buffer_ptr, SHOW_DETAIL) != 0) {
+	//load job info
+	if (slurm_load_jobs(0, &job_ptr, SHOW_DETAIL) != 0) {
 		 slurm_perror ("slurm_load_jobs error");
 		 return SLURM_ERROR;
 	 }
 
-	 for (i = 0; i < job_buffer_ptr->record_count; i++){
-		 numberOfCPUS = slurm_job_cpus_allocated_on_node(job_buffer_ptr->job_array[i].job_resrcs, drain_node);
-		 if (numberOfCPUS > 0){
-		 	printf ("number of cpus in node %s is %d\n", drain_node, numberOfCPUS);
-		 	//_migrate_job(job_buffer_ptr->job_array[i].job_id, 0, destination_nodes, excluded_nodes, shared, spread, true); //TODO: step_id?
+ 	//PRINT NODE INFO (JUST DEBUGGING)
+	printf ("NODE INFO\n");
+	slurm_print_node_info_msg(stdout, node_info, 0);
+	printf ("ALL JOBS INFO\n");
+	slurm_print_job_info_msg(stdout, job_ptr, 0);
 
-			if (_migrate_job(job_buffer_ptr->job_array[i].job_id, 0, destination_nodes, excluded_nodes, shared, spread, true) ==0){
-				printf ("job would have been migrated");
+
+	//Get all jobs running on that node
+	jobs_running_in_node = malloc (sizeof(slurm_job_info_t) * job_ptr->record_count);
+
+	cont = 0;
+	for (i = 0; i < job_ptr->record_count; i++){
+		job_info = job_ptr->job_array[i];
+//		printf ("Job %d is running on %s\n",job_ptr->job_array[i].job_id, job_ptr->job_array[i].nodes );
+		hl = hostlist_create(job_info.nodes);
+		if (hostlist_find(hl, drain_node) == -1)
+			continue;
+
+		if (_migrate_job(job_info.job_id, NO_VAL, destination_nodes, drain_node, shared, spread, true) !=0){
+			printf ("Job %d cannot be migrated, aborting.\n",job_info.job_id);
+			return SLURM_ERROR;
 			}
-			else{
-				printf ("Job could not be migrated, aborting. ");
-				return SLURM_ERROR;
-
-
-			}
-			}
-
-	 }
-
-	slurm_free_job_info_msg(job_buffer_ptr);
-
-
-	slurm_init_update_node_msg(&node_msg);
-	node_msg.node_names=drain_node;
-	printf ("Disabled DRAIN mode\n");
-
-	//node_msg.node_state = NODE_STATE_DRAIN;
-
-	if (slurm_update_node(&node_msg)) {
-		printf ("Could not set node %s into DRAIN status\n",drain_node );
-		return (EMIGRATION_ERROR);
+		printf ("We need to migrate job %d\n ",job_info.job_id);
+		jobs_running_in_node[cont] = job_info;
+		cont +=1;
 	}
-	printf ("Node should be in drain status now\n");
 
-	slurm_free_node_info_msg(node_info);
+
+	printf("Verification completed. Starting migration\n");
+
+	for (i = 0; i < cont; i++){
+		job_info = jobs_running_in_node[i];
+		printf ("Migrating job %d\n ", job_info.job_id);
+
+		 //Migration is a slow process, so we check task status just before migrating to avoid race conditions
+		 // (it may have finished while migrating the preivous one)
+		if ((error = slurm_load_job (&job_ptr, job_info.job_id, 0)) != SLURM_SUCCESS )
+			continue;
+
+		job_info = job_ptr->job_array[job_ptr->record_count-1];
+		if (job_info.job_state  != JOB_RUNNING) {
+			continue;
+
+		//after all verifications, migrate
+		if (_migrate_job(job_info.job_id, NO_VAL, destination_nodes, drain_node, shared, spread, false) !=0){
+		        printf ("Job %d could not be migrated, aborting node draining. Cancel it manually and try again.\n", job_info.job_id);
+						node_msg.node_state = old_node_state;
+						if (slurm_update_node(&node_msg)) {
+						 printf ("Could not set node %s into DRAIN status\n",drain_node );
+						 return (EMIGRATION_ERROR);
+						}
+						}
+
+
+		        return SLURM_ERROR;
+	  }
+	}
+
+	printf("All jobs migrated, exiting\n");
+	slurm_free_job_info_msg(job_ptr);
+
+
 
 	return (EMIGRATION_SUCCESS);
 
 }
 
 
-
-
-char** str_split(char* a_str, const char a_delim)
+char** _str_split(char* a_str, const char a_delim)
 {
     char** result    = 0;
     size_t count     = 0;
@@ -322,25 +353,25 @@ char** str_split(char* a_str, const char a_delim)
 
 static int _print_existing_jobs (void){
 
-	job_info_msg_t * job_buffer_ptr;
+	job_info_msg_t * job_ptr;
 	uint16_t show_flags = 0;
 	time_t update_time = 0;
 	int counter = 0;
 	FILE* fout = stdout;
 	printf ("PRINT EXSITING JOBS\n");
 	printf (	"loading jobs\n");
-	slurm_load_jobs (update_time, &job_buffer_ptr, show_flags);
+	slurm_load_jobs (update_time, &job_ptr, show_flags);
 
 	printf ("	jobs loaded\n");
-	printf ("	number of elements: %d \n", job_buffer_ptr->record_count);
+	printf ("	number of elements: %d \n", job_ptr->record_count);
 
-	while (counter < job_buffer_ptr->record_count){
+	while (counter < job_ptr->record_count){
 		printf ("	printing job %d\n", counter);
 
-		slurm_print_job_info (fout, &job_buffer_ptr->job_array[counter], 0);
+		slurm_print_job_info (fout, &job_ptr->job_array[counter], 0);
 		counter +=1;
 		}
-	slurm_free_job_info_msg(job_buffer_ptr);
+	slurm_free_job_info_msg(job_ptr);
 
 	return 0;
 
