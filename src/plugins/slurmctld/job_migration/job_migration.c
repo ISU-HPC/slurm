@@ -24,7 +24,7 @@ extern int _drain_node( char *destination_nodes, char *excluded_nodes, char *dra
 extern int slurm_checkpoint_migrate (uint32_t job_id, uint32_t step_id, char *destination_nodes, char *excluded_nodes, char *drain_node,  int shared, int spread, bool test_only)
 {
 
-	// printf("\n\n\njob_id=%u,\nstep_id=%u,\ndestination_nodes=%s,\nexcluded_nodes=%s, \ndrain_node=%s,\nshared=%u,\nspread=%u\n\n\n",job_id, step_id, destination_nodes, excluded_nodes, drain_node, shared, spread);
+	//printf("\n\n\njob_id=%u,\nstep_id=%u,\ndestination_nodes=%s,\nexcluded_nodes=%s, \ndrain_node=%s,\nshared=%u,\nspread=%u\n\n\n",job_id, step_id, destination_nodes, excluded_nodes, drain_node, shared, spread);
 	if (drain_node[0] == '\0' )
 		return _migrate_job(job_id, step_id, destination_nodes, excluded_nodes, shared, spread, test_only);
 
@@ -45,7 +45,7 @@ extern int slurm_checkpoint_migrate (uint32_t job_id, uint32_t step_id, char *de
 
 
 extern int _migrate_job(uint32_t job_id, uint32_t step_id, char *destination_nodes, char *excluded_nodes, int shared, int spread, bool test_only){
-		//printf("\n\n\njob_id=%u,\nstep_id=%u,\ndestination_nodes=%s,\nexcluded_nodes=%s, \nshared=%u,\nspread=%u\n\n\n",job_id, step_id, destination_nodes, excluded_nodes, shared, spread);
+		printf("\n\n\njob_id=%u,\nstep_id=%u,\ndestination_nodes=%s,\nexcluded_nodes=%s, \nshared=%u,\nspread=%u\n\n\n",job_id, step_id, destination_nodes, excluded_nodes, shared, spread);
 
 		int error = 0;
 
@@ -88,16 +88,30 @@ extern int _migrate_job(uint32_t job_id, uint32_t step_id, char *destination_nod
 			job_desc_msg_test.job_id = NO_VAL;
 			job_desc_msg_test.priority = NO_VAL - 1;
 
-			if (shared != (uint16_t)NO_VAL)
+			if ((job_info.shared ==1) || (shared != (uint16_t)NO_VAL))
 				job_desc_msg_test.shared = shared;
 
 			if (destination_nodes[0] != '\0' )
 				job_desc_msg_test.req_nodes = destination_nodes;
 
-		 if (excluded_nodes[0] != '\0' )
-				job_desc_msg_test.exc_nodes = excluded_nodes;
-			else
-				debug("Excluded nodes is empty");
+
+			if (excluded_nodes[0] != '\0' ){
+				int bufsize=999;
+				char* nodesToExclude;
+ 				if (job_info.exc_nodes != '\0'){
+					hostlist_t hl;
+					hl = hostlist_create(job_info.exc_nodes);
+					slurm_hostlist_push(hl, excluded_nodes);
+					slurm_hostlist_uniq(hl);
+					nodesToExclude = slurm_hostlist_ranged_string_malloc(hl);
+					//slurm_hostlist_ranged_string(hl, bufsize, nodesToExclude);
+					}
+				else {
+					nodesToExclude = excluded_nodes;
+				//	sprintf(nodesToExclude, "%s", excluded_nodes);
+					}
+				job_desc_msg_test.exc_nodes = nodesToExclude;
+			}
 
 			if (spread)
 				job_desc_msg_test.bitflags |= SPREAD_JOB;
