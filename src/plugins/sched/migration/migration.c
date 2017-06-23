@@ -144,12 +144,11 @@ static void _add_reservation(uint32_t start_time, uint32_t end_reserve,
 static void *_attempt_migration(void *dummyArg);
 extern List _build_running_job_queue();
 static bool _can_be_allocated(struct job_record *job_ptr);
-static bool _can_be_migrated(struct job_record *job_ptr);
+static bool _should_be_migrated(struct job_record *job_ptr);
 static int  _delta_tv(struct timeval *tv);
 static void _do_diag_stats(struct timeval *tv1, struct timeval *tv2);
 static void _load_config(void);
 static bool _many_pending_rpcs(void);
-static bool _migration_will_save_time(struct job_record *job_ptr);
 static bool _more_work(time_t last_migration_time);
 static uint32_t _my_sleep(int usec);
 static int  _num_feature_count(struct job_record *job_ptr, bool *has_xor);
@@ -687,28 +686,14 @@ extern void *migration_agent(void *args)
 }
 
 //here we decide if a given job can be migrated or not
-static bool _can_be_migrated(struct job_record *job_ptr){
+static bool _should_be_migrated(struct job_record *job_ptr){
+	printf ("Deciding what to do with job %d\n", job_ptr->job_id);
 	///job_ptr is declared in /slurm/src/slurmctld/slurmctld.h
 	if (job_ptr->details->req_nodes != NULL ) {
 		debug ("User has specified required nodes for job %u, not migrating this job", job_ptr->job_id);
 		return false;
 	}
 
-//as a proof of concept, we are migrating jobs from odd nodes to pair ones. if it is pair, we do NOT migrate it
-if (!strcmp(&job_ptr->nodes[strlen(job_ptr->nodes)-1], "2") ||
-		!strcmp(&job_ptr->nodes[strlen(job_ptr->nodes)-1], "4") ||
-		!strcmp(&job_ptr->nodes[strlen(job_ptr->nodes)-1], "6") ||
-		!strcmp(&job_ptr->nodes[strlen(job_ptr->nodes)-1], "8") ||
-		!strcmp(&job_ptr->nodes[strlen(job_ptr->nodes)-1], "10"))
-	return false;
-
-debug ("We are migratig job with id %u and node %s", job_ptr->job_id, job_ptr->nodes);
-	return true;
-}
-
-
-
-static bool _migration_will_save_time(struct job_record *job_ptr){
 	//it makes no sense to migrate a job employing a whole node
 	//note that this is called "exclusive" in some other places
 	if (job_ptr->details->whole_node == 1 ) {
@@ -716,9 +701,23 @@ static bool _migration_will_save_time(struct job_record *job_ptr){
 		return false;
 	}
 
-//////THIS WORKS BUT KEEPS SERIAL JOBS TO BE MIGRATED, SO I AM COMMENTING IT
-/*
-	//as an extension to that,  we are not migrating jobs using the minnimum posible number of nodes
+
+	/*
+	The following examples serve as proof of concept and to show how to
+	access the different resources and fields available to the developer
+	*/
+
+	//Migrate serial jobs from nodes 1X to 3X
+	if (job_ptr->total_cpus == 1){
+
+		printf ("penultima cifra: %c\n", job_ptr->nodes[strlen(job_ptr->nodes)-2]);
+	 	int one = '1';
+		if (job_ptr->nodes[strlen(job_ptr->nodes)-2] !=  one)
+			return false;
+}
+	// We are migrating parallel jobs NOT using the minnimum posible number of nodes
+if (job_ptr->total_cpus > 1){
+	printf ("JOB %d IS A PARALLEL JOB WITH %d CPUs\n", job_ptr->job_id, job_ptr->total_cpus);
 	int avg_node_size = cluster_cpus / bit_size(avail_node_bitmap); //problem: clusters heterogéneos con CPUs de distintos tamaños
 
 	//home-made CEIL implementation for positive integers
@@ -727,14 +726,19 @@ static bool _migration_will_save_time(struct job_record *job_ptr){
 	if (minimal_number_of_nodes * avg_node_size < job_ptr->cpu_cnt)
 			minimal_number_of_nodes += 1;
 
-	if (number_of_nodes <= minimal_number_of_nodes){
-		debug ("job %u is running in the minnimum posible number of nodes, no need to migrate", job_ptr->job_id);
+	if (number_of_nodes <= minimal_number_of_nodes)
 		return false;
-	}
+	else
+		debug ("job %u is NOT running in the minnimum posible number of nodes, we should migrate", job_ptr->job_id);
 
-	*/
-	return true;
 }
+
+	debug ("We are migratig job with id %u and node %s", job_ptr->job_id, job_ptr->nodes);
+		return true;
+}
+
+
+
 
 //MANUEL this is called every minute. Here we decide whether to migrate each task or not.
 //it is called by  *migration_agent(void *args)
@@ -854,19 +858,34 @@ static void *_attempt_migration(void *dummyArg)
 		if (!IS_JOB_RUNNING(job_ptr))	/* Something happened while getting here */
 			continue;
 
-		if (!_can_be_migrated(job_ptr))
-			continue;
 
-		if (!_migration_will_save_time(job_ptr))
+/*
+a different approach could be joining those two methods in something like
+"get_destination_node", which returns the node(s) where the job should be
+migrated to have a faster execution.
+
+This however depends on the final objective of this algorithm and is not relevant
+right here
+*/
+
+
+		if (!_should_be_migrated(job_ptr))
 			continue;
 
 	//debug ("migration for sched algorithm disabled");
 	//continue;
 
 		//debug ("MANUEL 8");
-	//extern int slurm_checkpoint_migrate (uint32_t job_id, uint32_t step_id,char *destination_nodes, char *excluded_nodes, int shared, int spread, bool test_only);
-       //slurm_checkpoint_migrate (uint32_t job_id, uint32_t step_id, char *destination_nodes, char *excluded_nodes, char *drain_node,  int shared, int spread, bool test_only)
-	slurm_checkpoint_migrate (job_ptr->job_id, NO_VAL, "", "slurmDev[1,3,5,7,9]", "", NO_VAL, NO_VAL, false);
+	//slurm_checkpoint_migrate (uint32_t job_id, uint32_t step_id, char *destination_nodes, char *excluded_nodes, char *drain_node,  int shared, int spread, bool test_only)
+	if (slurm_checkpoint_migrate (job_ptr->job_id, NO_VAL, "", "acme12", "", NO_VAL, NO_VAL, true) != 0){
+		printf("Job %d cannot be migrated, continuing", job_ptr->job_id);
+		continue;
+	}
+
+	if (slurm_checkpoint_migrate (job_ptr->job_id, NO_VAL, "", "acme12", "", NO_VAL, NO_VAL, false) != 0){
+		printf ("Errror when migrating job %d. What should I do?", job_ptr->job_id);
+		continue;
+	}
 	debug ("End of migration for job %u", job_ptr->job_id);
 	debug ("We only migrate a job per call. Exiting...");
 	break;

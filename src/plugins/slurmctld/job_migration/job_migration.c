@@ -45,7 +45,7 @@ extern int slurm_checkpoint_migrate (uint32_t job_id, uint32_t step_id, char *de
 
 
 extern int _migrate_job(uint32_t job_id, uint32_t step_id, char *destination_nodes, char *excluded_nodes, int shared, int spread, bool test_only){
-		printf("\n\n\njob_id=%u,\nstep_id=%u,\ndestination_nodes=%s,\nexcluded_nodes=%s, \nshared=%u,\nspread=%u\n\n\n",job_id, step_id, destination_nodes, excluded_nodes, shared, spread);
+	//	printf("\n\n\njob_id=%u,\nstep_id=%u,\ndestination_nodes=%s,\nexcluded_nodes=%s, \nshared=%u,\nspread=%u\n\n\n",job_id, step_id, destination_nodes, excluded_nodes, shared, spread);
 
 		int error = 0;
 
@@ -219,9 +219,6 @@ extern int _drain_node(char *destination_nodes, char *excluded_nodes, char *drai
 	int i, error, cont = 0;
 	hostlist_t hl;
 	uint32_t old_node_state;
-
-
-	printf ("DRAIN NODE\n");
 
 	if (slurm_load_node_single(&node_info, drain_node, 0) != 0) {
 		slurm_perror ("Could not get info from node");
