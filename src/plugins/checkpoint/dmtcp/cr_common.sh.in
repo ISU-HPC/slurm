@@ -52,4 +52,5 @@ startDMTCPCoordinator(){
     export DMTCP_COORD_PORT=$DMTCP_COORD_PORT
   done
   echo "export APP_TYPE=$APP_TYPE" >> $checkpoint_info
+  echo "export TMPDIR=$TMPDIR" >> $checkpoint_info  #this env var is created by slurm
 }

@@ -8,7 +8,10 @@ cd $folder
 
 checkpoint_info=$SLURM_CHECKPOINT_IMAGE_DIR"/checkpoint_info."$SLURM_JOB_ID
 source $checkpoint_info
-echo "APP_TYPE=$APP_TYPE" > $folder"/app_type"
+echo "APP_TYPE=$APP_TYPE" > $folder"/env_vars"
+echo "export TMPDIR=$TMPDIR" >> $folder"/env_vars"
+
+cp -r $TMPDIR $folder"/TMPDIR"
 
 @DMTCP_HOME@/dmtcp_command  bc
 
