@@ -44,10 +44,10 @@ mv $checkpoint_folder"/TMPDIR/"* $TMPDIR
 #restart job
 if [ "$APP_TYPE" == "SERIAL" ]
 then
-	@DMTCP_HOME@/dmtcp_restart *dmtcp
+	@DMTCP_HOME@/dmtcp_restart *dmtcp & wait $!
 elif [ "$APP_TYPE" == "MPI" ]
 then
-	/bin/sh $checkpoint_folder/dmtcp_restart_script.sh
+	/bin/sh $checkpoint_folder/dmtcp_restart_script.sh & wait $!
 fi
 #remove files after execution, if job was NOT cancelled.
 rm -rf $checkpoint_folder
