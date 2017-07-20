@@ -46,6 +46,7 @@ startDMTCPCoordinator(){
     then
       echo "export DMTCP_COORD_HOST=`hostname`" >> $checkpoint_info
       echo "export DMTCP_COORD_PORT=$DMTCP_COORD_PORT" >> $checkpoint_info
+      echo "export SLURM_JOB_USER=$SLURM_JOB_USER" >> $checkpoint_info
       break
     fi
     i=$(($i + 1))
@@ -54,4 +55,6 @@ startDMTCPCoordinator(){
   done
   echo "export APP_TYPE=$APP_TYPE" >> $checkpoint_info
   echo "export TMPDIR=$TMPDIR" >> $checkpoint_info  #this env var is created by slurm
+  echo "export SLURM_JOB_USER=$SLURM_JOB_USER" >> $checkpoint_info
+
 }

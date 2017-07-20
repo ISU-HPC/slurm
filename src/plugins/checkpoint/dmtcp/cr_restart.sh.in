@@ -38,8 +38,7 @@ trap 'rm -rf $checkpoint_info' SIGHUP SIGINT SIGTERM EXIT
 trap 'exit 0' SIGTERM SIGKILL
 
 #restore tmp files
-mv $checkpoint_folder"/TMPDIR/"* $TMPDIR
-
+cp -f -u -r $checkpoint_folder"/TMPDIR/"* $TMPDIR
 
 #restart job
 if [ "$APP_TYPE" == "SERIAL" ]
