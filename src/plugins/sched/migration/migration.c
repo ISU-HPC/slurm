@@ -688,6 +688,17 @@ extern void *migration_agent(void *args)
 //here we decide if a given job can be migrated or not
 static bool _should_be_migrated(struct job_record *job_ptr){
 	printf ("Deciding what to do with job %d\n", job_ptr->job_id);
+
+
+	time_t start_time;
+	//TODO esto tendría que ser algo como job_ptr->step_id (slurmctld.h)
+	uint32_t stepid = -1;
+	if (slurm_checkpoint_able(job_ptr->job_id, NO_VAL,&start_time) != 0) {
+		debug ("Job %u is not checkpointable, not migrating this job",job_ptr->job_id );
+		return false;
+	}
+
+
 	///job_ptr is declared in /slurm/src/slurmctld/slurmctld.h
 	if (job_ptr->details->req_nodes != NULL ) {
 		debug ("User has specified required nodes for job %u, not migrating this job", job_ptr->job_id);
