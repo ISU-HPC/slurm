@@ -2046,7 +2046,7 @@ _pick_best_nodes(struct node_set *node_set_ptr, int node_set_size,
 	}
 	return error_code;
 }
-//TODO ORGANIZAR ESTO
+
 struct ckptParams {
     uint32_t job_id;
     uint32_t max_wait;
