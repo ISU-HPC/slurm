@@ -16,7 +16,6 @@
 #include <slurm/slurm.h>
 #include "src/common/xmalloc.h"
 
-
 #define MAX_PATH_LEN 1024
 #define BUFSIZE 128
 
@@ -71,6 +70,8 @@ int slurm_spank_task_init(spank_t sp, int ac, char **av){
     return (ESPANK_SUCCESS);
     }
 
+//  slurm_error("This is sbatch, replace call");
+
    //we modify the application to be executed by including a DMTCP wrapper.
   char **argv;
   char **newArgv;
@@ -90,7 +91,7 @@ int slurm_spank_task_init(spank_t sp, int ac, char **av){
 
   for (cont = 0; cont < argc-1; cont++)
     newArgv[cont+1] = strdup(argv[cont]);
-
+   
 
   if (spank_set_item(sp, S_JOB_ARGV, &argc,&newArgv) != ESPANK_SUCCESS) {
     slurm_error("DMTCP Plugin could not be enabled");

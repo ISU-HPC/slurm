@@ -24,9 +24,10 @@ then
   exit 0
 fi
 
-source  $checkpoint_folder/app_type
+source  $checkpoint_folder/env_vars
 startDMTCPCoordinator $checkpoint_folder $checkpoint_info $APP_TYPE
 
+cd $checkpoint_folder
 source  $checkpoint_info
 
 #checkpoint info is created in startDMTCPCoordinator function. It is different that in "cr_start", where it is created in the "sempahore" function
@@ -36,15 +37,16 @@ trap 'rm -rf $checkpoint_info' SIGHUP SIGINT SIGTERM EXIT
 #in this case we want to cancel the execution of this script, so checkpoint files are not deleted
 trap 'exit 0' SIGTERM SIGKILL
 
+#restore tmp files
+cp -f -u -r $checkpoint_folder"/TMPDIR/"* $TMPDIR
+
 #restart job
-cd $checkpoint_folder
-source  $checkpoint_folder/app_type
 if [ "$APP_TYPE" == "SERIAL" ]
 then
-	@DMTCP_HOME@/dmtcp_restart *dmtcp
+	@DMTCP_HOME@/dmtcp_restart *dmtcp & wait $!
 elif [ "$APP_TYPE" == "MPI" ]
 then
-	/bin/sh $checkpoint_folder/dmtcp_restart_script.sh
+	/bin/sh $checkpoint_folder/dmtcp_restart_script.sh & wait $!
 fi
 #remove files after execution, if job was NOT cancelled.
 rm -rf $checkpoint_folder

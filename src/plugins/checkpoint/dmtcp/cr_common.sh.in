@@ -37,7 +37,8 @@ startDMTCPCoordinator(){
     export DMTCP_COORD_PORT=7779
   fi
 
-  max_coordinators=`nproc`
+  max_coordinators=`lscpu | grep "^CPU(s)" | awk '{split ($0,a, ":"); print a[2]}' |  tr -d '[:space:]'`
+
   i=0
   while [[ "$i" -le "$max_coordinators" ]]; do
     @DMTCP_HOME@/dmtcp_coordinator --daemon --exit-on-last --ckptdir $checkpoint_folder -q &> /dev/null
@@ -45,6 +46,7 @@ startDMTCPCoordinator(){
     then
       echo "export DMTCP_COORD_HOST=`hostname`" >> $checkpoint_info
       echo "export DMTCP_COORD_PORT=$DMTCP_COORD_PORT" >> $checkpoint_info
+      echo "export SLURM_JOB_USER=$SLURM_JOB_USER" >> $checkpoint_info
       break
     fi
     i=$(($i + 1))
@@ -52,4 +54,7 @@ startDMTCPCoordinator(){
     export DMTCP_COORD_PORT=$DMTCP_COORD_PORT
   done
   echo "export APP_TYPE=$APP_TYPE" >> $checkpoint_info
+  echo "export TMPDIR=$TMPDIR" >> $checkpoint_info  #this env var is created by slurm
+  echo "export SLURM_JOB_USER=$SLURM_JOB_USER" >> $checkpoint_info
+
 }

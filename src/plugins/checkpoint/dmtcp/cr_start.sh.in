@@ -36,7 +36,7 @@ startDMTCPCheckpointedJob(){
 
   #Serial application
   if [ $? -ne 0 ]; then
-    @DMTCP_HOME@/dmtcp_launch --ib --rm $@
+    @DMTCP_HOME@/dmtcp_launch --ib --rm $@ & wait $!
   #MPI application
   else
     #Permision fix
@@ -52,7 +52,7 @@ startDMTCPCheckpointedJob(){
     sed -E 's!^[ ]*(mpirun|srun|mpiexec)!srun @DMTCP_HOME@/dmtcp_launch --ib --rm!g' $1 >  $tmpFile
     cat $tmpFile > $1
     rm $tmpFile
-    $@
+    $@ & wait $!
   fi
 
   return $?
