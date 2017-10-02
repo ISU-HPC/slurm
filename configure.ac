@@ -538,6 +538,8 @@ AC_CONFIG_FILES([Makefile
 		 src/plugins/checkpoint/dmtcp/Makefile
 		 src/plugins/checkpoint/dmtcp/cr_checkpoint.sh
 		 src/plugins/checkpoint/dmtcp/cr_restart.sh
+		 src/plugins/checkpoint/dmtcp/cr_start.sh
+		 src/plugins/checkpoint/dmtcp/cr_common.sh
 		 src/plugins/checkpoint/multicheckpoint/Makefile
 		 src/plugins/checkpoint/multicheckpoint/cr_checkpoint.sh
 		 src/plugins/checkpoint/multicheckpoint/cr_restart.sh

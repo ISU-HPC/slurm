@@ -75,6 +75,7 @@ int main(int argc, char *argv[])
 	char *script_name;
 	void *script_body = NULL;
 	int script_size = 0;
+  int err = 0;
 
 	slurm_conf_init(NULL);
 	log_init(xbasename(argv[0]), logopt, 0, NULL);
@@ -108,9 +109,11 @@ int main(int argc, char *argv[])
 		exit(error_exit);
 	}
 
-  //_slurm_checkpoint_migrate (opt.jobid, opt.stepid, opt.nodes);
-  slurm_checkpoint_migrate ( opt.jobid, opt.stepid, opt.nodes);
-
+  err = slurm_checkpoint_migrate ( opt.jobid, opt.stepid, opt.nodes, opt.excluded_nodes, opt.drain_node, opt.shared, opt.spread, opt.test_only);
+  if (err != 0) {
+    error("Could not migrate task. Error code is %d", err);
+    return err;
+  }
   return (0);
 }
 

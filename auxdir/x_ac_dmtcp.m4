@@ -30,14 +30,14 @@ AC_DEFUN([X_AC_DMTCP], [
       [
         for d in $_x_ac_dmtcp_dirs; do
           test -d "$d" || continue
-          test -x "$d/$_x_ac_dmtcp_exec" && x_ac_cv_dmtcp_path="$d"  && break
+          test -x "$d/bin/$_x_ac_dmtcp_exec" && x_ac_cv_dmtcp_path="$d"  && break
         done
       ])
 
-    if test -z "$x_ac_cv_dmtcp_path"; then
+    if test -z "$x_ac_cv_dmtcp_path/bin"; then
       AC_MSG_WARN([unable to locate dmtcp installation])
     else
-      DMTCP_HOME="$x_ac_cv_dmtcp_path"
+      DMTCP_HOME="$x_ac_cv_dmtcp_path/bin"
     fi
 
     AC_DEFINE_UNQUOTED(DMTCP_HOME, "$x_ac_cv_dmtcp_path", [Define DMTCP installation home])

@@ -34,14 +34,14 @@ enum migration_err {
     EMIGRATION_ERROR       = 1, /* Generic error.                             */
     EMIGRATION_BAD_ARG     = 2, /* Bad argument.                              */
     EMIGRATION_NOT_JOB	   = 3, /* Job does not exist.                        */
-		EMIGRATION_JOB_ERROR	 = 4, /* Error on job																*/
+    EMIGRATION_JOB_ERROR   = 4, /* Error on job                               */
     EMIGRATION_DEST_ERROR  = 5, /* Error on destination nodes                 */
 };
 
 typedef enum migration_err migration_err_t;
 
 /* migrates a job after it has been checkpointed. */
-extern int slurm_checkpoint_migrate (uint32_t job_id, uint32_t step_id,char *destination_nodes);
+extern int slurm_checkpoint_migrate (uint32_t job_id, uint32_t step_id, char *destination_nodes, char *excluded_nodes, char *drain_node,  int shared, int spread, bool test_only);
 
 END_C_DECLS
 #endif

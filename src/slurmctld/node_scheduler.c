@@ -2047,6 +2047,66 @@ _pick_best_nodes(struct node_set *node_set_ptr, int node_set_size,
 	return error_code;
 }
 
+struct ckptParams {
+    uint32_t job_id;
+    uint32_t max_wait;
+    char* image_dir;
+};
+
+void *_slurm_checkpoint_requeue(void *arg)
+{
+
+	struct ckptParams *params = arg;
+	uint32_t job_id = params->job_id;
+	char* image_dir = params->image_dir;
+	void * result = 0;
+
+	int error = 0;
+	int show_flags=0;
+	job_info_msg_t * job_ptr;
+	slurm_job_info_t job_info;
+
+	if (( error = slurm_checkpoint_vacate (job_id, NO_VAL, 0,image_dir )) != 0){
+		slurm_perror ("there was an error calling slurm_checkpoint_create.");
+		return result;
+	 }
+//	 printf("Checkpoint has been created! \n");
+
+  while (true){
+		if (slurm_load_job (&job_ptr, job_id, show_flags) != SLURM_SUCCESS ){
+			slurm_perror ("there was an error loading job info.");
+			return result;
+		 }
+		sleep(1);
+		job_info = job_ptr->job_array[job_ptr->record_count-1];
+		if (job_info.job_state  != JOB_RUNNING)
+			break;
+	}
+
+	if (job_info.job_state != JOB_COMPLETE){
+		printf("Job is a wrong status for checkpoint, aborting. STATE IS %d\n",job_info.job_state );
+		return result;
+		}
+
+//		printf("Job is finally finallized. Now we'll wait for it to be deleted from the system (this might take a while)\n");
+
+		while (slurm_load_job (&job_ptr, job_id, show_flags) == SLURM_SUCCESS ){
+			sleep(1);
+		}
+//		printf("it should be deleted by now\n");
+
+
+		/*restart checkpoint */
+	if (slurm_checkpoint_restart(job_id, NO_VAL, 0,  image_dir) != 0) {
+		slurm_perror("Error restarting job\n");
+		return result;
+		}
+//	printf("Job %d has been restarted! \n", job_id);
+	return result;
+}
+
+
+
 static void _preempt_jobs(List preemptee_job_list, bool kill_pending,
 			  int *error_code)
 {
@@ -2054,7 +2114,6 @@ static void _preempt_jobs(List preemptee_job_list, bool kill_pending,
 	struct job_record *job_ptr;
 	uint16_t mode;
 	int job_cnt = 0, rc;
-	checkpoint_msg_t ckpt_msg;
 
 	iter = list_iterator_create(preemptee_job_list);
 	while ((job_ptr = (struct job_record *) list_next(iter))) {
@@ -2075,18 +2134,20 @@ static void _preempt_jobs(List preemptee_job_list, bool kill_pending,
 			job_cnt++;
 			if (!kill_pending)
 				continue;
-			memset(&ckpt_msg, 0, sizeof(checkpoint_msg_t));
-			ckpt_msg.op	   = CHECK_REQUEUE;
-			ckpt_msg.job_id    = job_ptr->job_id;
-			rc = job_checkpoint(&ckpt_msg, 0, -1,
-					    (uint16_t) NO_VAL);
-			if (rc == ESLURM_NOT_SUPPORTED) {
-				memset(&ckpt_msg, 0, sizeof(checkpoint_msg_t));
-				ckpt_msg.op	   = CHECK_VACATE;
-				ckpt_msg.job_id    = job_ptr->job_id;
-				rc = job_checkpoint(&ckpt_msg, 0, -1,
-						    (uint16_t) NO_VAL);
+
+			pthread_t inc_x_thread;
+			struct ckptParams *params;
+
+			params = malloc(sizeof(*params));
+			params->job_id = job_ptr->job_id;
+			params->max_wait = 10;
+			params->image_dir = job_ptr->details->ckpt_dir;
+
+			if(pthread_create(&inc_x_thread, NULL, _slurm_checkpoint_requeue, params)) {
+				return ;
 			}
+			rc=SLURM_SUCCESS;
+
 			if (rc == SLURM_SUCCESS) {
 				info("preempted job %u has been checkpointed",
 				     job_ptr->job_id);

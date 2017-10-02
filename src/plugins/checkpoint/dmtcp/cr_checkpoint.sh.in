@@ -1,14 +1,20 @@
 #!/bin/sh
 
-source /etc/profile
-
 SLURM_CHECKPOINT_IMAGE_DIR=$1
 SLURM_JOB_ID=$2
 folder=$SLURM_CHECKPOINT_IMAGE_DIR/$SLURM_JOB_ID
+mkdir -p $folder
 cd $folder
 
-dmtcp_coordinator="$folder/dmtcp_coordinator"
-source $dmtcp_coordinator
+checkpoint_info=$SLURM_CHECKPOINT_IMAGE_DIR"/checkpoint_info."$SLURM_JOB_ID
+source $checkpoint_info
+echo "APP_TYPE=$APP_TYPE" > $folder"/env_vars"
+echo "export TMPDIR=$TMPDIR" >> $folder"/env_vars"
+echo "SLURM_JOB_USER=$SLURM_JOB_USER" >> $folder"/env_vars"
+
+#save information from TMP dir.
+mkdir -p $folder"/TMPDIR"
+find $TMPDIR -maxdepth 1 -mindepth 1 -user $SLURM_JOB_USER -exec cp -u -p -r -f -t  $folder"/TMPDIR" {} ';'
 
 @DMTCP_HOME@/dmtcp_command  bc
 

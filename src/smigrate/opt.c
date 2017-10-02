@@ -94,7 +94,6 @@ MANUEL: quito esto, habra que sustituirlo por algo imagino...
 
 #include "src/smigrate/opt.h"
 
-//TODO: limpiar esta lista
 /* generic OPT_ definitions -- mainly for use with env vars  */
 #define OPT_NONE        0x00
 #define OPT_INT         0x01
@@ -127,15 +126,13 @@ MANUEL: quito esto, habra que sustituirlo por algo imagino...
 #define OPT_HINT	  0x22
 
 /* generic getopt_long flags, integers and *not* valid characters */
-
-
-//TODO last three have been redefined to keep the numbering secuential It might be a problem
-//if declared with a different value somewhere else... we'll see
-
 #define LONG_OPT_JOBID       0x105
-#define LONG_OPT_TEST_ONLY       0x106
-#define LONG_OPT_PRIORITY        0x107
+#define LONG_OPT_PRIORITY        0x106
+#define LONG_OPT_SPREAD_JOB      0x107
 #define LONG_OPT_STEPID	0x108
+#define LONG_OPT_TEST_ONLY       0x109
+
+
 /*---- global variables, defined in opt.h ----*/
 opt_t opt;
 int error_exit = 1;
@@ -190,13 +187,17 @@ static void argerror(const char *msg, ...)
  */
 static void _opt_default()
 {
+  opt.drain_node = "";
+  opt.excluded_nodes = "";
+  opt.hold	    = false;
 	opt.jobid    = NO_VAL;
-	opt.stepid    = NO_VAL;
 	opt.nodes = "";
-	opt.hold	    = false;
 	opt.priority = 0;
+  opt.quiet = 0;
+  opt.shared = (uint16_t)NO_VAL;
+  opt.spread = false;
+  opt.stepid    = NO_VAL;
 	opt.test_only   = false;
-	opt.quiet = 0;
 	opt.verbose = 0;
 
 }
@@ -208,13 +209,15 @@ static void _opt_default()
 
 //TODO anadir NODENAME y los demas que faltan
 static struct option long_options[] = {
-
+  {"drain-node", required_argument, 0, 'd'},
+  {"excluded-nodes", required_argument, 0, 'x'},
+  {"exclusive",     optional_argument, 0, 'e'},
 	{"help",          no_argument,       0, 'h'},
 	{"hold",          no_argument,       0, 'H'}, /* undocumented */
-	{"jobid",         required_argument, 0, LONG_OPT_JOBID},
-	{"nodes",         required_argument, 0, 'N'},
+	{"nodelist",      required_argument, 0, 'w'},
 	{"priority",      required_argument, 0, LONG_OPT_PRIORITY},
 	{"quiet",         no_argument,       0, 'Q'},
+  {"spread-job",    no_argument,       0, LONG_OPT_SPREAD_JOB},
 	{"stepid",        required_argument, 0, LONG_OPT_STEPID},
 	{"test-only",     no_argument,       0, LONG_OPT_TEST_ONLY},
 	{"usage",         no_argument,       0, 'u'},
@@ -322,9 +325,6 @@ int process_options_second_pass(int argc, char *argv[], const char *file,
 
 }
 
-
-//TODO ver los que hay, anadir NODENAME y los que faltan
-
 static void _set_options(int argc, char **argv)
 {
 	int opt_char, option_index = 0;
@@ -344,16 +344,31 @@ static void _set_options(int argc, char **argv)
 			error("Try \"smigrate --help\" for more information");
 			exit(error_exit);
 			break;
+      case 'd':
+          opt.drain_node = optarg;
+          break;
+    case 'x':
+        opt.excluded_nodes = optarg;
+        break;
+    case 'e':
+      if (optarg == NULL) {
+        opt.shared = JOB_SHARED_NONE;
+      } else if (!xstrcasecmp(optarg, "user")) {
+        opt.shared = JOB_SHARED_USER;
+      } else if (!xstrcasecmp(optarg, "mcs")) {
+        opt.shared = JOB_SHARED_MCS;
+      } else {
+        error("invalid exclusive option %s", optarg);
+        exit(error_exit);
+      }
+      break;
 		case 'h':
 			_help();
 			exit(0);
 		case 'H':
 			opt.hold = true;
 			break;
-		case LONG_OPT_JOBID:
-			opt.jobid = _get_int(optarg, "jobid");
-			break;
-		case 'N':
+		case 'w':
 			opt.nodes = optarg;
 			break;
 		case LONG_OPT_PRIORITY: {
@@ -365,6 +380,9 @@ static void _set_options(int argc, char **argv)
 			opt.priority = priority;
 			break;
 		}
+    case LONG_OPT_SPREAD_JOB:
+      opt.spread = true;
+      break;
 		case LONG_OPT_STEPID:
 			opt.stepid = _get_int(optarg, "stepid");
 			break;
@@ -386,6 +404,10 @@ static void _set_options(int argc, char **argv)
 			break;
 		}
 	}
+
+	if (optind < argc)
+    opt.jobid = _get_int(argv[optind], "jobid");
+
 	spank_option_table_destroy (optz);
 }
 
@@ -427,12 +449,7 @@ static int _get_int(const char *arg, const char *what)
 	return (int) result;
 }
 
-
-
 #define tf_(b) (b == true) ? "true" : "false"
-
-
-//TODOwhat is this for?
 
 static void _opt_list(void)
 {
@@ -440,43 +457,45 @@ static void _opt_list(void)
 
 	info("defined options for program `%i'", opt.jobid);
 	info("----------------- ---------------------");
-
+  info("drain-node  : %s", opt.drain_node);
+  info("excluded-nodes  : %s", opt.excluded_nodes);
+  info("exclusive      : %s", opt.shared ? "True" : "False" );
 	info("hold           : %s", opt.hold ? "True" : "False" );
-	info("jobid             : %u", opt.jobid);
-	info("nodes           : %s", opt.nodes);
-	info("priority           : %u", opt.priority);
-	info("quiet           : %s", opt.quiet ? "True" : "False" );
-	info("stepid           : %u", opt.stepid);
-	info("test_only           : %s", opt.test_only ? "True" : "False" );
-	info("verbose           : %s", opt.verbose ? "True" : "False" );
+	info("nodelist       : %s", opt.nodes);
+	info("priority       : %u", opt.priority);
+	info("quiet          : %s", opt.quiet ? "True" : "False" );
+	info("stepid         : %u", opt.stepid);
+	info("test-only      : %s", opt.test_only ? "True" : "False" );
+	info("verbose        : %s", opt.verbose ? "True" : "False" );
 
 	xfree(str);
 
 }
 
-
-//TODO esto esta parece incompleto. Xq hay más opciones en _help?
-static void _usage(void)
-{
- 	printf("Usage: smigrate  --jobid=id   --nodes=node1,node2... --verbose  \n");
-
-}
-
-
-//TODO falta alguna opcion aqui tb
 static void _help(void)
 {
 	printf (
-"Usage: smigrate [OPTIONS...] --jobid=id --nodes=node1,node2...\n"
+"Usage: smigrate [OPTIONS...] [job_id]\n"
 "\n"
 "Run options:\n"
-"      --jobid=id              id of the job to migrate\n"
+"  -d, --drain-node=host       migrate all tasks from a node and put it in drain status\n"
+"  -e, --exclusive             exclusive usage of the nodes\n"
+"  -w, --nodelist=hosts...     request a specific list of hosts\n"
+"  -x, --exclude=hosts...      exclude a specific list of hosts\n"
 "  -Q, --quiet                 quiet mode (suppress informational messages)\n"
 "  -v, --verbose               verbose mode (multiple -v's increase verbosity)\n"
 "  -H, --hold                  submit job in held state\n"
 "      --priority=value        set the priority of the job to value\n"
 "      --test-only             check whether the operation can be performed, but not perform it\n"
+"      --spread-job            spread job across as many nodes as possible\n"
 "      --stepid=id             perform migration on selected step [NOT IMPLEMENTED]\n"
+"\n"
+"Consumable resources related options:\n"
+"      --exclusive[=user]      allocate nodes in exclusive mode when\n"
+"                              cpu consumable resource is enabled\n"
+"      --exclusive[=mcs]       allocate nodes in exclusive mode when\n"
+"                              cpu consumable resource is enabled\n"
+"                              and mcs plugin is enabled\n"
 "\n"
 "Help options:\n"
 "  -h, --help                  show this help message\n"
@@ -487,4 +506,9 @@ static void _help(void)
 "\n"
 		);
 
+}
+
+static void _usage(void)
+{
+  _help();
 }
