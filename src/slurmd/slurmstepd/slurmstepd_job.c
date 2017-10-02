@@ -9,7 +9,7 @@
  *  CODE-OCEC-09-009. All rights reserved.
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://slurm.schedmd.com/>.
+ *  For details, see <https://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -60,12 +60,11 @@
 #include "src/common/xmalloc.h"
 #include "src/common/xstring.h"
 
+#include "src/slurmd/common/fname.h"
 #include "src/slurmd/slurmd/slurmd.h"
 #include "src/slurmd/slurmstepd/io.h"
-#include "src/slurmd/slurmstepd/fname.h"
 #include "src/slurmd/slurmstepd/multi_prog.h"
 #include "src/slurmd/slurmstepd/slurmstepd_job.h"
-#include "src/slurmd/slurmstepd/task.h"
 
 #ifdef HAVE_NATIVE_CRAY
 static bool already_validated_uid = true;
@@ -73,11 +72,14 @@ static bool already_validated_uid = true;
 static bool already_validated_uid = false;
 #endif
 
-static char ** _array_copy(int n, char **src);
+static char **_array_copy(int n, char **src);
 static void _array_free(char ***array);
-static void _srun_info_destructor(void *arg);
 static void _job_init_task_info(stepd_step_rec_t *job, uint32_t **gtid,
 				char *ifname, char *ofname, char *efname);
+static void _srun_info_destructor(void *arg);
+static stepd_step_task_info_t *_task_info_create(int taskid, int gtaskid,
+						 char *ifname, char *ofname,
+						 char *efname);
 static void _task_info_destroy(stepd_step_task_info_t *t, uint16_t multi_prog);
 
 /*
@@ -135,12 +137,16 @@ _job_init_task_info(stepd_step_rec_t *job, uint32_t **gtid,
 {
 	int          i, node_id = job->nodeid;
 	char        *in, *out, *err;
+	uint32_t     pack_offset = 0;
 
 	if (job->node_tasks == 0) {
 		error("User requested launch of zero tasks!");
 		job->task = NULL;
 		return;
 	}
+
+	if (job->pack_offset != NO_VAL)
+		pack_offset = job->pack_offset;
 
 #if defined(HAVE_NATIVE_CRAY)
 	for (i = 0; i < job->nnodes; i++) {
@@ -157,18 +163,18 @@ _job_init_task_info(stepd_step_rec_t *job, uint32_t **gtid,
 	job->task = (stepd_step_task_info_t **)
 		xmalloc(job->node_tasks * sizeof(stepd_step_task_info_t *));
 
-	if (((job->flags & LAUNCH_MULTI_PROG) == 0) && job->argv) {
-		char *new_path = build_path(job->argv[0], job->env, job->cwd);
-		xfree(job->argv[0]);
-		job->argv[0] = new_path;
-	}
-
 	for (i = 0; i < job->node_tasks; i++) {
-		in = _expand_stdio_filename(ifname, gtid[node_id][i], job);
-		out = _expand_stdio_filename(ofname, gtid[node_id][i], job);
-		err = _expand_stdio_filename(efname, gtid[node_id][i], job);
-		job->task[i] = task_info_create(i, gtid[node_id][i], in, out,
-						err);
+		in  = _expand_stdio_filename(ifname,
+					     gtid[node_id][i] + pack_offset,
+					     job);
+		out = _expand_stdio_filename(ofname,
+					     gtid[node_id][i] + pack_offset,
+					     job);
+		err = _expand_stdio_filename(efname,
+					     gtid[node_id][i] + pack_offset,
+					     job);
+		job->task[i] = _task_info_create(i, gtid[node_id][i], in, out,
+						 err);
 		if ((job->flags & LAUNCH_MULTI_PROG) == 0) {
 			job->task[i]->argc = job->argc;
 			job->task[i]->argv = job->argv;
@@ -235,8 +241,8 @@ _task_info_destroy(stepd_step_task_info_t *t, uint16_t multi_prog)
 }
 
 /* create a slurmd job structure from a launch tasks message */
-extern stepd_step_rec_t *
-stepd_step_rec_create(launch_tasks_request_msg_t *msg, uint16_t protocol_version)
+extern stepd_step_rec_t *stepd_step_rec_create(launch_tasks_request_msg_t *msg,
+					       uint16_t protocol_version)
 {
 	stepd_step_rec_t  *job = NULL;
 	srun_info_t   *srun = NULL;
@@ -302,6 +308,18 @@ stepd_step_rec_create(launch_tasks_request_msg_t *msg, uint16_t protocol_version
 	job->env     = _array_copy(msg->envc, msg->env);
 	job->array_job_id  = msg->job_id;
 	job->array_task_id = NO_VAL;
+	job->node_offset = msg->node_offset;	/* Used for env vars */
+	job->pack_jobid  = msg->pack_jobid;	/* Used for env vars */
+	job->pack_nnodes = msg->pack_nnodes;	/* Used for env vars */
+	if (msg->pack_nnodes && msg->pack_ntasks && msg->pack_task_cnts) {
+		job->pack_ntasks = msg->pack_ntasks;	/* Used for env vars */
+		i = sizeof(uint16_t) * msg->pack_nnodes;
+		job->pack_task_cnts = xmalloc(i);
+		memcpy(job->pack_task_cnts, msg->pack_task_cnts, i);
+	}
+	job->pack_offset = msg->pack_offset;	/* Used for env vars & labels */
+	job->pack_task_offset = msg->pack_task_offset;	/* Used for env vars & labels */
+	job->pack_node_list = xstrdup(msg->pack_node_list);
 	for (i = 0; i < msg->envc; i++) {
 		/*                         1234567890123456789 */
 		if (!xstrncmp(msg->env[i], "SLURM_ARRAY_JOB_ID=", 19))
@@ -314,7 +332,8 @@ stepd_step_rec_create(launch_tasks_request_msg_t *msg, uint16_t protocol_version
 	job->eio     = eio_handle_create(0);
 	job->sruns   = list_create((ListDelF) _srun_info_destructor);
 
-	/* Based on my testing the next 3 lists here could use the
+	/*
+	 * Based on my testing the next 3 lists here could use the
 	 * eio_obj_destroy, but if you do you can get an invalid read.  Since
 	 * these stay until the end of the job it isn't that big of a deal.
 	 */
@@ -420,6 +439,14 @@ stepd_step_rec_create(launch_tasks_request_msg_t *msg, uint16_t protocol_version
 				    &job->resv_id);
 #endif
 
+	/* only need these values on the extern step, don't copy otherwise */
+	if ((msg->job_step_id == SLURM_EXTERN_CONT) && msg->x11) {
+		job->x11 = msg->x11;
+		job->x11_magic_cookie = xstrdup(msg->x11_magic_cookie);
+		job->x11_target_host = xstrdup(msg->x11_target_host);
+		job->x11_target_port = msg->x11_target_port;
+	}
+
 	get_cred_gres(msg->cred, conf->node_name,
 		      &job->job_gres_list, &job->step_gres_list);
 
@@ -462,6 +489,10 @@ batch_stepd_step_rec_create(batch_job_launch_msg_t *msg)
 	job->stepid  = msg->step_id;
 	job->array_job_id  = msg->array_job_id;
 	job->array_task_id = msg->array_task_id;
+	job->pack_jobid  = NO_VAL;	/* Used to set env vars */
+	job->pack_nnodes = NO_VAL;	/* Used to set env vars */
+	job->pack_ntasks = NO_VAL;	/* Used to set env vars */
+	job->pack_offset = NO_VAL;	/* Used to set labels and env vars */
 	job->job_core_spec = msg->job_core_spec;
 
 	job->batch   = true;
@@ -549,10 +580,9 @@ batch_stepd_step_rec_create(batch_job_launch_msg_t *msg)
 	else
 		in_name = fname_create(job, msg->std_in, 0);
 
-	job->task[0] = task_info_create(0, 0,
-					in_name,
-					_batchfilename(job, msg->std_out),
-					_batchfilename(job, msg->std_err));
+	job->task[0] = _task_info_create(0, 0, in_name,
+					 _batchfilename(job, msg->std_out),
+					 _batchfilename(job, msg->std_err));
 	job->task[0]->argc = job->argc;
 	job->task[0]->argv = job->argv;
 
@@ -577,6 +607,7 @@ stepd_step_rec_destroy(stepd_step_rec_t *job)
 		multi_prog = 1;
 	for (i = 0; i < job->node_tasks; i++)
 		_task_info_destroy(job->task[i], multi_prog);
+	xfree(job->task);
 	eio_handle_destroy(job->eio);
 	FREE_NULL_LIST(job->sruns);
 	FREE_NULL_LIST(job->clients);
@@ -585,12 +616,19 @@ stepd_step_rec_destroy(stepd_step_rec_t *job)
 	FREE_NULL_LIST(job->free_incoming);
 	FREE_NULL_LIST(job->free_outgoing);
 	FREE_NULL_LIST(job->outgoing_cache);
+	xfree(job->ckpt_dir);
+	xfree(job->cpu_bind);
+	xfree(job->cwd);
 	xfree(job->envtp);
+	xfree(job->gids);
+	xfree(job->mem_bind);
+	eio_handle_destroy(job->msg_handle);
 	xfree(job->node_name);
 	mpmd_free(job);
 	xfree(job->task_prolog);
 	xfree(job->task_epilog);
 	xfree(job->job_alloc_cores);
+	xfree(job->restart_dir);
 	xfree(job->step_alloc_cores);
 	xfree(job->task_cnts);
 	xfree(job->user_name);
@@ -643,9 +681,9 @@ srun_info_destroy(srun_info_t *srun)
 	xfree(srun);
 }
 
-extern stepd_step_task_info_t *
-task_info_create(int taskid, int gtaskid,
-		 char *ifname, char *ofname, char *efname)
+static stepd_step_task_info_t *_task_info_create(int taskid, int gtaskid,
+						 char *ifname, char *ofname,
+						 char *efname)
 {
 	stepd_step_task_info_t *t = xmalloc(sizeof(stepd_step_task_info_t));
 

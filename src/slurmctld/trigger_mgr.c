@@ -3,13 +3,13 @@
  *****************************************************************************
  *  Copyright (C) 2007 The Regents of the University of California.
  *  Copyright (C) 2008-2010 Lawrence Livermore National Security.
- *  Portions Copyright (C) 2010-2016 SchedMD <http://www.schedmd.com>.
+ *  Portions Copyright (C) 2010-2016 SchedMD <https://www.schedmd.com>.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Morris Jette <jette1@llnl.gov> et. al.
  *  CODE-OCEC-09-009. All rights reserved.
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://slurm.schedmd.com/>.
+ *  For details, see <https://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -163,12 +163,6 @@ static void _dump_trigger_msg(char *header, trigger_info_msg_t *msg)
 		     msg->trigger_array[i].user_id,
 		     msg->trigger_array[i].program);
 	}
-}
-
-
-static int _match_all_triggers(void *x, void *key)
-{
-	return 1;
 }
 
 /* Validate trigger program */
@@ -433,7 +427,7 @@ extern int trigger_set(uid_t uid, gid_t gid, trigger_info_msg_t *msg)
 	}
 
 	_dump_trigger_msg("trigger_set", msg);
-	for (i=0; i<msg->record_count; i++) {
+	for (i = 0; i < msg->record_count; i++) {
 		if (msg->trigger_array[i].res_type ==
 		    TRIGGER_RES_TYPE_JOB) {
 			job_id = (uint32_t) atol(
@@ -454,12 +448,14 @@ extern int trigger_set(uid_t uid, gid_t gid, trigger_info_msg_t *msg)
 			    (msg->trigger_array[i].res_id[0] != '*') &&
 			    (node_name2bitmap(msg->trigger_array[i].res_id,
 					      false, &bitmap) != 0)) {
+				FREE_NULL_BITMAP(bitmap);
 				rc = ESLURM_INVALID_NODE_NAME;
 				continue;
 			}
 		}
 		msg->trigger_array[i].user_id = (uint32_t) uid;
 		if (_duplicate_trigger(&msg->trigger_array[i])) {
+			FREE_NULL_BITMAP(bitmap);
 			rc = ESLURM_TRIGGER_DUP;
 			continue;
 		}
@@ -490,6 +486,8 @@ extern int trigger_set(uid_t uid, gid_t gid, trigger_info_msg_t *msg)
 		msg->trigger_array[i].program = NULL;
 		if (!_validate_trigger(trig_add)) {
 			rc = ESLURM_ACCESS_DENIED;
+			FREE_NULL_BITMAP(trig_add->nodes_bitmap);
+			FREE_NULL_BITMAP(trig_add->orig_bitmap);
 			xfree(trig_add->program);
 			xfree(trig_add->res_id);
 			xfree(trig_add);
@@ -705,10 +703,10 @@ extern void trigger_burst_buffer(void)
 static void _dump_trigger_state(trig_mgr_info_t *trig_ptr, Buf buffer)
 {
 	/* write trigger pull state flags */
-	safe_pack8(ctld_failure,    buffer);
-	safe_pack8(bu_ctld_failure, buffer);
-	safe_pack8(dbd_failure,     buffer);
-	safe_pack8(db_failure,      buffer);
+	pack8(ctld_failure,    buffer);
+	pack8(bu_ctld_failure, buffer);
+	pack8(dbd_failure,     buffer);
+	pack8(db_failure,      buffer);
 
 	pack16   (trig_ptr->flags,     buffer);
 	pack32   (trig_ptr->trig_id,   buffer);
@@ -936,6 +934,9 @@ extern void trigger_state_restore(void)
 	state_fd = _open_resv_state_file(&state_file);
 	if (state_fd < 0) {
 		info("No trigger state file (%s) to recover", state_file);
+		xfree(state_file);
+		unlock_state_files();
+		return;
 	} else {
 		data_allocated = BUF_SIZE;
 		data = xmalloc(data_allocated);
@@ -967,6 +968,8 @@ extern void trigger_state_restore(void)
 		safe_unpack16(&protocol_version, buffer);
 
 	if (protocol_version == (uint16_t) NO_VAL) {
+		if (!ignore_state_errors)
+			fatal("Can't recover trigger state, data version incompatible, start with '-i' to ignore this");
 		error("Can't recover trigger state, data version "
 		      "incompatible");
 		xfree(ver_str);
@@ -977,7 +980,7 @@ extern void trigger_state_restore(void)
 
 	safe_unpack_time(&buf_time, buffer);
 	if (trigger_list)
-		list_delete_all (trigger_list, _match_all_triggers, NULL);
+		list_flush(trigger_list);
 	while (remaining_buf(buffer) > 0) {
 		if (_load_trigger_state(buffer, protocol_version) !=
 		    SLURM_SUCCESS)
@@ -987,6 +990,8 @@ extern void trigger_state_restore(void)
 	goto fini;
 
 unpack_error:
+	if (!ignore_state_errors)
+		fatal("Incomplete trigger data checkpoint file, start with '-i' to ignore this");
 	error("Incomplete trigger data checkpoint file");
 fini:	verbose("State of %d triggers recovered", trigger_cnt);
 	free_buf(buffer);
@@ -1539,7 +1544,7 @@ static void _trigger_run_program(trig_mgr_info_t *trig_in)
 		trig_in->child_pid = child_pid;
 	} else if (child_pid == 0) {
 		int i;
-		bool run_as_self = (uid == getuid());
+		bool run_as_self = (uid == slurmctld_conf.slurm_user_id);
 
 		for (i = 0; i < 1024; i++)
 			(void) close(i);

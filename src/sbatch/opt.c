@@ -3,13 +3,13 @@
  *****************************************************************************
  *  Copyright (C) 2002-2007 The Regents of the University of California.
  *  Copyright (C) 2008-2010 Lawrence Livermore National Security.
- *  Portions Copyright (C) 2010-2015 SchedMD LLC <http://www.schedmd.com>
+ *  Portions Copyright (C) 2010-2015 SchedMD LLC <https://www.schedmd.com>
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Mark Grondona <grondona1@llnl.gov>, et. al.
  *  CODE-OCEC-09-009. All rights reserved.
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://slurm.schedmd.com/>.
+ *  For details, see <https://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -69,6 +69,7 @@
 #include "src/common/slurm_rlimits_info.h"
 #include "src/common/slurm_acct_gather_profile.h"
 #include "src/common/uid.h"
+#include "src/common/x11_util.h"
 #include "src/common/xmalloc.h"
 #include "src/common/xstring.h"
 #include "src/common/util-net.h"
@@ -146,7 +147,6 @@ enum wrappers {
 #define LONG_OPT_WRAP        0x118
 #define LONG_OPT_REQUEUE     0x119
 #define LONG_OPT_NETWORK     0x120
-#define LONG_OPT_QOS             0x127
 #define LONG_OPT_SOCKETSPERNODE  0x130
 #define LONG_OPT_CORESPERSOCKET  0x131
 #define LONG_OPT_THREADSPERCORE  0x132
@@ -189,11 +189,15 @@ enum wrappers {
 #define LONG_OPT_DEADLINE        0x166
 #define LONG_OPT_BURST_BUFFER_FILE 0x167
 #define LONG_OPT_DELAY_BOOT      0x168
+#define LONG_OPT_CLUSTER_CONSTRAINT 0x169
+#define LONG_OPT_X11             0x170
 
 /*---- global variables, defined in opt.h ----*/
 opt_t opt;
-int error_exit = 1;
-int ignore_pbs = 0;
+sbatch_env_t pack_env;
+int   error_exit = 1;
+int   ignore_pbs = 0;
+bool  is_pack_job = false;
 
 /*---- forward declarations of static functions  ----*/
 
@@ -202,14 +206,15 @@ typedef struct env_vars env_vars_t;
 static void  _help(void);
 
 /* fill in default options  */
-static void _opt_default(void);
+static void _opt_default(bool first_pass);
 
 /* set options from batch script */
-static void _opt_batch_script(const char *file, const void *body, int size);
+static bool _opt_batch_script(const char *file, const void *body, int size,
+			      int pack_inx);
 
 /* set options from pbs batch script */
 static bool _opt_wrpr_batch_script(const char *file, const void *body, int size,
-				  int argc, char **argv, int magic);
+				   int argc, char **argv, int magic);
 
 /* Wrapper functions */
 static void _set_pbs_options(int argc, char **argv);
@@ -229,11 +234,11 @@ static void _process_env_var(env_vars_t *e, const char *val);
 
 static uint16_t _parse_pbs_mail_type(const char *arg);
 
-static void  _usage(void);
 static void _fullpath(char **filename, const char *cwd);
+static void _parse_pbs_resource_list(char *rl);
 static char *_read_file(char *fname);
 static void _set_options(int argc, char **argv);
-static void _parse_pbs_resource_list(char *rl);
+static void _usage(void);
 
 /*---[ end forward declarations of static functions ]---------------------*/
 
@@ -243,7 +248,7 @@ static void _parse_pbs_resource_list(char *rl);
 #undef USE_ARGERROR
 #if USE_ARGERROR
 static void argerror(const char *msg, ...)
-  __attribute__ ((format (printf, 1, 2)));
+	__attribute__ ((format (printf, 1, 2)));
 static void argerror(const char *msg, ...)
 {
 	va_list ap;
@@ -288,135 +293,127 @@ static bool _valid_node_list(char **node_list_pptr)
 /*
  * _opt_default(): used by initialize_and_process_args to set defaults
  */
-static void _opt_default(void)
+static void _opt_default(bool first_pass)
 {
 	char buf[MAXPATHLEN + 1];
 	int i;
 	uid_t uid = getuid();
 
-	opt.user = uid_to_string(uid);
-	if (xstrcmp(opt.user, "nobody") == 0)
-		fatal("Invalid user id: %u", uid);
-
-	opt.script_argc = 0;
-	opt.script_argv = NULL;
-
-	opt.uid = uid;
-	opt.gid = getgid();
-
-	if ((getcwd(buf, MAXPATHLEN)) == NULL) {
-		error("getcwd failed: %m");
-		exit(error_exit);
+	/* Some options will persist for all components of a heterogeneous job
+	 * once specified for one, but will be overwritten with new values if
+	 * specified on the command line */
+	if (first_pass) {
+		xfree(opt.account);
+		xfree(opt.acctg_freq);
+		opt.begin		= 0;
+		xfree(opt.c_constraints);
+		opt.ckpt_dir 		= slurm_get_checkpoint_dir();
+		opt.ckpt_interval	= 0;
+		xfree(opt.ckpt_interval_str);
+		xfree(opt.clusters);
+		xfree(opt.comment);
+		if ((getcwd(buf, MAXPATHLEN)) == NULL) {
+			error("getcwd failed: %m");
+			exit(error_exit);
+		}
+		opt.cwd			= xstrdup(buf);
+		opt.deadline		= 0;
+		opt.delay_boot		= NO_VAL;
+		xfree(opt.dependency);
+		opt.egid		= (gid_t) -1;
+		xfree(opt.efname);
+		xfree(opt.exc_nodes);
+		xfree(opt.export_env);
+		xfree(opt.export_file);
+		opt.euid		= (uid_t) -1;
+		opt.get_user_env_mode	= -1;
+		opt.get_user_env_time	= -1;
+		opt.gid			= getgid();
+		opt.hold		= false;
+		opt.ifname		= xstrdup("/dev/null");
+		opt.immediate		= false;
+		xfree(opt.mcs_label);
+		opt.nice		= NO_VAL;
+		opt.no_kill		= false;
+		xfree(opt.ofname);
+		opt.parsable		= false;
+		opt.priority		= 0;
+		opt.profile		= ACCT_GATHER_PROFILE_NOT_SET;
+		xfree(opt.propagate); 	 /* propagate specific rlimits */
+		xfree(opt.qos);
+		opt.quiet		= 0;
+		opt.reboot		= false;
+		opt.requeue		= NO_VAL;
+		xfree(opt.reservation);
+		opt.test_only		= false;
+		opt.time_limit		= NO_VAL;
+		opt.time_min		= NO_VAL;
+		opt.uid			= uid;
+		opt.umask		= -1;
+		opt.user		= uid_to_string(uid);
+		if (xstrcmp(opt.user, "nobody") == 0)
+			fatal("Invalid user id: %u", uid);
+		opt.wait		= false;
+		opt.wait_all_nodes	= NO_VAL16;
+		opt.warn_flags		= 0;
+		opt.warn_signal		= 0;
+		opt.warn_time		= 0;
+		xfree(opt.wckey);
+		opt.x11			= 0;
 	}
-	opt.cwd = xstrdup(buf);
 
-	opt.clusters = NULL;
-	opt.progname = NULL;
-
-	opt.ntasks = 1;
-	opt.ntasks_set = false;
-	opt.cpu_freq_min = NO_VAL;
-	opt.cpu_freq_max = NO_VAL;
-	opt.cpu_freq_gov = NO_VAL;
-	opt.cpus_per_task = 0;
-	opt.cpus_set = false;
-	opt.min_nodes = 1;
-	opt.max_nodes = 0;
-	opt.nodes_set = false;
-	opt.sockets_per_node = NO_VAL; /* requested sockets */
-	opt.cores_per_socket = NO_VAL; /* requested cores */
-	opt.threads_per_core = NO_VAL; /* requested threads */
-	opt.ntasks_per_node      = 0;  /* ntask max limits */
-	opt.ntasks_per_socket    = NO_VAL;
-	opt.ntasks_per_core      = NO_VAL;
-	opt.mem_bind_type = 0;
-	opt.mem_bind = NULL;
-	opt.core_spec = (uint16_t) NO_VAL;
-	opt.time_limit = NO_VAL;
-	opt.time_min = NO_VAL;
-	opt.partition = NULL;
-	opt.power_flags = 0;
-
-	opt.job_name = NULL;
-	opt.jobid    = NO_VAL;
-	opt.jobid_set = false;
-	opt.dependency = NULL;
-	opt.account  = NULL;
-	opt.comment  = NULL;
-	opt.qos      = NULL;
-
-	opt.distribution = SLURM_DIST_UNKNOWN;
-	opt.plane_size   = NO_VAL;
-
-	opt.shared = (uint16_t)NO_VAL;
-	opt.no_kill = false;
-
-	opt.immediate	= false;
-	opt.requeue	= NO_VAL;
-	opt.overcommit	= false;
-
-	opt.quiet = 0;
-	opt.verbose = 0;
-	opt.warn_flags = 0;
-	opt.warn_signal = 0;
-	opt.warn_time   = 0;
-	opt.wait_all_nodes = (uint16_t) NO_VAL;
-
-	/* constraint default (-1 is no constraint) */
-	opt.mincpus	    = -1;
-	opt.mem_per_cpu	    = -1;
-	opt.realmem	    = -1;
-	opt.tmpdisk	    = -1;
-
-	opt.hold	    = false;
-	opt.parsable	    = false;
-	opt.constraints	    = NULL;
-	opt.gres	    = NULL;
-	opt.contiguous	    = false;
-	opt.nodelist	    = NULL;
-	opt.exc_nodes	    = NULL;
-
+	/* All other options must be specified individually for each component
+	 * of the job */
+	xfree(opt.constraints);
+	opt.contiguous			= false;
 	for (i = 0; i < HIGHEST_DIMENSIONS; i++) {
-		opt.conn_type[i]    = (uint16_t) NO_VAL;
-		opt.geometry[i]	    = 0;
+		opt.conn_type[i]	 = NO_VAL16;
+		opt.geometry[i]	 	= 0;
 	}
-	opt.reboot          = false;
-	opt.no_rotate	    = false;
-
-	opt.euid	    = (uid_t) -1;
-	opt.egid	    = (gid_t) -1;
-
-	opt.profile	    = ACCT_GATHER_PROFILE_NOT_SET;
-	opt.propagate	    = NULL;  /* propagate specific rlimits */
-
-	opt.ifname = xstrdup("/dev/null");
-	opt.ofname = NULL;
-	opt.efname = NULL;
-
-	opt.export_env        = NULL;
-	opt.export_file       = NULL;
-	opt.get_user_env_time = -1;
-	opt.get_user_env_mode = -1;
-	opt.acctg_freq        = NULL;
-	opt.reservation       = NULL;
-	opt.req_switch        = -1;
-	opt.umask             = -1;
-	opt.wait              = false;
-	opt.wait4switch       = -1;
-	opt.wckey             = NULL;
-
-	opt.ckpt_interval = 0;
-	opt.ckpt_interval_str = NULL;
-	opt.ckpt_dir = slurm_get_checkpoint_dir();
-
-	opt.nice = NO_VAL;
-	opt.priority = 0;
-
-	opt.test_only   = false;
-	opt.job_flags = 0;
-
-	opt.mcs_label		= NULL;
-	opt.delay_boot      = NO_VAL;
+	opt.core_spec			= NO_VAL16;
+	opt.cores_per_socket		= NO_VAL; /* requested cores */
+	opt.cpu_freq_gov		= NO_VAL;
+	opt.cpu_freq_max		= NO_VAL;
+	opt.cpu_freq_min		= NO_VAL;
+	opt.cpus_per_task		= 0;
+	opt.cpus_set			= false;
+	opt.distribution		= SLURM_DIST_UNKNOWN;
+	/* opt.geometry[i]	See above */
+	xfree(opt.gres);
+	opt.hint_env			= NULL;
+	opt.hint_set			= false;
+	opt.job_flags			= 0;
+	opt.jobid			= NO_VAL;
+	opt.jobid_set			= false;
+	opt.mail_type			= 0;
+	xfree(opt.mail_user);
+	opt.max_nodes			= 0;
+	xfree(opt.mem_bind);
+	opt.mem_bind_type		= 0;
+	opt.mem_per_cpu			= -1;
+	opt.mincpus			= -1;
+	opt.min_nodes			= 1;
+	opt.no_rotate			= false;
+	xfree(opt.nodelist);
+	opt.nodes_set			= false;
+	opt.ntasks			= 1;
+	opt.ntasks_per_core		= NO_VAL;
+	opt.ntasks_per_core_set		= false;
+	opt.ntasks_per_node		= 0;	/* ntask max limits */
+	opt.ntasks_per_socket		= NO_VAL;
+	opt.ntasks_set			= false;
+	opt.overcommit			= false;
+	xfree(opt.partition);
+	opt.plane_size			= NO_VAL;
+	opt.power_flags			= 0;
+	opt.realmem			= -1;
+	opt.req_switch			= -1;
+	opt.shared			= NO_VAL16;
+	opt.sockets_per_node		= NO_VAL; /* requested sockets */
+	opt.tmpdisk			= -1;
+	opt.threads_per_core		= NO_VAL; /* requested threads */
+	opt.threads_per_core_set	= false;
+	opt.wait4switch			= -1;
 }
 
 /* Read specified file's contents into a buffer.
@@ -482,6 +479,8 @@ env_vars_t env_vars[] = {
   {"SBATCH_CLUSTERS",      OPT_STRING,     &opt.clusters,      NULL          },
   {"SLURM_CLUSTERS",       OPT_STRING,     &opt.clusters,      NULL          },
   {"SBATCH_CNLOAD_IMAGE",  OPT_STRING,     &opt.linuximage,    NULL          },
+  {"SBATCH_CONSTRAINT",    OPT_STRING,     &opt.constraints,   NULL          },
+  {"SBATCH_CLUSTER_CONSTRAINT", OPT_STRING,&opt.c_constraints, NULL          },
   {"SBATCH_CONN_TYPE",     OPT_CONN_TYPE,  NULL,               NULL          },
   {"SBATCH_CORE_SPEC",     OPT_INT,        &opt.core_spec,     NULL          },
   {"SBATCH_CPU_FREQ_REQ",  OPT_CPU_FREQ,   NULL,               NULL          },
@@ -544,6 +543,10 @@ static void _opt_env(void)
 			_process_env_var(e, val);
 		e++;
 	}
+
+	/* Process spank env options */
+	if (spank_process_env_options())
+		exit(error_exit);
 }
 
 static void
@@ -614,15 +617,7 @@ _process_env_var(env_vars_t *e, const char *val)
 		break;
 
 	case OPT_HINT:
-		/* Keep after other options filled in */
-		if (verify_hint(val,
-				&opt.sockets_per_node,
-				&opt.cores_per_socket,
-				&opt.threads_per_core,
-				&opt.ntasks_per_core,
-				NULL)) {
-			exit(error_exit);
-		}
+		opt.hint_env = xstrdup(val);
 		break;
 
 	case OPT_MEM_BIND:
@@ -734,7 +729,7 @@ _process_env_var(env_vars_t *e, const char *val)
 		break;
 	case OPT_CPU_FREQ:
 		if (cpu_freq_verify_cmdline(val, &opt.cpu_freq_min,
-				&opt.cpu_freq_max, &opt.cpu_freq_gov))
+					    &opt.cpu_freq_max, &opt.cpu_freq_gov))
 			error("Invalid --cpu-freq argument: %s. Ignored", val);
 		break;
 	case OPT_POWER:
@@ -742,7 +737,7 @@ _process_env_var(env_vars_t *e, const char *val)
 		break;
 	case OPT_THREAD_SPEC:
 		opt.core_spec = parse_int("thread_spec", val, false) |
-					 CORE_SPEC_THREAD;
+			CORE_SPEC_THREAD;
 		break;
 	case OPT_DELAY_BOOT:
 		i = time_str2secs(val);
@@ -769,18 +764,20 @@ static struct option long_options[] = {
 	{"array",         required_argument, 0, 'a'},
 	{"batch",         no_argument,       0, 'b'}, /* batch option
 							 is only here for
-							 moab tansition
+							 moab translation
 							 doesn't do anything */
 	{"extra-node-info", required_argument, 0, 'B'},
 	{"cpus-per-task", required_argument, 0, 'c'},
+	{"cluster-constraint",required_argument,0, LONG_OPT_CLUSTER_CONSTRAINT},
 	{"constraint",    required_argument, 0, 'C'},
 	{"dependency",    required_argument, 0, 'd'},
+	{"chdir",         required_argument, 0, 'D'},
 	{"workdir",       required_argument, 0, 'D'},
 	{"error",         required_argument, 0, 'e'},
 	{"nodefile",      required_argument, 0, 'F'},
 	{"geometry",      required_argument, 0, 'g'},
 	{"help",          no_argument,       0, 'h'},
-	{"hold",          no_argument,       0, 'H'}, /* undocumented */
+	{"hold",          no_argument,       0, 'H'},
 	{"input",         required_argument, 0, 'i'},
 	{"immediate",     no_argument,       0, 'I'},
 	{"job-name",      required_argument, 0, 'J'},
@@ -797,6 +794,7 @@ static struct option long_options[] = {
 	{"overcommit",    no_argument,       0, 'O'},
 	{"oversubscribe", no_argument,       0, 's'},
 	{"partition",     required_argument, 0, 'p'},
+	{"qos",		  required_argument, 0, 'q'},
 	{"quiet",         no_argument,       0, 'Q'},
 	{"no-rotate",     no_argument,       0, 'R'},
 	{"share",         no_argument,       0, 's'},
@@ -857,7 +855,6 @@ static struct option long_options[] = {
 	{"propagate",     optional_argument, 0, LONG_OPT_PROPAGATE},
 	{"profile",       required_argument, 0, LONG_OPT_PROFILE},
 	{"priority",      required_argument, 0, LONG_OPT_PRIORITY},
-	{"qos",		  required_argument, 0, LONG_OPT_QOS},
 	{"ramdisk-image", required_argument, 0, LONG_OPT_RAMDISK_IMAGE},
 	{"reboot",        no_argument,       0, LONG_OPT_REBOOT},
 	{"requeue",       no_argument,       0, LONG_OPT_REQUEUE},
@@ -877,11 +874,12 @@ static struct option long_options[] = {
 	{"wait-all-nodes",required_argument, 0, LONG_OPT_WAIT_ALL_NODES},
 	{"wckey",         required_argument, 0, LONG_OPT_WCKEY},
 	{"wrap",          required_argument, 0, LONG_OPT_WRAP},
+	{"x11",           optional_argument, 0, LONG_OPT_X11},
 	{NULL,            0,                 0, 0}
 };
 
 static char *opt_string =
-	"+ba:A:B:c:C:d:D:e:F:g:hHi:IJ:kL:m:M:n:N:o:Op:P:QRsS:t:uU:vVw:Wx:";
+	"+ba:A:B:c:C:d:D:e:F:g:hHi:IJ:kL:m:M:n:N:o:Op:P:q:QRsS:t:uU:vVw:Wx:";
 char *pos_delimit;
 
 
@@ -900,12 +898,12 @@ char *pos_delimit;
  * line, otherwise return NULL, and the script will need to be read from
  * standard input.
  */
-char *process_options_first_pass(int argc, char **argv)
+extern char *process_options_first_pass(int argc, char **argv)
 {
 	int opt_char, option_index = 0;
-	char *str = NULL;
-
 	struct option *optz = spank_option_table_create(long_options);
+	int i, local_argc = 0;
+	char **local_argv, *script_file = NULL;
 
 	if (!optz) {
 		error("Unable to create options table");
@@ -913,17 +911,24 @@ char *process_options_first_pass(int argc, char **argv)
 	}
 
 	/* initialize option defaults */
-	_opt_default();
+	_opt_default(true);
+
+	/* Remove pack job separator and capture all options of interest from
+	 * all job components (e.g. "sbatch -N1 -v : -N2 -v tmp" -> "-vv") */
+	local_argv = xmalloc(sizeof(char *) * argc);
+	for (i = 0; i < argc; i++) {
+		if (xstrcmp(argv[i], ":"))
+			local_argv[local_argc++] = argv[i];
+	}
 
 	opt.progname = xbasename(argv[0]);
 	optind = 0;
-
-	while ((opt_char = getopt_long(argc, argv, opt_string,
+	while ((opt_char = getopt_long(local_argc, local_argv, opt_string,
 				       optz, &option_index)) != -1) {
 		switch (opt_char) {
 		case '?':
-			fprintf(stderr, "Try \"sbatch --help\" for more "
-				"information\n");
+			fprintf(stderr,
+				"Try \"sbatch --help\" for more information\n");
 			exit(error_exit);
 			break;
 		case 'h':
@@ -944,28 +949,28 @@ char *process_options_first_pass(int argc, char **argv)
 			exit(0);
 			break;
 		case LONG_OPT_WRAP:
-			opt.wrap = xstrdup(optarg);
+			xfree(opt.job_name);
+			xfree(opt.wrap);
 			opt.job_name = xstrdup("wrap");
+			opt.wrap = xstrdup(optarg);
 			break;
 		default:
-			/* will be parsed in second pass function */
+			/* all others parsed in second pass function */
 			break;
 		}
 	}
-	xfree(str);
 	spank_option_table_destroy(optz);
 
-	if (argc > optind && opt.wrap != NULL) {
-		error("Script arguments are not permitted with the"
-		      " --wrap option.");
+	if ((local_argc > optind) && (opt.wrap != NULL)) {
+		error("Script arguments not permitted with --wrap option");
 		exit(error_exit);
 	}
-	if (argc > optind) {
+	if (local_argc > optind) {
 		int i;
 		char **leftover;
 
-		opt.script_argc = argc - optind;
-		leftover = argv + optind;
+		opt.script_argc = local_argc - optind;
+		leftover = local_argv + optind;
 		opt.script_argv = (char **) xmalloc((opt.script_argc + 1)
 						    * sizeof(char *));
 		for (i = 0; i < opt.script_argc; i++)
@@ -981,11 +986,11 @@ char *process_options_first_pass(int argc, char **argv)
 			xfree(opt.script_argv[0]);
 			opt.script_argv[0] = fullpath;
 		}
-
-		return opt.script_argv[0];
-	} else {
-		return NULL;
+		script_file = opt.script_argv[0];
 	}
+
+	xfree(local_argv);
+	return script_file;
 }
 
 /* process options:
@@ -993,24 +998,37 @@ char *process_options_first_pass(int argc, char **argv)
  * 2. update options with env vars
  * 3. update options with commandline args
  * 4. perform some verification that options are reasonable
+ *
+ * argc IN - Count of elements in argv
+ * argv IN - Array of elements to parse
+ * argc_off OUT - Offset of first non-parsable element
+ * pack_inx IN - pack job component ID, zero origin
+ * more_packs OUT - more packs job specifications in script to process
  */
-int process_options_second_pass(int argc, char *argv[], const char *file,
-				const void *script_body, int script_size)
+extern void process_options_second_pass(int argc, char **argv, int *argc_off,
+					int pack_inx, bool *more_packs,
+					const char *file,
+					const void *script_body,
+					int script_size)
 {
+	static bool first_pass = true;
 	int i;
 
+	/* initialize option defaults */
+	_opt_default(first_pass);
+	first_pass = false;
+
 	/* set options from batch script */
-	_opt_batch_script(file, script_body, script_size);
+	*more_packs = _opt_batch_script(file, script_body, script_size,
+				        pack_inx);
 
 	for (i = WRPR_START + 1; i < WRPR_CNT; i++) {
 		/* Convert command from batch script to sbatch command */
 		bool stop = _opt_wrpr_batch_script(file, script_body,
 						   script_size, argc, argv, i);
 
-		if (stop) {
+		if (stop)
 			break;
-		}
-
 	}
 
 	/* set options from env vars */
@@ -1018,15 +1036,13 @@ int process_options_second_pass(int argc, char *argv[], const char *file,
 
 	/* set options from command line */
 	_set_options(argc, argv);
+	*argc_off = optind;
 
 	if (!_opt_verify())
 		exit(error_exit);
 
 	if (opt.verbose)
 		_opt_list();
-
-	return 1;
-
 }
 
 /*
@@ -1092,6 +1108,9 @@ _get_argument(const char *file, int lineno, const char *line, int *skipped)
 	ptr = line;
 	*skipped = 0;
 
+	if ((argument = strcasestr(line, "packjob")))
+		memcpy(argument, "       ", 7);
+
 	/* skip whitespace */
 	while (isspace(*ptr) && *ptr != '\0') {
 		ptr++;
@@ -1102,7 +1121,7 @@ _get_argument(const char *file, int lineno, const char *line, int *skipped)
 
 	/* copy argument into "argument" buffer, */
 	i = 0;
-	while ((quoted || !isspace(*ptr)) && *ptr != '\n' && *ptr != '\0') {
+	while ((quoted || !isspace(*ptr)) && (*ptr != '\n') && (*ptr != '\0')) {
 		if (escape_flag) {
 			escape_flag = false;
 		} else if (*ptr == '\\') {
@@ -1115,7 +1134,7 @@ _get_argument(const char *file, int lineno, const char *line, int *skipped)
 				ptr++;
 				continue;
 			}
-		} else if (*ptr == '"' || *ptr == '\'') {
+		} else if ((*ptr == '"') || (*ptr == '\'')) {
 			quoted = true;
 			q_char = *(ptr++);
 			continue;
@@ -1129,9 +1148,10 @@ _get_argument(const char *file, int lineno, const char *line, int *skipped)
 		argument[i++] = *(ptr++);
 	}
 
-	if (quoted) /* Unmatched quote */
+	if (quoted) {	/* Unmatched quote */
 		fatal("%s: line %d: Unmatched `%c` in [%s]",
 		      file, lineno, q_char, line);
+	}
 
 	*skipped = ptr - line;
 
@@ -1143,8 +1163,10 @@ _get_argument(const char *file, int lineno, const char *line, int *skipped)
  *
  * Build an argv-style array of options from the script "body",
  * then pass the array to _set_options for() further parsing.
+ * RET - True if more pack job specifications to process
  */
-static void _opt_batch_script(const char * file, const void *body, int size)
+static bool _opt_batch_script(const char * file, const void *body, int size,
+			      int pack_inx)
 {
 	char *magic_word1 = "#SBATCH";
 	char *magic_word2 = "#SLURM";
@@ -1156,7 +1178,8 @@ static void _opt_batch_script(const char * file, const void *body, int size)
 	char *option;
 	char *ptr;
 	int skipped = 0, warned = 0, lineno = 0;
-	int i;
+	int i, pack_scan_inx = 0;
+	bool more_packs = false;
 
 	magic_word_len1 = strlen(magic_word1);
 	magic_word_len2 = strlen(magic_word2);
@@ -1196,11 +1219,23 @@ static void _opt_batch_script(const char * file, const void *body, int size)
 		}
 
 		/* this line starts with the magic word */
+		if (strcasestr(line, "packjob"))
+			pack_scan_inx++;
+		if (pack_scan_inx < pack_inx) {
+			xfree(line);
+			continue;
+		}
+		if (pack_scan_inx > pack_inx) {
+			more_packs = true;
+			xfree(line);
+			break;
+		}
+
 		while ((option = _get_argument(file, lineno, ptr, &skipped))) {
 			debug2("Found in script, argument \"%s\"", option);
-			argc += 1;
-			xrealloc(argv, sizeof(char*) * argc);
-			argv[argc-1] = option;
+			argc++;
+			xrealloc(argv, sizeof(char *) * argc);
+			argv[argc - 1] = option;
 			ptr += skipped;
 		}
 		xfree(line);
@@ -1212,6 +1247,8 @@ static void _opt_batch_script(const char * file, const void *body, int size)
 	for (i = 1; i < argc; i++)
 		xfree(argv[i]);
 	xfree(argv);
+
+	return more_packs;
 }
 
 /*
@@ -1221,8 +1258,8 @@ static void _opt_batch_script(const char * file, const void *body, int size)
  * then pass the array to _set_options for() further parsing.
  */
 static bool _opt_wrpr_batch_script(const char *file, const void *body,
-				     int size, int cmd_argc, char **cmd_argv,
-				     int magic)
+				   int size, int cmd_argc, char **cmd_argv,
+				   int magic)
 {
 	char *magic_word;
 	void (*wrp_func) (int,char**) = NULL;
@@ -1308,7 +1345,7 @@ static bool _opt_wrpr_batch_script(const char *file, const void *body,
 		xfree(line);
 	}
 
-	if (argc > 0 && wrp_func != NULL)
+	if ((argc > 0) && (wrp_func != NULL))
 		wrp_func(argc, argv);
 
 	for (i = 1; i < argc; i++)
@@ -1352,20 +1389,25 @@ static void _set_options(int argc, char **argv)
 			   to do anything */
 			break;
 		case 'B':
+			if (!optarg)
+				break;	/* Fix for Coverity false positive */
 			opt.extra_set = verify_socket_core_thread_count(
-						optarg,
-						&opt.sockets_per_node,
-						&opt.cores_per_socket,
-						&opt.threads_per_core,
-						NULL);
+				optarg,
+				&opt.sockets_per_node,
+				&opt.cores_per_socket,
+				&opt.threads_per_core,
+				NULL);
 
 			if (opt.extra_set == false) {
 				error("invalid resource allocation -B `%s'",
-					optarg);
+				      optarg);
 				exit(error_exit);
 			}
+			opt.threads_per_core_set = true;
 			break;
 		case 'c':
+			if (!optarg)
+				break;	/* Fix for Coverity false positive */
 			opt.cpus_set = true;
 			opt.cpus_per_task = parse_int("cpus-per-task",
 						      optarg, true);
@@ -1379,6 +1421,8 @@ static void _set_options(int argc, char **argv)
 			opt.dependency = xstrdup(optarg);
 			break;
 		case 'D':
+			if (!optarg)
+				break;	/* Fix for Coverity false positive */
 			xfree(opt.cwd);
 			if (is_full_path(optarg))
 				opt.cwd = xstrdup(optarg);
@@ -1386,6 +1430,8 @@ static void _set_options(int argc, char **argv)
 				opt.cwd = make_full_path(optarg);
 			break;
 		case 'e':
+			if (!optarg)
+				break;	/* Fix for Coverity false positive */
 			xfree(opt.efname);
 			if (xstrcasecmp(optarg, "none") == 0)
 				opt.efname = xstrdup("/dev/null");
@@ -1393,6 +1439,8 @@ static void _set_options(int argc, char **argv)
 				opt.efname = xstrdup(optarg);
 			break;
 		case 'F':
+			if (!optarg)
+				break;	/* Fix for Coverity false positive */
 			xfree(opt.nodelist);
 			tmp = slurm_read_hostfile(optarg, 0);
 			if (tmp != NULL) {
@@ -1405,6 +1453,8 @@ static void _set_options(int argc, char **argv)
 			}
 			break;
 		case 'g':
+			if (!optarg)
+				break;	/* Fix for Coverity false positive */
 			if (verify_geometry(optarg, opt.geometry))
 				exit(error_exit);
 			break;
@@ -1415,6 +1465,8 @@ static void _set_options(int argc, char **argv)
 			opt.hold = true;
 			break;
 		case 'i':
+			if (!optarg)
+				break;	/* Fix for Coverity false positive */
 			xfree(opt.ifname);
 			if (xstrcasecmp(optarg, "none") == 0)
 				opt.ifname = xstrdup("/dev/null");
@@ -1436,6 +1488,8 @@ static void _set_options(int argc, char **argv)
 			opt.licenses = xstrdup(optarg);
 			break;
 		case 'm':
+			if (!optarg)
+				break;	/* Fix for Coverity false positive */
 			opt.distribution = verify_dist_type(optarg,
 							    &opt.plane_size);
 			if (opt.distribution == SLURM_DIST_UNKNOWN) {
@@ -1454,6 +1508,8 @@ static void _set_options(int argc, char **argv)
 				parse_int("number of tasks", optarg, true);
 			break;
 		case 'N':
+			if (!optarg)
+				break;	/* Fix for Coverity false positive */
 			opt.nodes_set =
 				verify_node_count(optarg,
 						  &opt.min_nodes,
@@ -1465,6 +1521,8 @@ static void _set_options(int argc, char **argv)
 			}
 			break;
 		case 'o':
+			if (!optarg)
+				break;	/* Fix for Coverity false positive */
 			xfree(opt.ofname);
 			if (xstrcasecmp(optarg, "none") == 0)
 				opt.ofname = xstrdup("/dev/null");
@@ -1482,6 +1540,10 @@ static void _set_options(int argc, char **argv)
 			verbose("-P option is deprecated, use -d instead");
 			xfree(opt.dependency);
 			opt.dependency = xstrdup(optarg);
+			break;
+		case 'q':
+			xfree(opt.qos);
+			opt.qos = xstrdup(optarg);
 			break;
 		case 'Q':
 			/* handled in process_options_first_pass() */
@@ -1512,15 +1574,23 @@ static void _set_options(int argc, char **argv)
 			opt.wait = true;
 			break;
 		case 'x':
+			if (!optarg)
+				break;	/* Fix for Coverity false positive */
 			xfree(opt.exc_nodes);
 			opt.exc_nodes = xstrdup(optarg);
 			if (!_valid_node_list(&opt.exc_nodes))
 				exit(error_exit);
 			break;
+		case LONG_OPT_CLUSTER_CONSTRAINT:
+			xfree(opt.c_constraints);
+			opt.c_constraints = xstrdup(optarg);
+			break;
 		case LONG_OPT_CONT:
 			opt.contiguous = true;
 			break;
 		case LONG_OPT_DEADLINE:
+			if (!optarg)
+				break;	/* Fix for Coverity false positive */
 			opt.deadline = parse_time(optarg, 0);
 			if (errno == ESLURM_INVALID_TIME_VALUE) {
 				error("Invalid deadline specification %s",
@@ -1529,6 +1599,8 @@ static void _set_options(int argc, char **argv)
 			}
 			break;
 		case LONG_OPT_DELAY_BOOT:
+			if (!optarg)
+				break;	/* Fix for Coverity false positive */
 			i = time_str2secs(optarg);
 			if (i == NO_VAL) {
 				error("Invalid delay-boot specification %s",
@@ -1550,11 +1622,15 @@ static void _set_options(int argc, char **argv)
 			}
 			break;
 		case LONG_OPT_MEM_BIND:
+			if (!optarg)
+				break;	/* Fix for Coverity false positive */
 			if (slurm_verify_mem_bind(optarg, &opt.mem_bind,
 						  &opt.mem_bind_type))
 				exit(error_exit);
 			break;
 		case LONG_OPT_MINCPU:
+			if (!optarg)
+				break;	/* Fix for Coverity false positive */
 			opt.mincpus = parse_int("mincpus", optarg, true);
 			if (opt.mincpus < 0) {
 				error("invalid mincpus constraint %s", optarg);
@@ -1562,6 +1638,8 @@ static void _set_options(int argc, char **argv)
 			}
 			break;
 		case LONG_OPT_MINCORES:
+			if (!optarg)
+				break;	/* Fix for Coverity false positive */
 			verbose("mincores option has been deprecated, use "
 				"cores-per-socket");
 			opt.cores_per_socket = parse_int("mincores",
@@ -1573,6 +1651,8 @@ static void _set_options(int argc, char **argv)
 			}
 			break;
 		case LONG_OPT_MINSOCKETS:
+			if (!optarg)
+				break;	/* Fix for Coverity false positive */
 			verbose("minsockets option has been deprecated, use "
 				"sockets-per-node");
 			opt.sockets_per_node = parse_int("minsockets",
@@ -1584,6 +1664,8 @@ static void _set_options(int argc, char **argv)
 			}
 			break;
 		case LONG_OPT_MINTHREADS:
+			if (!optarg)
+				break;	/* Fix for Coverity false positive */
 			verbose("minthreads option has been deprecated, use "
 				"threads-per-core");
 			opt.threads_per_core = parse_int("minthreads",
@@ -1593,9 +1675,12 @@ static void _set_options(int argc, char **argv)
 				      optarg);
 				exit(error_exit);
 			}
+			opt.threads_per_core_set = true;
 			break;
 		case LONG_OPT_MEM:
-			opt.realmem = (int64_t) str_to_mbytes(optarg);
+			if (!optarg)
+				break;	/* Fix for Coverity false positive */
+			opt.realmem = (int64_t) str_to_mbytes2(optarg);
 			if (opt.realmem < 0) {
 				error("invalid memory constraint %s",
 				      optarg);
@@ -1603,7 +1688,9 @@ static void _set_options(int argc, char **argv)
 			}
 			break;
 		case LONG_OPT_MEM_PER_CPU:
-			opt.mem_per_cpu = (int64_t) str_to_mbytes(optarg);
+			if (!optarg)
+				break;	/* Fix for Coverity false positive */
+			opt.mem_per_cpu = (int64_t) str_to_mbytes2(optarg);
 			if (opt.mem_per_cpu < 0) {
 				error("invalid memory constraint %s",
 				      optarg);
@@ -1611,40 +1698,52 @@ static void _set_options(int argc, char **argv)
 			}
 			break;
 		case LONG_OPT_TMP:
-			opt.tmpdisk = str_to_mbytes(optarg);
+			if (!optarg)
+				break;	/* Fix for Coverity false positive */
+			opt.tmpdisk = str_to_mbytes2(optarg);
 			if (opt.tmpdisk < 0) {
 				error("invalid tmp value %s", optarg);
 				exit(error_exit);
 			}
 			break;
 		case LONG_OPT_JOBID:
+			if (!optarg)
+				break;	/* Fix for Coverity false positive */
 			opt.jobid = parse_int("jobid", optarg, true);
 			opt.jobid_set = true;
 			break;
 		case LONG_OPT_UID:
+			if (!optarg)
+				break;	/* Fix for Coverity false positive */
 			if (opt.euid != (uid_t) -1) {
 				error("duplicate --uid option");
 				exit(error_exit);
 			}
-			if (uid_from_string (optarg, &opt.euid) < 0) {
+			if (uid_from_string(optarg, &opt.euid) < 0) {
 				error("--uid=\"%s\" invalid", optarg);
 				exit(error_exit);
 			}
 			break;
 		case LONG_OPT_GID:
+			if (!optarg)
+				break;	/* Fix for Coverity false positive */
 			if (opt.egid != (gid_t) -1) {
 				error("duplicate --gid option");
 				exit(error_exit);
 			}
-			if (gid_from_string (optarg, &opt.egid) < 0) {
+			if (gid_from_string(optarg, &opt.egid) < 0) {
 				error("--gid=\"%s\" invalid", optarg);
 				exit(error_exit);
 			}
 			break;
 		case LONG_OPT_CONNTYPE:
+			if (!optarg)
+				break;	/* Fix for Coverity false positive */
 			verify_conn_type(optarg, opt.conn_type);
 			break;
 		case LONG_OPT_BEGIN:
+			if (!optarg)
+				break;	/* Fix for Coverity false positive */
 			opt.begin = parse_time(optarg, 0);
 			if (opt.begin == 0) {
 				error("Invalid time specification %s", optarg);
@@ -1652,6 +1751,8 @@ static void _set_options(int argc, char **argv)
 			}
 			break;
 		case LONG_OPT_MAIL_TYPE:
+			if (!optarg)
+				break;	/* Fix for Coverity false positive */
 			opt.mail_type |= parse_mail_type(optarg);
 			if (opt.mail_type == (uint16_t)INFINITE) {
 				error("--mail-type=%s invalid", optarg);
@@ -1659,15 +1760,20 @@ static void _set_options(int argc, char **argv)
 			}
 			break;
 		case LONG_OPT_MAIL_USER:
+			if (!optarg)
+				break;	/* Fix for Coverity false positive */
 			xfree(opt.mail_user);
 			opt.mail_user = xstrdup(optarg);
 			break;
-		case LONG_OPT_MCS_LABEL: {
+		case LONG_OPT_MCS_LABEL:
+			if (!optarg)
+				break;	/* Fix for Coverity false positive */
 			xfree(opt.mcs_label);
 			opt.mcs_label = xstrdup(optarg);
 			break;
-		}
 		case LONG_OPT_BURST_BUFFER_FILE:
+			if (!optarg)
+				break;	/* Fix for Coverity false positive */
 			xfree(opt.burst_buffer_file);
 			opt.burst_buffer_file = _read_file(optarg);
 			break;
@@ -1677,7 +1783,7 @@ static void _set_options(int argc, char **argv)
 				tmp_nice = strtoll(optarg, NULL, 10);
 			else
 				tmp_nice = 100;
-			if (abs(tmp_nice) > (NICE_OFFSET - 3)) {
+			if (llabs(tmp_nice) > (NICE_OFFSET - 3)) {
 				error("Nice value out of range (+/- %u). Value "
 				      "ignored", NICE_OFFSET - 3);
 				tmp_nice = 0;
@@ -1695,9 +1801,9 @@ static void _set_options(int argc, char **argv)
 			break;
 		}
 		case LONG_OPT_PRIORITY:
-			if (!optarg) { /* CLANG Fix */
-				;
-			} else if (strcasecmp(optarg, "TOP") == 0) {
+			if (!optarg)
+				break;	/* Fix for Coverity false positive */
+			if (strcasecmp(optarg, "TOP") == 0) {
 				opt.priority = NO_VAL - 1;
 			} else {
 				priority = strtoll(optarg, NULL, 10);
@@ -1720,17 +1826,17 @@ static void _set_options(int argc, char **argv)
 			opt.requeue = 1;
 			break;
 		case LONG_OPT_PROFILE:
+			if (!optarg)
+				break;	/* Fix for Coverity false positive */
 			opt.profile = acct_gather_profile_from_string(optarg);
 			break;
 		case LONG_OPT_COMMENT:
 			xfree(opt.comment);
 			opt.comment = xstrdup(optarg);
 			break;
-		case LONG_OPT_QOS:
-			xfree(opt.qos);
-			opt.qos = xstrdup(optarg);
-			break;
 		case LONG_OPT_SOCKETSPERNODE:
+			if (!optarg)
+				break;	/* Fix for Coverity false positive */
 			max_val = 0;
 			get_resource_arg_range( optarg, "sockets-per-node",
 						&opt.sockets_per_node,
@@ -1740,6 +1846,8 @@ static void _set_options(int argc, char **argv)
 				opt.sockets_per_node = NO_VAL;
 			break;
 		case LONG_OPT_CORESPERSOCKET:
+			if (!optarg)
+				break;	/* Fix for Coverity false positive */
 			max_val = 0;
 			get_resource_arg_range( optarg, "cores-per-socket",
 						&opt.cores_per_socket,
@@ -1749,6 +1857,8 @@ static void _set_options(int argc, char **argv)
 				opt.cores_per_socket = NO_VAL;
 			break;
 		case LONG_OPT_THREADSPERCORE:
+			if (!optarg)
+				break;	/* Fix for Coverity false positive */
 			max_val = 0;
 			get_resource_arg_range( optarg, "threads-per-core",
 						&opt.threads_per_core,
@@ -1756,27 +1866,34 @@ static void _set_options(int argc, char **argv)
 			if ((opt.threads_per_core == 1) &&
 			    (max_val == INT_MAX))
 				opt.threads_per_core = NO_VAL;
+			opt.threads_per_core_set = true;
 			break;
 		case LONG_OPT_NTASKSPERNODE:
+			if (!optarg)
+				break;	/* Fix for Coverity false positive */
 			opt.ntasks_per_node = parse_int("ntasks-per-node",
 							optarg, true);
 			if (opt.ntasks_per_node > 0)
-				setenvf(NULL, "SLURM_NTASKS_PER_NODE", "%d",
-					opt.ntasks_per_node);
+				pack_env.ntasks_per_node = opt.ntasks_per_node;
 			break;
 		case LONG_OPT_NTASKSPERSOCKET:
+			if (!optarg)
+				break;	/* Fix for Coverity false positive */
 			opt.ntasks_per_socket = parse_int("ntasks-per-socket",
 							  optarg, true);
-			setenvf(NULL, "SLURM_NTASKS_PER_SOCKET", "%d",
-				opt.ntasks_per_socket);
+			pack_env.ntasks_per_socket = opt.ntasks_per_socket;
 			break;
 		case LONG_OPT_NTASKSPERCORE:
+			if (!optarg)
+				break;	/* Fix for Coverity false positive */
 			opt.ntasks_per_core = parse_int("ntasks-per-core",
 							optarg, true);
-			setenvf(NULL, "SLURM_NTASKS_PER_CORE", "%d",
-				opt.ntasks_per_core);
+			pack_env.ntasks_per_core = opt.ntasks_per_core;
+			opt.ntasks_per_core_set = true;
 			break;
 		case LONG_OPT_HINT:
+			if (!optarg)
+				break;	/* Fix for Coverity false positive */
 			/* Keep after other options filled in */
 			if (verify_hint(optarg,
 					&opt.sockets_per_node,
@@ -1786,6 +1903,9 @@ static void _set_options(int argc, char **argv)
 					NULL)) {
 				exit(error_exit);
 			}
+			opt.hint_set = true;
+			opt.ntasks_per_core_set = true;
+			opt.threads_per_core_set = true;
 			break;
 		case LONG_OPT_BLRTS_IMAGE:
 			xfree(opt.blrtsimage);
@@ -1823,8 +1943,8 @@ static void _set_options(int argc, char **argv)
 				opt.get_user_env_time = 0;
 			break;
 		case LONG_OPT_OPEN_MODE:
-			if (!optarg) /* CLANG Fix */
-				break;
+			if (!optarg)
+				break;	/* Fix for Coverity false positive */
 			if ((optarg[0] == 'a') || (optarg[0] == 'A'))
 				opt.open_mode = OPEN_MODE_APPEND;
 			else if ((optarg[0] == 't') || (optarg[0] == 'T'))
@@ -1866,6 +1986,8 @@ static void _set_options(int argc, char **argv)
 			opt.ckpt_dir = xstrdup(optarg);
 			break;
 		case LONG_OPT_SIGNAL:
+			if (!optarg)
+				break;	/* Fix for Coverity false positive */
 			if (get_signal_opts(optarg, &opt.warn_signal,
 					    &opt.warn_time, &opt.warn_flags)) {
 				error("Invalid signal specification: %s",
@@ -1878,6 +2000,8 @@ static void _set_options(int argc, char **argv)
 			opt.time_min_str = xstrdup(optarg);
 			break;
 		case LONG_OPT_GRES:
+			if (!optarg)
+				break;	/* Fix for Coverity false positive */
 			if (!xstrcasecmp(optarg, "help") ||
 			    !xstrcasecmp(optarg, "list")) {
 				print_gres_help();
@@ -1887,6 +2011,8 @@ static void _set_options(int argc, char **argv)
 			opt.gres = xstrdup(optarg);
 			break;
 		case LONG_OPT_GRES_FLAGS:
+			if (!optarg)
+				break;	/* Fix for Coverity false positive */
 			if (!xstrcasecmp(optarg, "enforce-binding")) {
 				opt.job_flags |= GRES_ENFORCE_BIND;
 			} else {
@@ -1896,8 +2022,8 @@ static void _set_options(int argc, char **argv)
 			}
 			break;
 		case LONG_OPT_WAIT_ALL_NODES:
-			if (!optarg) /* CLANG Fix */
-				break;
+			if (!optarg)
+				break;	/* Fix for Coverity false positive */
 			if ((optarg[0] < '0') || (optarg[0] > '9')) {
 				error("Invalid --wait-all-nodes argument: %s",
 				      optarg);
@@ -1906,6 +2032,8 @@ static void _set_options(int argc, char **argv)
 			opt.wait_all_nodes = strtol(optarg, NULL, 10);
 			break;
 		case LONG_OPT_EXPORT:
+			if (!optarg)
+				break;	/* Fix for Coverity false positive */
 			xfree(opt.export_env);
 			opt.export_env = xstrdup(optarg);
 			if (!xstrcasecmp(opt.export_env, "ALL"))
@@ -1918,14 +2046,17 @@ static void _set_options(int argc, char **argv)
 			opt.export_file = xstrdup(optarg);
 			break;
 		case LONG_OPT_CPU_FREQ:
+			if (!optarg)
+				break;	/* Fix for Coverity false positive */
 			if (cpu_freq_verify_cmdline(optarg, &opt.cpu_freq_min,
-					&opt.cpu_freq_max, &opt.cpu_freq_gov))
+						    &opt.cpu_freq_max,
+						    &opt.cpu_freq_gov))
 				error("Invalid --cpu-freq argument: %s. "
-						"Ignored", optarg);
+				      "Ignored", optarg);
 			break;
 		case LONG_OPT_REQ_SWITCH:
-			if (!optarg) /* CLANG Fix */
-				break;
+			if (!optarg)
+				break;	/* Fix for Coverity false positive */
 			pos_delimit = strstr(optarg,"@");
 			if (pos_delimit != NULL) {
 				pos_delimit[0] = '\0';
@@ -1944,14 +2075,20 @@ static void _set_options(int argc, char **argv)
 			opt.parsable = true;
 			break;
 		case LONG_OPT_POWER:
+			if (!optarg)
+				break;	/* Fix for Coverity false positive */
 			opt.power_flags = power_flags_id(optarg);
 			break;
 		case LONG_OPT_THREAD_SPEC:
+			if (!optarg)
+				break;	/* Fix for Coverity false positive */
 			opt.core_spec = parse_int("thread_spec",
 						  optarg, false) |
-					CORE_SPEC_THREAD;
+				CORE_SPEC_THREAD;
 			break;
 		case LONG_OPT_KILL_INV_DEP:
+			if (!optarg)
+				break;	/* Fix for Coverity false positive */
 			if (xstrcasecmp(optarg, "yes") == 0)
 				opt.job_flags |= KILL_INV_DEP;
 			if (xstrcasecmp(optarg, "no") == 0)
@@ -1963,18 +2100,16 @@ static void _set_options(int argc, char **argv)
 		case LONG_OPT_USE_MIN_NODES:
 			opt.job_flags |= USE_MIN_NODES;
 			break;
+		case LONG_OPT_X11:
+			if (optarg)
+				opt.x11 = x11_str2flags(optarg);
+			else
+				opt.x11 = X11_FORWARD_BATCH;
+			break;
 		default:
-			if (spank_process_option (opt_char, optarg) < 0) {
-				error("Unrecognized command line parameter %c",
-				      opt_char);
+			if (spank_process_option (opt_char, optarg) < 0)
 				exit(error_exit);
-			}
 		}
-	}
-
-	if (optind < argc) {
-		error("Invalid argument: %s", argv[optind]);
-		exit(error_exit);
 	}
 
 	spank_option_table_destroy (optz);
@@ -2147,7 +2282,7 @@ static void _set_pbs_options(int argc, char **argv)
 	optind = 0;
 	while ((opt_char = getopt_long(argc, argv, pbs_opt_string,
 				       pbs_long_options, &option_index))
-	      != -1) {
+	       != -1) {
 		switch (opt_char) {
 		case 'a':
 			opt.begin = parse_time(optarg, 0);
@@ -2215,7 +2350,7 @@ static void _set_pbs_options(int argc, char **argv)
 				tmp_nice = strtoll(optarg, NULL, 10);
 			else
 				tmp_nice = 100;
-			if (abs(tmp_nice) > (NICE_OFFSET - 3)) {
+			if (llabs(tmp_nice) > (NICE_OFFSET - 3)) {
 				error("Nice value out of range (+/- %u). Value "
 				      "ignored", NICE_OFFSET - 3);
 				tmp_nice = 0;
@@ -2472,10 +2607,10 @@ static void _parse_pbs_resource_list(char *rl)
 				xfree(temp);
 			}
 #if defined(HAVE_ALPS_CRAY) || defined(HAVE_NATIVE_CRAY)
-		/*
-		 * NB: no "mppmem" here since it specifies per-PE memory units,
-		 *     whereas SLURM uses per-node and per-CPU memory units.
-		 */
+			/*
+			 * NB: no "mppmem" here since it specifies per-PE memory units,
+			 *     whereas SLURM uses per-node and per-CPU memory units.
+			 */
 		} else if (!xstrncmp(rl + i, "mppdepth=", 9)) {
 			/* Cray: number of CPUs (threads) per processing element */
 			i += 9;
@@ -2537,7 +2672,7 @@ static void _parse_pbs_resource_list(char *rl)
 				tmp_nice = strtoll(temp, NULL, 10);
 			else
 				tmp_nice = 100;
-			if (abs(tmp_nice) > (NICE_OFFSET - 3)) {
+			if (llabs(tmp_nice) > (NICE_OFFSET - 3)) {
 				error("Nice value out of range (+/- %u). Value "
 				      "ignored", NICE_OFFSET - 3);
 				tmp_nice = 0;
@@ -2645,18 +2780,31 @@ static void _parse_pbs_resource_list(char *rl)
 static bool _opt_verify(void)
 {
 	bool verified = true;
-	char *dist = NULL, *lllp_dist = NULL;
+	char *dist = NULL, *dist_lllp = NULL;
 	uint32_t cluster_flags = slurmdb_setup_cluster_flags();
+	hostlist_t hl = NULL;
+	int hl_cnt = 0;
 
 	if (opt.quiet && opt.verbose) {
 		error ("don't specify both --verbose (-v) and --quiet (-Q)");
 		verified = false;
 	}
 
-	if (opt.ntasks_set && (opt.ntasks > 0)) {
-		setenvf(NULL, "SLURM_NPROCS", "%d", opt.ntasks);
-		setenvf(NULL, "SLURM_NTASKS", "%d", opt.ntasks);
+	if (opt.hint_env &&
+	    (!opt.hint_set && !opt.ntasks_per_core_set &&
+	     !opt.threads_per_core_set)) {
+		if (verify_hint(opt.hint_env,
+				&opt.sockets_per_node,
+				&opt.cores_per_socket,
+				&opt.threads_per_core,
+				&opt.ntasks_per_core,
+				NULL)) {
+			exit(error_exit);
+		}
 	}
+
+	if (opt.ntasks_set && (opt.ntasks > 0))
+		pack_env.ntasks = opt.ntasks;
 
 	_fullpath(&opt.efname, opt.cwd);
 	_fullpath(&opt.ifname, opt.cwd);
@@ -2676,8 +2824,7 @@ static bool _opt_verify(void)
 			opt.distribution &= SLURM_DIST_STATE_FLAGS;
 			opt.distribution |= SLURM_DIST_ARBITRARY;
 			if (!_valid_node_list(&opt.nodelist)) {
-				error("Failure getting NodeNames from "
-				      "hostfile");
+				error("Failure getting NodeNames from hostfile");
 				exit(error_exit);
 			} else {
 				debug("loaded nodes (%s) from hostfile",
@@ -2690,8 +2837,7 @@ static bool _opt_verify(void)
 	}
 
 	if (opt.nodelist) {
-		int hl_cnt;
-		hostlist_t hl = hostlist_create(opt.nodelist);
+		hl = hostlist_create(opt.nodelist);
 
 		if (!hl) {
 			error("memory allocation failure");
@@ -2703,6 +2849,7 @@ static bool _opt_verify(void)
 			opt.min_nodes = MAX(hl_cnt, opt.min_nodes);
 		else
 			opt.min_nodes = hl_cnt;
+		opt.nodes_set = true;
 	}
 
 	if (cluster_flags & CLUSTER_FLAG_BGQ)
@@ -2794,25 +2941,16 @@ static bool _opt_verify(void)
 		}
 	}
 
-	if (opt.cpus_set &&
-	    setenvf(NULL, "SLURM_CPUS_PER_TASK", "%d", opt.cpus_per_task)) {
-		error("Can't set SLURM_CPUS_PER_TASK env variable");
-	}
+	if (opt.cpus_set)
+		 pack_env.cpus_per_task = opt.cpus_per_task;
 
-	set_distribution(opt.distribution, &dist, &lllp_dist);
-	if (dist &&
-	    setenvf(NULL, "SLURM_DISTRIBUTION", "%s", dist)) {
-		error("Can't set SLURM_DISTRIBUTION env variable");
-	}
-
-	if (((opt.distribution & SLURM_DIST_STATE_BASE) == SLURM_DIST_PLANE) &&
-	    setenvf(NULL, "SLURM_DIST_PLANESIZE", "%d", opt.plane_size)) {
-		error("Can't set SLURM_DIST_PLANESIZE env variable");
-	}
-
-	if (lllp_dist && setenvf(NULL, "SLURM_DIST_LLLP", "%s", lllp_dist)) {
-		error("Can't set SLURM_DIST_LLLP env variable");
-	}
+	set_distribution(opt.distribution, &dist, &dist_lllp);
+	if (dist)
+		 pack_env.dist = xstrdup(dist);
+	if ((opt.distribution & SLURM_DIST_STATE_BASE) == SLURM_DIST_PLANE)
+		 pack_env.plane_size = opt.plane_size;
+	if (dist_lllp)
+		 pack_env.dist_lllp = xstrdup(dist_lllp);
 
 	/* massage the numbers */
 	if ((opt.nodes_set || opt.extra_set)				&&
@@ -2836,6 +2974,12 @@ static bool _opt_verify(void)
 		}
 
 	} else if (opt.nodes_set && opt.ntasks_set) {
+		/*
+		 * Make sure that the number of
+		 * max_nodes is <= number of tasks
+		 */
+		if (opt.ntasks < opt.max_nodes)
+			opt.max_nodes = opt.ntasks;
 
 		/*
 		 *  make sure # of procs >= min_nodes
@@ -2846,10 +2990,21 @@ static bool _opt_verify(void)
 			      "nodes, setting nnodes to %d",
 			      opt.ntasks, opt.min_nodes, opt.ntasks);
 
-			opt.min_nodes = opt.ntasks;
-			if (   opt.max_nodes
-			       && (opt.min_nodes > opt.max_nodes) )
-				opt.max_nodes = opt.min_nodes;
+			opt.min_nodes = opt.max_nodes = opt.ntasks;
+
+			if (hl_cnt > opt.min_nodes) {
+				int del_cnt, i;
+				char *host;
+				del_cnt = hl_cnt - opt.min_nodes;
+				for (i=0; i<del_cnt; i++) {
+					host = hostlist_pop(hl);
+					free(host);
+				}
+				xfree(opt.nodelist);
+				opt.nodelist =
+					hostlist_ranged_string_xmalloc(hl);
+			}
+
 		}
 
 	} /* else if (opt.ntasks_set && !opt.nodes_set) */
@@ -2857,8 +3012,9 @@ static bool _opt_verify(void)
 	/* set up the proc and node counts based on the arbitrary list
 	   of nodes */
 	if (((opt.distribution & SLURM_DIST_STATE_BASE) == SLURM_DIST_ARBITRARY)
-	   && (!opt.nodes_set || !opt.ntasks_set)) {
-		hostlist_t hl = hostlist_create(opt.nodelist);
+	    && (!opt.nodes_set || !opt.ntasks_set)) {
+		if (!hl)
+			hl = hostlist_create(opt.nodelist);
 		if (!opt.ntasks_set) {
 			opt.ntasks_set = 1;
 			opt.ntasks = hostlist_count(hl);
@@ -2868,8 +3024,10 @@ static bool _opt_verify(void)
 			hostlist_uniq(hl);
 			opt.min_nodes = opt.max_nodes = hostlist_count(hl);
 		}
-		hostlist_destroy(hl);
 	}
+
+	if (hl)
+		hostlist_destroy(hl);
 
 	if (opt.time_limit_str) {
 		opt.time_limit = time_str2mins(opt.time_limit_str);
@@ -2909,16 +3067,6 @@ static bool _opt_verify(void)
 	if ((opt.egid != (gid_t) -1) && (opt.egid != opt.gid))
 		opt.gid = opt.egid;
 
-	if (opt.immediate) {
-		char *sched_name = slurm_get_sched_type();
-		if (xstrcmp(sched_name, "sched/wiki") == 0) {
-			info("WARNING: Ignoring the -I/--immediate option "
-				"(not supported by Maui)");
-			opt.immediate = false;
-		}
-		xfree(sched_name);
-	}
-
 	if (opt.open_mode) {
 		/* Propage mode to spawned job using environment variable */
 		if (opt.open_mode == OPEN_MODE_APPEND)
@@ -2950,10 +3098,22 @@ static bool _opt_verify(void)
 		char tmp[64];
 		slurm_sprint_mem_bind_type(tmp, opt.mem_bind_type);
 		if (opt.mem_bind) {
-			setenvf(NULL, "SBATCH_MEM_BIND", "%s:%s",
-				tmp, opt.mem_bind);
+			xstrfmtcat(pack_env.mem_bind, "%s:%s",
+				   tmp, opt.mem_bind);
 		} else {
-			setenvf(NULL, "SBATCH_MEM_BIND", "%s", tmp);
+			pack_env.mem_bind = xstrdup(tmp);
+		}
+	}
+	if (opt.mem_bind_type && (getenv("SLURM_MEM_BIND_SORT") == NULL) &&
+	    (opt.mem_bind_type & MEM_BIND_SORT)) {
+		pack_env.mem_bind_sort = xstrdup("sort");
+	}
+
+	if (opt.mem_bind_type && (getenv("SLURM_MEM_BIND_VERBOSE") == NULL)) {
+		if (opt.mem_bind_type & MEM_BIND_VERBOSE) {
+			pack_env.mem_bind_verbose = xstrdup("verbose");
+		} else {
+			pack_env.mem_bind_verbose = xstrdup("quiet");
 		}
 	}
 
@@ -2969,7 +3129,12 @@ static bool _opt_verify(void)
 	}
 
 	cpu_freq_set_env("SLURM_CPU_FREQ_REQ",
-			opt.cpu_freq_min, opt.cpu_freq_max, opt.cpu_freq_gov);
+			 opt.cpu_freq_min, opt.cpu_freq_max, opt.cpu_freq_gov);
+
+	if (opt.x11) {
+		opt.x11_target_port = x11_get_display_port();
+		opt.x11_magic_cookie = x11_get_xauth();
+	}
 
 	return verified;
 }
@@ -3089,7 +3254,7 @@ extern int   spank_unset_job_env(const char *name)
  *
  * warning: returns pointer to memory allocated on the stack.
  */
-static char *print_constraints()
+static char *print_constraints(void)
 {
 	char *buf = xstrdup("");
 
@@ -3126,6 +3291,9 @@ static char *print_constraints()
 	if (opt.constraints != NULL)
 		xstrfmtcat(buf, "constraints=`%s' ", opt.constraints);
 
+	if (opt.c_constraints != NULL)
+		xstrfmtcat(buf, "cluster-constraints=`%s' ", opt.c_constraints);
+
 	return buf;
 }
 
@@ -3161,7 +3329,7 @@ static void _opt_list(void)
 	info("gid               : %ld", (long) opt.gid);
 	info("cwd               : %s", opt.cwd);
 	info("ntasks            : %d %s", opt.ntasks,
-		opt.ntasks_set ? "(set)" : "(default)");
+	     opt.ntasks_set ? "(set)" : "(default)");
 	if (opt.cpus_set)
 		info("cpus_per_task     : %d", opt.cpus_per_task);
 	if (opt.max_nodes) {
@@ -3169,12 +3337,12 @@ static void _opt_list(void)
 		     opt.min_nodes, opt.max_nodes);
 	} else {
 		info("nodes             : %d %s", opt.min_nodes,
-			opt.nodes_set ? "(set)" : "(default)");
+		     opt.nodes_set ? "(set)" : "(default)");
 	}
 	info("jobid             : %u %s", opt.jobid,
-		opt.jobid_set ? "(set)" : "(default)");
+	     opt.jobid_set ? "(set)" : "(default)");
 	info("partition         : %s",
-		opt.partition == NULL ? "default" : opt.partition);
+	     opt.partition == NULL ? "default" : opt.partition);
 	info("profile           : `%s'",
 	     acct_gather_profile_to_string(opt.profile));
 	info("job name          : `%s'", opt.job_name);
@@ -3282,7 +3450,7 @@ static void _usage(void)
 "              [-D path] [--immediate] [--no-kill] [--overcommit]\n"
 "              [--input file] [--output file] [--error file]\n"
 "              [--time-min=minutes] [--licenses=names] [--clusters=cluster_names]\n"
-"              [--workdir=directory] [--oversubscibe] [-m dist] [-J jobname]\n"
+"              [--chdir=directory] [--oversubscibe] [-m dist] [-J jobname]\n"
 "              [--jobid=id] [--verbose] [--gid=group] [--uid=user]\n"
 "              [--contiguous] [--mincpus=n] [--mem=MB] [--tmp=MB] [-C list]\n"
 "              [--account=name] [--dependency=type:jobid] [--comment=name]\n"
@@ -3317,9 +3485,6 @@ static void _help(void)
 "      --bb=<spec>             burst buffer specifications\n"
 "      --bbf=<file_name>       burst buffer specification file\n"
 "      --begin=time            defer job until HH:MM MM/DD/YY\n"
-"  -M, --clusters=names        Comma separated list of clusters to issue\n"
-"                              commands to.  Default is current cluster.\n"
-"                              Name of 'all' will submit to run on all clusters.\n"
 "      --comment=name          arbitrary comment\n"
 "      --cpu-freq=min[-max[:gov]] requested cpu frequency (and governor)\n"
 "  -c, --cpus-per-task=ncpus   number of cpus required per task\n"
@@ -3328,7 +3493,7 @@ static void _help(void)
 "      --deadline=time         remove the job if no ending possible before\n"
 "                              this deadline (start > (deadline - time[-min]))\n"
 "      --delay-boot=mins       delay boot for desired node features\n"
-"  -D, --workdir=directory     set working directory for batch script\n"
+"  -D, --chdir=directory       set working directory for batch script\n"
 "  -e, --error=err             file for batch script's standard error\n"
 "      --export[=names]        specify environment variables to export\n"
 "      --export-file=file|fd   specify environment variables file or file\n"
@@ -3345,9 +3510,12 @@ static void _help(void)
 "  -J, --job-name=jobname      name of job\n"
 "  -k, --no-kill               do not kill job on node failure\n"
 "  -L, --licenses=names        required license, comma separated\n"
+"  -M, --clusters=names        Comma separated list of clusters to issue\n"
+"                              commands to.  Default is current cluster.\n"
+"                              Name of 'all' will submit to run on all clusters.\n"
+"                              NOTE: SlurmDBD must up.\n"
 "  -m, --distribution=type     distribution method for processes to nodes\n"
 "                              (type = block|cyclic|arbitrary)\n"
-
 "      --mail-type=type        notify on state change: BEGIN, END, FAIL or ALL\n"
 "      --mail-user=user        who to send email notification for job state\n"
 "                              changes\n"
@@ -3368,7 +3536,7 @@ static void _help(void)
 "                              value is all or none or any combination of\n"
 "                              energy, lustre, network or task\n"
 "      --propagate[=rlimits]   propagate all [or specific list of] rlimits\n"
-"      --qos=qos               quality of service\n"
+"  -q, --qos=qos               quality of service\n"
 "  -Q, --quiet                 quiet mode (suppress informational messages)\n"
 "      --reboot                reboot compute nodes before starting job\n"
 "      --requeue               if set, permit the job to be requeued\n"
@@ -3391,6 +3559,7 @@ static void _help(void)
 
 "\n"
 "Constraint options:\n"
+"      --cluster-constraint=[!]list specify a list of cluster constraints\n"
 "      --contiguous            demand a contiguous range of nodes\n"
 "  -C, --constraint=list       specify a list of constraints\n"
 "  -F, --nodefile=filename     request a specific list of hosts\n"
@@ -3468,4 +3637,94 @@ static void _help(void)
 "\n"
 		);
 
+}
+
+extern void init_envs(sbatch_env_t *local_env)
+{
+	local_env->cpus_per_task	= NO_VAL;
+	local_env->dist			= NULL;
+	local_env->dist_lllp		= NULL;
+	local_env->mem_bind		= NULL;
+	local_env->mem_bind_sort	= NULL;
+	local_env->mem_bind_verbose	= NULL;
+	local_env->ntasks		= NO_VAL;
+	local_env->ntasks_per_core	= NO_VAL;
+	local_env->ntasks_per_node	= NO_VAL;
+	local_env->ntasks_per_socket	= NO_VAL;
+	local_env->plane_size		= NO_VAL;
+}
+
+extern void set_envs(char ***array_ptr, sbatch_env_t *local_env,
+		     int pack_offset)
+{
+	if ((local_env->cpus_per_task != NO_VAL) &&
+	    !env_array_overwrite_pack_fmt(array_ptr, "SLURM_CPUS_PER_TASK",
+					  pack_offset, "%u",
+					  local_env->cpus_per_task)) {
+		error("Can't set SLURM_CPUS_PER_TASK env variable");
+	}
+	if (local_env->dist &&
+	    !env_array_overwrite_pack_fmt(array_ptr, "SLURM_DISTRIBUTION",
+					  pack_offset, "%s",
+					  local_env->dist)) {
+		error("Can't set SLURM_DISTRIBUTION env variable");
+	}
+	if (local_env->mem_bind &&
+	    !env_array_overwrite_pack_fmt(array_ptr, "SLURM_MEM_BIND",
+					  pack_offset, "%s",
+					  local_env->mem_bind)) {
+		error("Can't set SLURM_MEM_BIND env variable");
+	}
+	if (local_env->mem_bind_sort &&
+	    !env_array_overwrite_pack_fmt(array_ptr, "SLURM_MEM_BIND_SORT",
+					  pack_offset, "%s",
+					  local_env->mem_bind_sort)) {
+		error("Can't set SLURM_MEM_BIND_SORT env variable");
+	}
+	if (local_env->mem_bind_verbose &&
+	    !env_array_overwrite_pack_fmt(array_ptr, "SLURM_MEM_BIND_VERBOSE",
+					  pack_offset, "%s",
+					  local_env->mem_bind_verbose)) {
+		error("Can't set SLURM_MEM_BIND_VERBOSE env variable");
+	}
+	if (local_env->dist_lllp &&
+	    !env_array_overwrite_pack_fmt(array_ptr, "SLURM_DIST_LLLP",
+					  pack_offset, "%s",
+					  local_env->dist_lllp)) {
+		error("Can't set SLURM_DIST_LLLP env variable");
+	}
+	if (local_env->ntasks != NO_VAL) {
+		if (!env_array_overwrite_pack_fmt(array_ptr, "SLURM_NPROCS",
+						  pack_offset, "%u",
+						  local_env->ntasks))
+			error("Can't set SLURM_NPROCS env variable");
+		if (!env_array_overwrite_pack_fmt(array_ptr, "SLURM_NTASKS",
+						  pack_offset, "%u",
+						  local_env->ntasks))
+			error("Can't set SLURM_NTASKS env variable");
+	}
+	if ((local_env->ntasks_per_core != NO_VAL) &&
+	    !env_array_overwrite_pack_fmt(array_ptr, "SLURM_NTASKS_PER_CORE",
+					  pack_offset, "%u",
+					  local_env->ntasks_per_core)) {
+		error("Can't set SLURM_NTASKS_PER_CORE env variable");
+	}
+	if ((local_env->ntasks_per_node != NO_VAL) &&
+	    !env_array_overwrite_pack_fmt(array_ptr, "SLURM_NTASKS_PER_NODE",
+					  pack_offset, "%u",
+					  local_env->ntasks_per_node)) {
+		error("Can't set SLURM_NTASKS_PER_NODE env variable");
+	}
+	if ((local_env->ntasks_per_socket != NO_VAL) &&
+	    !env_array_overwrite_pack_fmt(array_ptr, "SLURM_NTASKS_PER_SOCKET",
+					  pack_offset, "%u",
+					  local_env->ntasks_per_socket)) {
+		error("Can't set SLURM_NTASKS_PER_SOCKET env variable");
+	}
+	if ((local_env->plane_size != NO_VAL) &&
+	    !env_array_overwrite_pack_fmt(array_ptr, "SLURM_DIST_PLANESIZE",
+					  pack_offset, "%u",
+					  local_env->plane_size)) {
+		error("Can't set SLURM_DIST_PLANESIZE env variable");
+	}
 }

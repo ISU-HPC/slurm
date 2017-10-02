@@ -5,10 +5,6 @@
 <p>Familiarity with Slurm's <a href="accounting.html">Accounting</a> web page
 is strongly recommended before use of this document.</p>
 
-<p><b>Note for users of Maui or Moab schedulers:</b><br>
-Maui and Moab are not integrated with Slurm's resource limits,
-but should use their own resource limits mechanisms.</p>
-
 <h2>Hierarchy</h2>
 
 <p>Slurm's hierarchical limits are enforced in the following order
@@ -97,10 +93,6 @@ user names and optional partition name.)
 Without AccountingStorageEnforce being set (the default behavior)
 jobs will be executed based upon policies configured in Slurm on each
 cluster.
-<br>
-It is advisable to run without the 'limits' option set when running a
-scheduler on top of Slurm, like Moab, that does not update in real
-time its limits per association.
 </p>
 
 <h2>Tools</h2>
@@ -129,7 +121,7 @@ specified then no limit will apply.</p>
 <p><b>NOTE:</b> Unless noted, if a job request breaches a given limit
 the job will pend unless the job's QOS has the DenyOnLimit
 flag set, which will cause the job to be denied at submission.  When
-Grp limits are considerd with respects to this flag the Grp limit
+Grp limits are considered with respects to this flag the Grp limit
 is treated as a Max limit.</p>
 
 <ul>
@@ -140,8 +132,10 @@ is treated as a Max limit.</p>
   jobs will be allowed to run.  This usage is decayed (at a rate of
   PriorityDecayHalfLife).  It can also be reset (according to
   PriorityUsageResetPeriod) in order to allow jobs to run against the
-  association tree or QOS again.  This limit only applies when using
-  the Priority Multifactor plugin.
+  association tree or QOS again.  QOS that have the NoDecay flag set
+  do not decay GrpTRESMins, see <a href="qos.html#qos_other">QOS Options</a>
+  for details.
+  This limit only applies when using the Priority Multifactor plugin.
 </li>
 
 <li><b>GrpTRESRunMins=</b> Used to limit the combined total number of TRES
@@ -171,7 +165,12 @@ is treated as a Max limit.</p>
 
 <li><b>GrpWall=</b> The maximum wall clock time any job submitted to
   this group can run for.  If this limit is reached submission requests
-  will be denied.
+  will be denied.  This usage is decayed (at a rate of
+  PriorityDecayHalfLife).  It can also be reset (according to
+  PriorityUsageResetPeriod) in order to allow jobs to run against the
+  association tree or QOS again.  QOS that have the NoDecay flag set
+  do not decay GrpWall, see <a href="qos.html#qos_other">QOS Options</a> for
+  details.
 </li>
 
 <li><b>MaxTRESMinsPerJob=</b> A limit of TRES minutes to be used by a job.
@@ -186,18 +185,6 @@ is treated as a Max limit.</p>
 
 <li><b>MaxTRESPerNode=</b> The maximum size in TRES each node in a job
   allocation can use.
-</li>
-
-<li><b>MaxJobs=</b> The total number of jobs able to run at any given
-  time for the given association/QOS.  If this limit is reached new jobs will
-  be queued but only allowed to run after previous jobs complete from
-  the association/QOS.
-</li>
-
-<li><b>MaxSubmitJobs=</b> The maximum number of jobs able to be submitted
-  to the system at any given time from the given association/QOS.  If
-  this limit is reached new submission requests will be denied until
-  previous jobs complete from this association.
 </li>
 
 <li><b>MaxWallDurationPerJob=</b> The maximum wall clock time any job
@@ -231,20 +218,53 @@ is treated as a Max limit.</p>
   is affected.
 </li>
 
+<li><b>MaxJobs=</b> The total number of jobs able to run at any given
+  time for the given association.  If this limit is reached new jobs will
+  be queued but only allowed to run after previous jobs complete from
+  the association.
+</li>
+
+<li><b>MaxSubmitJobs=</b> The maximum number of jobs able to be submitted
+  to the system at any given time from the given association.  If
+  this limit is reached new submission requests will be denied until
+  previous jobs complete from this association.
+</li>
+
 <li><b>QOS=</b> comma separated list of QOS's an association is
   able to run.
 </li>
+
 </ul>
 
 <h2>QOS specific limits supported</h2>
 
 <ul>
-<li><b>MaxTRESPerUser=</b> The maximum number of limited TRES a user can
-  request (combo of all jobs running or pending).
+<li><b>MaxJobsPerAccount=</b> The maximum number of jobs an account (or
+  subaccount) can have running at a given time.
+</li>
+
+<li><b>MaxJobsPerUser=</b> The maximum number of jobs a user can
+  have running at a given time.
+</li>
+
+<li><b>MaxSubmitJobsPerAccount=</b> The maximum number of jobs an account (or
+  subaccount) can have running and pending at a given time.
+</li>
+
+<li><b>MaxSubmitJobsPerUser=</b> The maximum number of jobs a user can
+  have running and pending at a given time.
+</li>
+
+<li><b>MaxTRESPerAccount=</b> The maximum number of TRES an account can
+  allocate at a given time.
+</li>
+
+<li><b>MaxTRESPerUser=</b> The maximum number of TRES a user can
+  allocate at a given time.
 </li>
 
 <li><b>MinTRESPerJob=</b> The minimum size in TRES any given job can
-  have from when using the requested QOS.
+  have when using the requested QOS.
 </li>
 
 </ul>
@@ -262,6 +282,6 @@ data maintained in the Slurm database.  More information can be found
 in the <a href="priority_multifactor.html">priority/multifactor</a>
 plugin description.</p>
 
-<p style="text-align: center;">Last modified 19 October 2015</p>
+<p style="text-align: center;">Last modified 6 April 2017</p>
 
 </ul></body></html>

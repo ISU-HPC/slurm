@@ -32,11 +32,13 @@ generated_html = \
 	elastic_computing.html \
 	ext_sensorsplugins.html \
 	faq.html \
+	federation.html \
 	gang_scheduling.html \
 	gres.html \
 	gres_design.html \
 	gres_plugins.html \
 	hdf5_profile_user_guide.html \
+	heterogeneous_jobs.html \
 	high_throughput.html \
 	ibm-pe.html \
 	intel_knl.html \
@@ -52,12 +54,10 @@ generated_html = \
 	fair_tree.html \
 	mail.html \
 	man_index.html \
-	maui.html \
 	mc_support.html \
 	mcs.html \
 	mcs_plugins.html \
 	meetings.html \
-	moab.html \
 	mpi_guide.html \
 	mpiplugins.html \
 	multi_cluster.html \
@@ -110,18 +110,19 @@ html_DATA = \
 	${generated_html} \
 	allocation_pies.gif \
 	arch.gif \
-	bull.jpg \
 	coding_style.pdf \
 	configurator.html \
 	configurator.easy.html \
 	entities.gif \
 	example_usage.gif \
+	fonts.css \
+	fonts.ttf \
 	hdf5_task_attr.png \
 	hdf5_job_outline.png \
 	ibm_pe_fig1.png \
 	ibm_pe_fig2.png \
+	jquery.min.js \
 	k_function.gif \
-	linuxstyles.css \
 	mc_support.gif \
 	plane_ex1.gif \
 	plane_ex2.gif \
@@ -130,14 +131,14 @@ html_DATA = \
 	plane_ex5.gif \
 	plane_ex6.gif \
 	plane_ex7.gif \
+	reset.css \
 	slurm_logo.png \
 	schedmd.png \
-	slurm_design.pdf \
-	slurmstyles.css \
+	slurm.css \
 	Slurm_Entity.pdf \
 	Slurm_Individual.pdf \
-	sponsors.gif \
 	squeue_color.png \
+	style.css \
 	topo_ex1.gif \
 	topo_ex2.gif \
 	tutorial_intro_files.tar \

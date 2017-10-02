@@ -7,7 +7,7 @@
  *  Written by Marlys Kohnke
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://slurm.schedmd.com/>.
+ *  For details, see <https://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -279,6 +279,9 @@ static char *_ccm_create_nidlist_file(ccm_info_t *ccm_info)
 	char *unique_filenm = NULL;
 	FILE *tmp_fp = NULL;
 	slurm_step_layout_t *step_layout = NULL;
+	slurm_step_layout_req_t step_layout_req;
+	uint16_t cpus_per_task_array[1];
+	uint32_t cpus_task_reps[1];
 
 	/*
 	 * Create a unique temp file; name of the file will be passed
@@ -309,15 +312,24 @@ static char *_ccm_create_nidlist_file(ccm_info_t *ccm_info)
 		debug3("CCM job %u nodes[%d] is %d",
 		       ccm_info->job_id, i, nodes[i]);
 	}
+
+	memset(&step_layout_req, 0, sizeof(slurm_step_layout_req_t));
+
+	step_layout_req.node_list = ccm_info->nodelist;
+	step_layout_req.cpus_per_node = ccm_info->cpus_per_node;
+	step_layout_req.cpu_count_reps = ccm_info->cpu_count_reps;
+	step_layout_req.num_hosts = ccm_info->node_cnt;
+	step_layout_req.num_tasks = ccm_info->num_tasks;
+
+	cpus_per_task_array[0] = ccm_info->cpus_per_task;
+	cpus_task_reps[0] = step_layout_req.num_hosts;
+
+	step_layout_req.cpus_per_task = cpus_per_task_array;
+	step_layout_req.cpus_task_reps = cpus_task_reps;
+	step_layout_req.task_dist = ccm_info->task_dist;
+	step_layout_req.plane_size = ccm_info->plane_size;
 	/* Determine how many PEs(tasks) will be run on each node */
-	step_layout = slurm_step_layout_create(ccm_info->nodelist,
-					       ccm_info->cpus_per_node,
-					       ccm_info->cpu_count_reps,
-					       ccm_info->node_cnt,
-					       ccm_info->num_tasks,
-					       ccm_info->cpus_per_task,
-					       ccm_info->task_dist,
-					       ccm_info->plane_size);
+	step_layout = slurm_step_layout_create(&step_layout_req);
 	if (!step_layout) {
 		CRAY_ERR("CCM job %u slurm_step_layout_create failure",
 			 ccm_info->job_id);
@@ -457,7 +469,7 @@ static int _run_ccm_prolog_epilog(ccm_info_t *ccm_info, char *ccm_type,
  * Get the CCM configuration information.
  *
  */
-extern void ccm_get_config()
+extern void ccm_get_config(void)
 {
 	char *err_msg = NULL, *ccm_env;
 
@@ -477,7 +489,7 @@ extern void ccm_get_config()
 	ccm_config.ccm_enabled = 0;
 	err_msg = _get_ccm_partition(&ccm_config);
 	if (err_msg) {
-		info("CCM ssh launch disabled, %s", err_msg);
+		info("CCM ssh launch disabled: %s", err_msg);
 	} else {
 		if (ccm_config.num_ccm_partitions > 0) {
 			ccm_config.ccm_enabled = 1;
@@ -485,47 +497,6 @@ extern void ccm_get_config()
 			     ccm_prolog_path, ccm_epilog_path);
 		}
 	}
-	return;
-}
-
-/*
- * Create a detached pthread to handle CCM prolog and epilog
- * activities.  This is only called if CCM is enabled and the batch job has
- * been identified as coming from a CCM partition.
- */
-extern void spawn_ccm_thread(
-	void *obj_ptr, void *(*start_routine) (void *))
-{
-	pthread_attr_t attr_agent;
-	pthread_t thread_agent;
-	int retries;
-	struct job_record *job_ptr = (struct job_record *)obj_ptr;
-
-	/* spawn a pthread to start CCM prolog or epilog activities */
-	slurm_attr_init(&attr_agent);
-	if (pthread_attr_setdetachstate(&attr_agent, PTHREAD_CREATE_DETACHED)) {
-		CRAY_ERR("CCM job %u pthread_attr_setdetachstate error %m",
-			 job_ptr->job_id);
-	}
-	retries = 0;
-	while (pthread_create(&thread_agent, &attr_agent,
-			      start_routine, obj_ptr)) {
-		CRAY_ERR("CCM job_id %u pthread_create error %m",
-			 job_ptr->job_id);
-		if (++retries > CCM_MAX_PTHREAD_RETRIES) {
-			if (!xstrcasecmp((char *)start_routine, "ccm_begin")) {
-				/* Decrement so job launch can continue */
-				debug("CCM job %u prolog_running_decr, cur %d",
-				      job_ptr->job_id,
-				      job_ptr->details->prolog_running);
-				prolog_running_decr(job_ptr);
-			}
-			fatal("CCM job %u _spawn_ccm_thread can't create "
-			      "pthread", job_ptr->job_id);
-		}
-		usleep(100000);	/* sleep 1/10th second and retry */
-	}
-	slurm_attr_destroy(&attr_agent);
 	return;
 }
 

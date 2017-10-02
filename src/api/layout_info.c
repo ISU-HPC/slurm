@@ -5,7 +5,7 @@
  *  Written by Bull - Thomas Cadeau
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://slurm.schedmd.com/>.
+ *  For details, see <https://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -80,7 +80,8 @@ extern int slurm_load_layout (char *layout_type, char *entities, char *type,
 	req_msg.msg_type = REQUEST_LAYOUT_INFO;
 	req_msg.data     = &req;
 
-	if (slurm_send_recv_controller_msg(&req_msg, &resp_msg) < 0)
+	if (slurm_send_recv_controller_msg(&req_msg, &resp_msg,
+					   working_cluster_rec) < 0)
 		return SLURM_ERROR;
 
 	switch (resp_msg.msg_type) {

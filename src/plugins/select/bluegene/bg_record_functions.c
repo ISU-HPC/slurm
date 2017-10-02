@@ -6,7 +6,7 @@
  *  Written by Danny Auble <da@llnl.gov>
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://slurm.schedmd.com/>.
+ *  For details, see <https://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -1108,7 +1108,7 @@ extern int down_nodecard(char *mp_name, bitoff_t io_start,
 	   these bits when we set them below. */
 	if (io_start >= bg_conf->ionodes_per_mp
 	    || (io_start+io_cnt) >= bg_conf->ionodes_per_mp) {
-		debug("io %d-%d not configured on this "
+		debug("io %"BITSTR_FMT"-%"BITSTR_FMT" not configured on this "
 		      "system, only %d ionodes per midplane",
 		      io_start, io_start+io_cnt, bg_conf->ionodes_per_mp);
 		return EINVAL;
@@ -1120,7 +1120,7 @@ extern int down_nodecard(char *mp_name, bitoff_t io_start,
 	blockreq.conn_type[0] = SELECT_SMALL;
 	blockreq.save_name = mp_name;
 
-	debug3("here setting node %d of %d and ionodes %d-%d of %d",
+	debug3("here setting node %d of %d and ionodes %"BITSTR_FMT"-%"BITSTR_FMT" of %d",
 	       mp_bit, node_record_count, io_start,
 	       io_start+io_cnt, bg_conf->ionodes_per_mp);
 
@@ -1816,7 +1816,7 @@ extern void bg_record_hw_failure(bg_record_t *bg_record, List *ret_kill_list)
 		if (jobinfo->cleaning || !IS_JOB_RUNNING(found_job_ptr))
 			continue;
 
-		qos_ptr = (slurmdb_qos_rec_t *)found_job_ptr->qos_ptr;
+		qos_ptr = found_job_ptr->qos_ptr;
 		if (qos_ptr) {
 			/* If we ever get one that
 			   isn't set correctly then we

@@ -6,7 +6,7 @@
  *  Written by Morris Jette <jette@schedmd.com>
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://slurm.schedmd.com/>.
+ *  For details, see <https://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -56,15 +56,18 @@
  * working.  If you need to add fields, add them to the end of the structure.
  */
 typedef struct node_features_ops {
+	uint32_t(*boot_time)	(void);
 	int	(*get_node)	(char *node_list);
 	int	(*job_valid)	(char *job_features);
 	char *	(*job_xlate)	(char *job_features);
 	bool	(*node_power)	(void);
-	bool	(*node_reboot)	(void);
+	int	(*node_set)	(char *active_features);
 	void	(*node_state)	(char **avail_modes, char **current_mode);
 	int	(*node_update)	(char *active_features, bitstr_t *node_bitmap);
 	char *	(*node_xlate)	(char *new_features, char *orig_features,
-				 int mode);
+				 char *avail_features);
+	char *	(*node_xlate2)	(char *new_features);
+	void	(*step_config)	(bool mem_sort, bitstr_t *numa_bitmap);
 	int	(*reconfig)	(void);
 	bool	(*user_update)	(uid_t uid);
 } node_features_ops_t;
@@ -74,14 +77,17 @@ typedef struct node_features_ops {
  * declared for node_features_ops_t.
  */
 static const char *syms[] = {
+	"node_features_p_boot_time",
 	"node_features_p_get_node",
 	"node_features_p_job_valid",
 	"node_features_p_job_xlate",
 	"node_features_p_node_power",
-	"node_features_p_node_reboot",
+	"node_features_p_node_set",
 	"node_features_p_node_state",
 	"node_features_p_node_update",
 	"node_features_p_node_xlate",
+	"node_features_p_node_xlate2",
+	"node_features_p_step_config",
 	"node_features_p_reconfig",
 	"node_features_p_user_update"
 };
@@ -188,6 +194,24 @@ extern int node_features_g_count(void)
 	return rc;
 }
 
+/* Perform set up for step launch
+ * mem_sort IN - Trigger sort of memory pages (KNL zonesort)
+ * numa_bitmap IN - NUMA nodes allocated to this job */
+extern void node_features_g_step_config(bool mem_sort, bitstr_t *numa_bitmap)
+{
+	DEF_TIMERS;
+	int i;
+
+	START_TIMER;
+	if (node_features_g_init() != SLURM_SUCCESS)
+		return;
+	slurm_mutex_lock(&g_context_lock);
+	for (i = 0; i < g_context_cnt; i++)
+		(*(ops[i].step_config))(mem_sort, numa_bitmap);
+	slurm_mutex_unlock(&g_context_lock);
+	END_TIMER2("node_features_g_step_config");
+}
+
 /* Reset plugin configuration information */
 extern int node_features_g_reconfig(void)
 {
@@ -289,25 +313,25 @@ extern bool node_features_g_node_power(void)
 	return node_power;
 }
 
-/* Return true if the plugin requires RebootProgram for booting nodes */
-extern bool node_features_g_node_reboot(void)
+/* Set's the node's active features based upon job constraints.
+ * NOTE: Executed by the slurmd daemon.
+ * IN active_features - New active features
+ * RET error code */
+extern int node_features_g_node_set(char *active_features)
 {
 	DEF_TIMERS;
-	bool node_reboot = false;
-	int i;
+	int i, rc = SLURM_SUCCESS;
 
 	START_TIMER;
 	(void) node_features_g_init();
 	slurm_mutex_lock(&g_context_lock);
-	for (i = 0; i < g_context_cnt; i++) {
-		node_reboot = (*(ops[i].node_reboot))();
-		if (node_reboot)
-			break;
+	for (i = 0; ((i < g_context_cnt) && (rc == SLURM_SUCCESS)); i++) {
+		rc = (*(ops[i].node_set))(active_features);
 	}
 	slurm_mutex_unlock(&g_context_lock);
-	END_TIMER2("node_features_g_node_reboot");
+	END_TIMER2("node_features_g_node_set");
 
-	return node_reboot;
+	return rc;
 }
 
 /* Get this node's current and available MCDRAM and NUMA settings from BIOS.
@@ -352,14 +376,14 @@ extern int node_features_g_node_update(char *active_features,
 }
 
 /* Translate a node's feature specification by replacing any features associated
- * with this plugin in the original value with the new values, preserving any
- * features that are not associated with this plugin
- * IN new_features - newly specific features (active or available)
- * IN orig_features - original features (active or available)
- * IN mode - 1=registration, 2=update
+ *	with this plugin in the original value with the new values, preserving
+ *	andy features that are not associated with this plugin
+ * IN new_features - newly active features
+ * IN orig_features - original active features
+ * IN avail_features - original available features
  * RET node's new merged features, must be xfreed */
 extern char *node_features_g_node_xlate(char *new_features, char *orig_features,
-					int mode)
+					char *avail_features)
 {
 	DEF_TIMERS;
 	char *new_value = NULL, *tmp_str;
@@ -375,12 +399,43 @@ extern char *node_features_g_node_xlate(char *new_features, char *orig_features,
 			tmp_str = xstrdup(orig_features);
 		else
 			tmp_str = NULL;
-		new_value = (*(ops[i].node_xlate))(new_features, tmp_str, mode);
+		new_value = (*(ops[i].node_xlate))(new_features, tmp_str,
+						   avail_features);
 		xfree(tmp_str);
 
 	}
 	slurm_mutex_unlock(&g_context_lock);
 	END_TIMER2("node_features_g_node_xlate");
+
+	return new_value;
+}
+
+/* Translate a node's new feature specification into a "standard" ordering
+ * RET node's new merged features, must be xfreed */
+extern char *node_features_g_node_xlate2(char *new_features)
+{
+	DEF_TIMERS;
+	char *new_value = NULL, *tmp_str;
+	int i;
+
+	START_TIMER;
+	(void) node_features_g_init();
+	slurm_mutex_lock(&g_context_lock);
+
+	if (!g_context_cnt)
+		new_value = xstrdup(new_features);
+
+	for (i = 0; i < g_context_cnt; i++) {
+		if (new_value)
+			tmp_str = xstrdup(new_value);
+		else
+			tmp_str = xstrdup(new_features);
+		new_value = (*(ops[i].node_xlate2))(tmp_str);
+		xfree(tmp_str);
+
+	}
+	slurm_mutex_unlock(&g_context_lock);
+	END_TIMER2("node_features_g_node_xlate2");
 
 	return new_value;
 }
@@ -403,4 +458,23 @@ extern bool node_features_g_user_update(uid_t uid)
 	END_TIMER2("node_features_g_user_update");
 
 	return result;
+}
+
+/* Return estimated reboot time, in seconds */
+extern uint32_t node_features_g_boot_time(void)
+{
+	DEF_TIMERS;
+	uint32_t boot_time = 0;
+	int i;
+
+	START_TIMER;
+	(void) node_features_g_init();
+	slurm_mutex_lock(&g_context_lock);
+	for (i = 0; i < g_context_cnt; i++) {
+		boot_time = MAX(boot_time, (*(ops[i].boot_time))());
+	}
+	slurm_mutex_unlock(&g_context_lock);
+	END_TIMER2("node_features_g_user_update");
+
+	return boot_time;
 }

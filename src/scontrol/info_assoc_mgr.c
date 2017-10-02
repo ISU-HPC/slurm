@@ -7,7 +7,7 @@
  *  Written by Stephen Trofinoff and Danny Auble
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://slurm.schedmd.com/>.
+ *  For details, see <https://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -489,7 +489,7 @@ static void _print_assoc_mgr_info(assoc_mgr_info_msg_t *msg)
  *
  */
 
-extern void scontrol_print_assoc_mgr_info(int argc, char *argv[])
+extern void scontrol_print_assoc_mgr_info(int argc, char **argv)
 {
 	char *tag = NULL, *val = NULL;
 	int cc, tag_len, i;

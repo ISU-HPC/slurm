@@ -14,7 +14,7 @@
  *  CODE-OCEC-09-009. All rights reserved.
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://slurm.schedmd.com/>.
+ *  For details, see <https://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -60,6 +60,7 @@
 #include "src/common/xstring.h"
 
 #include "debugger.h"
+#include "multi_prog.h"
 #include "opt.h"
 
 /* Given a program name, translate it to a fully qualified pathname
@@ -267,8 +268,9 @@ mpir_cleanup(void)
 #endif
 }
 
-extern void
-mpir_set_executable_names(const char *executable_name)
+extern void mpir_set_executable_names(const char *executable_name,
+				      uint32_t task_offset,
+				      uint32_t task_count)
 {
 #if defined HAVE_BG_FILES
 	/* Use symbols from the runjob.so library provided by IBM.
@@ -276,13 +278,12 @@ mpir_set_executable_names(const char *executable_name)
 #else
 	int i;
 
-	for (i = 0; i < MPIR_proctable_size; i++) {
+	if (task_offset == NO_VAL)
+		task_offset = 0;
+	xassert((task_offset + task_count) <= MPIR_proctable_size);
+	for (i = task_offset; i < (task_offset + task_count); i++) {
 		MPIR_proctable[i].executable_name = xstrdup(executable_name);
-		if (MPIR_proctable[i].executable_name == NULL) {
-			error("Unable to set MPI_proctable executable_name:"
-			      " %m");
-			exit(error_exit);
-		}
+		// info("NAME[%d]:%s", i, executable_name);
 	}
 #endif
 }
@@ -299,8 +300,6 @@ mpir_dump_proctable(void)
 
 	for (i = 0; i < MPIR_proctable_size; i++) {
 		tv = &MPIR_proctable[i];
-		if (!tv)
-			break;
 		info("task:%d, host:%s, pid:%d, executable:%s",
 		     i, tv->host_name, tv->pid, tv->executable_name);
 	}
@@ -309,7 +308,7 @@ mpir_dump_proctable(void)
 
 static int
 _update_task_mask(int low_num, int high_num, int *ntasks, bool *ntasks_set,
-		  bitstr_t *task_mask, bool ignore_duplicates)
+		  bitstr_t **task_mask, bool ignore_duplicates)
 {
 	int i;
 
@@ -330,24 +329,24 @@ _update_task_mask(int low_num, int high_num, int *ntasks, bool *ntasks_set,
 			*ntasks = high_num + 1;
 			*ntasks_set = true;
 			i_set_ntasks = true;
-			task_mask = bit_realloc(task_mask, *ntasks);
+			(*task_mask) = bit_realloc((*task_mask), *ntasks);
 		}
 	}
 	for (i=low_num; i<=high_num; i++) {
-		if (bit_test(task_mask, i)) {
+		if (bit_test((*task_mask), i)) {
 			if (ignore_duplicates)
 				continue;
 			error("Duplicate record for task %d", i);
 			return -1;
 		}
-		bit_set(task_mask, i);
+		bit_set((*task_mask), i);
 	}
 	return 0;
 }
 
 static int
 _validate_ranks(char *ranks, int *ntasks, bool *ntasks_set, int32_t *ncmds,
-		bitstr_t *task_mask)
+		bitstr_t **task_mask)
 {
 	static bool has_asterisk = false;
 	char *range = NULL, *p = NULL;
@@ -465,7 +464,7 @@ verify_multi_name(char *config_fname, int *ntasks, bool *ntasks_set,
 			goto fini;
 		}
 		if (_validate_ranks(ranks, ntasks, ntasks_set, ncmds,
-				    task_mask)) {
+				    &task_mask)) {
 			error("Line %d of configuration file %s invalid",
 				line_num, config_fname);
 			rc = -1;

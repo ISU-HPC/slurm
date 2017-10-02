@@ -7,7 +7,7 @@
  *  CODE-OCEC-09-009. All rights reserved.
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://slurm.schedmd.com/>.
+ *  For details, see <https://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -203,6 +203,7 @@ static int spank_stack_get_remote_options(struct spank_stack *, job_options_t);
 static int spank_stack_get_remote_options_env (struct spank_stack *, char **);
 static int spank_stack_set_remote_options_env (struct spank_stack * stack);
 static int dyn_spank_set_job_env (const char *var, const char *val, int ovwt);
+static char *_opt_env_name(struct spank_plugin_opt *p, char *buf, size_t siz);
 
 static void spank_stack_destroy (struct spank_stack *stack)
 {
@@ -1141,19 +1142,12 @@ void spank_option_table_destroy(struct option *optz)
 	optz_destroy(optz);
 }
 
-int spank_process_option(int optval, const char *arg)
+static int _do_option_cb(struct spank_plugin_opt *opt, const char *arg)
 {
-	struct spank_plugin_opt *opt;
 	int rc = 0;
-	List option_cache = get_global_option_cache();
 
-	if (option_cache == NULL || (list_count(option_cache) == 0))
-		return (-1);
-
-	opt = list_find_first(option_cache, (ListFindF) _opt_by_val, &optval);
-
-	if (!opt)
-		return (-1);
+	xassert(opt);
+	xassert(arg);
 
 	/*
 	 *  Call plugin callback if such a one exists
@@ -1170,7 +1164,68 @@ int spank_process_option(int optval, const char *arg)
 		opt->optarg = xstrdup(arg);
 	opt->found = 1;
 
+	return rc;
+}
+
+extern int spank_process_option(int optval, const char *arg)
+{
+	struct spank_plugin_opt *opt;
+	int rc = 0;
+	List option_cache = get_global_option_cache();
+
+	if (option_cache == NULL || (list_count(option_cache) == 0)) {
+		error("No spank option cache");
+		return (-1);
+	}
+
+	opt = list_find_first(option_cache, (ListFindF)_opt_by_val, &optval);
+	if (!opt) {
+		error("Failed to find spank option for optval: %d", optval);
+		return (-1);
+	}
+
+	if ((rc = _do_option_cb(opt, arg))) {
+		error("Invalid --%s argument: %s", opt->opt->name, arg);
+		return (rc);
+	}
+
 	return (0);
+}
+
+extern int spank_process_env_options()
+{
+	char var[1024];
+	const char *arg;
+	struct spank_plugin_opt *option;
+	ListIterator i;
+	List option_cache = get_global_option_cache();
+	int rc = 0;
+
+	if (option_cache == NULL || (list_count(option_cache) == 0))
+		return 0;
+
+	i = list_iterator_create(option_cache);
+	while ((option = list_next(i))) {
+		char *env_name;
+		env_name = xstrdup_printf("SLURM_SPANK_%s",
+					  _opt_env_name(option, var,
+							sizeof(var)));
+		if (!(arg = getenv(env_name))) {
+			xfree(env_name);
+			continue;
+		}
+
+		if ((rc = _do_option_cb(option, arg))) {
+			error("Invalid argument (%s) for environment variable: %s",
+			      arg, env_name);
+			xfree(env_name);
+			break;
+		}
+		xfree(env_name);
+	}
+	list_iterator_destroy(i);
+
+	return rc;
 }
 
 static char *
@@ -1372,15 +1427,31 @@ static char * _opt_env_name (struct spank_plugin_opt *p, char *buf, size_t siz)
 
 static int _option_setenv (struct spank_plugin_opt *option)
 {
-	char var [1024];
+	char var[1024];
+	char *arg = option->optarg;
 
-	_opt_env_name (option, var, sizeof (var));
+	_opt_env_name(option, var, sizeof(var));
 
-	if (setenv (var, option->optarg, 1) < 0)
-	    error ("failed to set %s=%s in env", var, option->optarg);
+	/*
+	 * Old glibc behavior was to set the variable with an empty value if
+	 * the option was NULL. Newer glibc versions will segfault instead,
+	 * so feed it an empty string when necessary to maintain backwards
+	 * compatibility.
+	 */
+	if (!option->optarg)
+		arg = "";
 
-	if (dyn_spank_set_job_env (var, option->optarg, 1) < 0)
-	    error ("failed to set %s=%s in env", var, option->optarg);
+	if (setenv(var, arg, 1) < 0)
+		error("failed to set %s=%s in env", var, arg);
+
+	/*
+	 * Use the possibly-NULL value and let the command itself figure
+	 * out how to handle it. This will usually result in "(null)"
+	 * instead of "" used above.
+	 */
+
+	if (dyn_spank_set_job_env(var, option->optarg, 1) < 0)
+		error("failed to set %s=%s in env", var, option->optarg);
 
 	return (0);
 }
@@ -2243,40 +2314,55 @@ spank_err_t spank_unsetenv (spank_t spank, const char *var)
 /*
  *  Dynamically loaded versions of spank_*_job_env
  */
-const char *dyn_spank_get_job_env (const char *name)
+const char *dyn_spank_get_job_env(const char *name)
 {
-	void *h = dlopen (NULL, 0);
+	void *h = dlopen(NULL, 0);
 	char * (*fn)(const char *n);
+	char *rc;
 
-	fn = dlsym (h, "spank_get_job_env");
-	if (fn == NULL)
+	fn = dlsym(h, "spank_get_job_env");
+	if (fn == NULL) {
+		(void) dlclose(h);
 		return NULL;
+	}
 
-	return ((*fn) (name));
+	rc = ((*fn) (name));
+/*	(void) dlclose(h);	NOTE: DO NOT CLOSE OR SPANK WILL BREAK */
+	return rc;
 }
 
-int dyn_spank_set_job_env (const char *n, const char *v, int overwrite)
+int dyn_spank_set_job_env(const char *n, const char *v, int overwrite)
 {
-	void *h = dlopen (NULL, 0);
+	void *h = dlopen(NULL, 0);
 	int (*fn)(const char *n, const char *v, int overwrite);
+	int rc;
 
-	fn = dlsym (h, "spank_set_job_env");
-	if (fn == NULL)
+	fn = dlsym(h, "spank_set_job_env");
+	if (fn == NULL) {
+		(void) dlclose(h);
 		return (-1);
+	}
 
-	return ((*fn) (n, v, overwrite));
+	rc = ((*fn) (n, v, overwrite));
+/*	(void) dlclose(h);	NOTE: DO NOT CLOSE OR SPANK WILL BREAK */
+	return rc;
 }
 
-extern int dyn_spank_unset_job_env (const char *n)
+extern int dyn_spank_unset_job_env(const char *n)
 {
-	void *h = dlopen (NULL, 0);
+	void *h = dlopen(NULL, 0);
 	int (*fn)(const char *n);
+	int rc;
 
-	fn = dlsym (h, "spank_unset_job_env");
-	if (fn == NULL)
+	fn = dlsym(h, "spank_unset_job_env");
+	if (fn == NULL) {
+		(void) dlclose(h);
 		return (-1);
+	}
 
-	return ((*fn) (n));
+	rc = ((*fn) (n));
+/*	(void) dlclose(h);	NOTE: DO NOT CLOSE OR SPANK WILL BREAK */
+	return rc;
 }
 
 static spank_err_t spank_job_control_access_check (spank_t spank)

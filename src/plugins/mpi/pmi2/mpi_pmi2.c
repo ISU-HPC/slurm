@@ -9,7 +9,7 @@
  *  All rights reserved.
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://slurm.schedmd.com/>.
+ *  For details, see <https://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -156,11 +156,6 @@ p_mpi_hook_client_prelaunch(mpi_plugin_client_info_t *job, char ***env)
 	}
 
 	return (void *)0x12345678;
-}
-
-int p_mpi_hook_client_single_task_per_node(void)
-{
-	return false;
 }
 
 int p_mpi_hook_client_fini(mpi_plugin_client_state_t *state)

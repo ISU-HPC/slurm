@@ -13,7 +13,7 @@
 # Written by Morris Jette <jette(at)schedmd.com>
 #
 # This file is part of SLURM, a resource management program.
-# For details, see <http://slurm.schedmd.com/>.
+# For details, see <https://slurm.schedmd.com/>.
 # Please also read the included file: DISCLAIMER.
 #
 # SLURM is free software; you can redistribute it and/or modify it under
@@ -42,6 +42,8 @@ set output_data "test$test_id.data.out"
 set output_use  "test$test_id-%A_%a.output"
 set script_use  "test$test_id.use.bash"
 set tmp_file    "test$test_id"
+
+stop_root_user
 
 proc find_bb_jobid { fname bb_jobid } {
 	global bin_cat

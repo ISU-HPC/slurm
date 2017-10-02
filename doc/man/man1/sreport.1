@@ -1,4 +1,4 @@
-.TH sreport "1" "Slurm Commands" "June 2015" "Slurm Commands"
+.TH sreport "1" "Slurm Commands" "April 2017" "Slurm Commands"
 
 .SH "NAME"
 sreport \- Generate reports from the slurm accounting data.
@@ -15,13 +15,25 @@ utilization for Slurm jobs saved to the Slurm Database,
 
 .TP
 \fB\-a\fR, \fB\-\-all_clusters\fR
-Use all clusters instead of only the cluster from where the command was run.
+Use all clusters instead of only the cluster from which the command was
+executed.
+.TP
+\fB\-\-federation\fR
+Generate a report for the federation if a member of one.
 .TP
 \fB\-h\fR, \fB\-\-help\fR
 Print a help message describing the usage of \fBsreport\fR.
 .TP
+\fB\-\-local\fR
+Generate a report for the local cluster, even if part of a federation.
+Overrides \-\-federation
+.TP
 \fB\-M\fR, \fB\-\-cluster\fR
-The cluster(s) to generate reports for. Default is local cluster.
+The cluster(s) to generate reports for. Default is local cluster, unless the
+local cluster is currently part of a federation and in that case generate a
+report for all clusters in the current federation. If the clusters included
+in a federation vary through time, use this option to identify the clusters
+to be included in report. Implies --local.
 .TP
 \fB\-n\fR, \fB\-\-noheader\fR
 Don't display header when listing results.
@@ -169,7 +181,7 @@ root account by default this report will list the underlying
 usage with a sum on each level.  Use the 'tree' option to span
 the tree for better visibility.
 NOTE: If there were reservations allowing a whole account any
-any idle time in the reservation given to the association for the
+idle time in the reservation given to the association for the
 account, not the user associations in the account, so it can be
 possible a parent account can be larger than the sum of it's children.
 .TP
@@ -196,7 +208,7 @@ each user on each cluster.
 
 .TP
 .B job SizesByAccount
-This report will dispay the amount of time used for job ranges
+This report will display the amount of time used for job ranges
 specified by the 'grouping=' option.  Only a single level in the tree
 is displayed defaulting to the root dir.  If you specify other
 accounts with the 'account=' option sreport will use those accounts as
@@ -210,7 +222,7 @@ instead of just account so there will most likely be multiple accounts
 listed depending on the number of wckeys used.
 .TP
 .B job SizesByWckey
-This report will dispay the amount of time for each wckey for job ranges
+This report will display the amount of time for each wckey for job ranges
 specified by the 'grouping=' option.
 
 .TP
@@ -423,7 +435,16 @@ All commands and options are case-insensitive.
 Some \fBsreport\fR options may be set via environment variables. These
 environment variables, along with their corresponding options, are listed below.
 (Note: commandline options will always override these settings)
-.TP 14
+.TP 20
+\fBSREPORT_CLUSTER\fR
+Same as \fB\-M\fR, \fB\-\-cluster\fR
+.TP
+\fBSREPORT_FEDERATION\fR
+Same as \-\-federation\fR
+.TP
+\fBSREPORT_LOCAL\fR
+Same as \-\-local\fR
+.TP
 \fBSREPORT_TRES\fR
 Same as \fB\-t, \-\-tres\fR
 .TP
@@ -460,7 +481,7 @@ Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
 Copyright (C) 2010\-2015 SchedMD LLC.
 .LP
 This file is part of Slurm, a resource management program.
-For details, see <http://slurm.schedmd.com/>.
+For details, see <https://slurm.schedmd.com/>.
 .LP
 Slurm is free software; you can redistribute it and/or modify it under
 the terms of the GNU General Public License as published by the Free

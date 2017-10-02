@@ -3,13 +3,13 @@
  *****************************************************************************
  *  Copyright (C) 2002-2007 The Regents of the University of California.
  *  Copyright (C) 2008-2010 Lawrence Livermore National Security.
- *  Portions Copyright (C) 2015 SchedMD <http://www.schedmd.com>.
+ *  Portions Copyright (C) 2015 SchedMD <https://www.schedmd.com>.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Morris Jette <jette1@llnl.gov>.
  *  CODE-OCEC-09-009. All rights reserved.
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://slurm.schedmd.com/>.
+ *  For details, see <https://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -1254,12 +1254,12 @@ extern void get_cred_gres(slurm_cred_t *cred, char *node_name,
 #else
 	host_index = hostset_find(hset, node_name);
 #endif
+	hostset_destroy(hset);
 	if ((host_index < 0) || (host_index >= cred->job_nhosts)) {
 		error("Invalid host_index %d for job %u",
 		      host_index, cred->jobid);
 		error("Host %s not in credential hostlist %s",
 		      node_name, cred->job_hostlist);
-		hostset_destroy(hset);
 		return;
 	}
 
@@ -1292,7 +1292,6 @@ slurm_cred_unpack(Buf buffer, uint16_t protocol_version)
 {
 	uint32_t     cred_uid, len;
 	slurm_cred_t *cred = NULL;
-	char        *bit_fmt = NULL;
 	char       **sigp;
 	uint32_t     cluster_flags = slurmdb_setup_cluster_flags();
 
@@ -1326,18 +1325,8 @@ slurm_cred_unpack(Buf buffer, uint16_t protocol_version)
 		if (!(cluster_flags & CLUSTER_FLAG_BG)) {
 			uint32_t tot_core_cnt;
 			safe_unpack32(&tot_core_cnt, buffer);
-			safe_unpackstr_xmalloc(&bit_fmt, &len, buffer);
-			cred->job_core_bitmap =
-				bit_alloc((bitoff_t) tot_core_cnt);
-			if (bit_unfmt(cred->job_core_bitmap, bit_fmt))
-				goto unpack_error;
-			xfree(bit_fmt);
-			safe_unpackstr_xmalloc(&bit_fmt, &len, buffer);
-			cred->step_core_bitmap =
-				bit_alloc((bitoff_t) tot_core_cnt);
-			if (bit_unfmt(cred->step_core_bitmap, bit_fmt))
-				goto unpack_error;
-			xfree(bit_fmt);
+			unpack_bit_str_hex(&cred->job_core_bitmap, buffer);
+			unpack_bit_str_hex(&cred->step_core_bitmap, buffer);
 			safe_unpack16(&cred->core_array_size, buffer);
 			if (cred->core_array_size) {
 				safe_unpack16_array(&cred->cores_per_socket,
@@ -1393,6 +1382,7 @@ slurm_cred_unpack(Buf buffer, uint16_t protocol_version)
 
 		if (!(cluster_flags & CLUSTER_FLAG_BG)) {
 			uint32_t tot_core_cnt;
+			char *bit_fmt = NULL;
 			safe_unpack32(&tot_core_cnt, buffer);
 			safe_unpackstr_xmalloc(&bit_fmt, &len, buffer);
 			cred->job_core_bitmap =
@@ -1759,8 +1749,8 @@ _pack_cred(slurm_cred_t *cred, Buf buffer, uint16_t protocol_version)
 			if (cred->job_core_bitmap)
 				tot_core_cnt = bit_size(cred->job_core_bitmap);
 			pack32(tot_core_cnt, buffer);
-			pack_bit_fmt(cred->job_core_bitmap, buffer);
-			pack_bit_fmt(cred->step_core_bitmap, buffer);
+			pack_bit_str_hex(cred->job_core_bitmap, buffer);
+			pack_bit_str_hex(cred->step_core_bitmap, buffer);
 			pack16(cred->core_array_size, buffer);
 			if (cred->core_array_size) {
 				pack16_array(cred->cores_per_socket,
@@ -1821,25 +1811,26 @@ _pack_cred(slurm_cred_t *cred, Buf buffer, uint16_t protocol_version)
 	}
 }
 
+static int _list_find_cred_state(void *x, void *key)
+{
+	cred_state_t *s = (cred_state_t *) x;
+	slurm_cred_t *cred = (slurm_cred_t *) key;
+	if ((s->jobid  == cred->jobid)  &&
+	    (s->stepid == cred->stepid) &&
+	    (s->ctime  == cred->ctime))
+		return 1;
+	return 0;
+}
+
 
 static bool
 _credential_replayed(slurm_cred_ctx_t ctx, slurm_cred_t *cred)
 {
-	ListIterator  i = NULL;
 	cred_state_t *s = NULL;
 
 	_clear_expired_credential_states(ctx);
 
-	i = list_iterator_create(ctx->state_list);
-
-	while ((s = list_next(i))) {
-		if ((s->jobid  == cred->jobid)  &&
-		    (s->stepid == cred->stepid) &&
-		    (s->ctime  == cred->ctime))
-			break;
-	}
-
-	list_iterator_destroy(i);
+	s = list_find_first(ctx->state_list, _list_find_cred_state, cred);
 
 	/*
 	 * If we found a match, this credential is being replayed.
@@ -1925,19 +1916,20 @@ _credential_revoked(slurm_cred_ctx_t ctx, slurm_cred_t *cred)
 	return false;
 }
 
+static int _list_find_job_state(void *x, void *key)
+{
+	job_state_t *j = (job_state_t *) x;
+	uint32_t jobid = *(uint32_t *) key;
+	if (j->jobid == jobid)
+		return 1;
+	return 0;
+}
 
 static job_state_t *
 _find_job_state(slurm_cred_ctx_t ctx, uint32_t jobid)
 {
-	ListIterator  i = NULL;
-	job_state_t  *j = NULL;
-
-	i = list_iterator_create(ctx->job_list);
-	while ((j = list_next(i))) {
-		if (j->jobid == jobid)
-			break;
-	}
-	list_iterator_destroy(i);
+	job_state_t *j =
+		list_find_first(ctx->job_list, _list_find_job_state, &jobid);
 	return j;
 }
 
@@ -2022,25 +2014,27 @@ _clear_expired_job_states(slurm_cred_ctx_t ctx)
 	list_iterator_destroy(i);
 }
 
+static int _list_find_expired(void *x, void *key)
+{
+	cred_state_t *s = (cred_state_t *)x;
+	time_t curr_time = *(time_t *)key;
+
+	if (curr_time > s->expiration)
+		return 1;
+	return 0;
+}
 
 static void
 _clear_expired_credential_states(slurm_cred_ctx_t ctx)
 {
 	static time_t last_scan = 0;
 	time_t        now = time(NULL);
-	ListIterator  i   = NULL;
-	cred_state_t *s   = NULL;
 
 	if ((now - last_scan) < 2)	/* Reduces slurmd overhead */
 		return;
 	last_scan = now;
 
-	i = list_iterator_create(ctx->state_list);
-	while ((s = list_next(i))) {
-		if (now > s->expiration)
-			list_delete_item(i);
-	}
-	list_iterator_destroy(i);
+	list_delete_all(ctx->state_list, _list_find_expired, &now);
 }
 
 
@@ -2128,7 +2122,7 @@ _job_state_unpack_one(Buf buffer)
 	}
 	if (j->expiration) {
 		strcpy(t3, " expires:");
-		timestr(&j->revoked, (t3+9), (64-9));
+		timestr(&j->expiration, (t3+9), (64-9));
 	} else {
 		t3[0] = '\0';
 	}
@@ -2173,7 +2167,8 @@ _cred_state_unpack(slurm_cred_ctx_t ctx, Buf buffer)
 	cred_state_t *s   = NULL;
 
 	safe_unpack32(&n, buffer);
-
+	if (n > NO_VAL32)
+		goto unpack_error;
 	for (i = 0; i < n; i++) {
 		if (!(s = _cred_state_unpack_one(buffer)))
 			goto unpack_error;
@@ -2217,7 +2212,8 @@ _job_state_unpack(slurm_cred_ctx_t ctx, Buf buffer)
 	job_state_t *j   = NULL;
 
 	safe_unpack32(&n, buffer);
-
+	if (n > NO_VAL32)
+		goto unpack_error;
 	for (i = 0; i < n; i++) {
 		if (!(j = _job_state_unpack_one(buffer)))
 			goto unpack_error;

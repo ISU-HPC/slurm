@@ -12,7 +12,7 @@
  *  Adapted by Yoann Blein <yoann.blein@bull.net> @ Bull.
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://slurm.schedmd.com>.
+ *  For details, see <https://slurm.schedmd.com>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -181,14 +181,16 @@ static int _create_directories(void)
 	else if (access(hdf5_conf.dir, R_OK|W_OK|X_OK) < 0)
 		fatal("Incorrect permissions on acct_gather_profile_dir: %s",
 		      hdf5_conf.dir);
-	chmod(hdf5_conf.dir, 0755);
+	if (chmod(hdf5_conf.dir, 0755) == -1)
+		error("%s: chmod(%s): %m", __func__, hdf5_conf.dir);
 
 	user_dir = xstrdup_printf("%s/%s", hdf5_conf.dir, g_job->user_name);
 	if (((rc = stat(user_dir, &st)) < 0) && (errno == ENOENT)) {
 		if (mkdir(user_dir, 0700) < 0)
 			fatal("mkdir(%s): %m", user_dir);
 	}
-	chmod(user_dir, 0700);
+	if (chmod(user_dir, 0700) == -1)
+		error("%s: chmod(%s): %m", __func__, user_dir);
 	if (chown(user_dir, (uid_t)g_job->uid,
 		  (gid_t)g_job->gid) < 0)
 		error("chown(%s): %m", user_dir);
@@ -322,7 +324,8 @@ extern int acct_gather_profile_p_node_step_start(stepd_step_rec_t* job)
 
 	_create_directories();
 
-	/* Use a more user friendly string "batch" rather
+	/*
+	 * Use a more user friendly string "batch" rather
 	 * then 4294967294.
 	 */
 	if (g_job->stepid == NO_VAL) {
@@ -345,20 +348,25 @@ extern int acct_gather_profile_p_node_step_start(stepd_step_rec_t* job)
 		     profile_str, profile_file_name);
 	}
 
-	// Create a new file using the default properties.
+	/*
+	 * Create a new file using the default properties
+	 */
 	file_id = H5Fcreate(profile_file_name, H5F_ACC_TRUNC, H5P_DEFAULT,
 			    H5P_DEFAULT);
 	if (chown(profile_file_name, (uid_t)g_job->uid,
 		  (gid_t)g_job->gid) < 0)
 		error("chown(%s): %m", profile_file_name);
-	chmod(profile_file_name,  0600);
+	if (chmod(profile_file_name, 0600) < 0)
+		error("chmod(%s): %m", profile_file_name);
 	xfree(profile_file_name);
 
 	if (file_id < 1) {
 		info("PROFILE: Failed to create Node group");
 		return SLURM_FAILURE;
 	}
-	/* fd_set_close_on_exec(file_id); Not supported for HDF5 */
+	/*
+	 * fd_set_close_on_exec(file_id); Not supported for HDF5
+	 */
 	sprintf(group_node, "/%s", g_job->node_name);
 	gid_node = make_group(file_id, group_node);
 	if (gid_node < 0) {
@@ -538,8 +546,10 @@ extern int acct_gather_profile_p_create_dataset(
 			field_id = H5T_NATIVE_DOUBLE;
 			field_size = sizeof(double);
 			break;
-		case PROFILE_FIELD_NOT_SET:
-			break;
+		default:
+			error("%s: unknown field type:%d",
+			      __func__, dataset_loc->type);
+			continue;
 		}
 		if (H5Tinsert(dtype_id, dataset_loc->name,
 			      offset, field_id) < 0)

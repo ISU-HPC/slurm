@@ -7,7 +7,7 @@
  *  CODE-OCEC-09-009. All rights reserved.
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://slurm.schedmd.com/>.
+ *  For details, see <https://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -789,8 +789,10 @@ extern int load_all_front_end_state(bool state_only)
 	lock_state_files ();
 	state_fd = _open_front_end_state_file(&state_file);
 	if (state_fd < 0) {
-		info ("No node state file (%s) to recover", state_file);
-		error_code = ENOENT;
+		info("No node state file (%s) to recover", state_file);
+		xfree(state_file);
+		unlock_state_files();
+		return ENOENT;
 	} else {
 		data_allocated = BUF_SIZE;
 		data = xmalloc(data_allocated);
@@ -823,6 +825,8 @@ extern int load_all_front_end_state(bool state_only)
 		safe_unpack16(&protocol_version, buffer);
 
 	if (protocol_version == (uint16_t) NO_VAL) {
+		if (!ignore_state_errors)
+			fatal("Can not recover front_end state, version incompatible, start with '-i' to ignore this");
 		error("*****************************************************");
 		error("Can not recover front_end state, version incompatible");
 		error("*****************************************************");
@@ -899,6 +903,14 @@ extern int load_all_front_end_state(bool state_only)
 			else
 				front_end_ptr->protocol_version =
 					protocol_version;
+
+			/* Sanity check to make sure we can take a version we
+			 * actually understand.
+			 */
+			if (front_end_ptr->protocol_version <
+			    SLURM_MIN_PROTOCOL_VERSION)
+				front_end_ptr->protocol_version =
+					SLURM_MIN_PROTOCOL_VERSION;
 		}
 
 		xfree(node_name);
@@ -910,6 +922,8 @@ fini:	info("Recovered state of %d front_end nodes", node_cnt);
 	return error_code;
 
 unpack_error:
+	if (!ignore_state_errors)
+		fatal("Incomplete front_end node data checkpoint file, start with '-i' to ignore this");
 	error("Incomplete front_end node data checkpoint file");
 	error_code = EFAULT;
 	xfree (node_name);
@@ -942,7 +956,7 @@ extern void set_front_end_down (front_end_record_t *front_end_ptr,
 		xfree(front_end_ptr->reason);
 		front_end_ptr->reason = xstrdup(reason);
 		front_end_ptr->reason_time = now;
-		front_end_ptr->reason_uid = slurm_get_slurm_user_id();
+		front_end_ptr->reason_uid = slurmctld_conf.slurm_user_id;
 	}
 	last_front_end_update = now;
 #endif

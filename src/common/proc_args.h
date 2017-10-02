@@ -6,7 +6,7 @@
  *  from existing SLURM source code, particularly src/srun/opt.c
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://slurm.schedmd.com/>.
+ *  For details, see <https://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -74,9 +74,16 @@ char * base_name(char* command);
 
 /*
  * str_to_mbytes(): verify that arg is numeric with optional "K", "M", "G"
- * or "T" at end and return the number in mega-bytes
+ * or "T" at end and return the number in mega-bytes. Default units are MB.
  */
 long str_to_mbytes(const char *arg);
+
+/*
+ * str_to_mbytes2(): verify that arg is numeric with optional "K", "M", "G"
+ * or "T" at end and return the number in mega-bytes. Default units are GB
+ * if ???, otherwise MB.
+ */
+long str_to_mbytes2(const char *arg);
 
 /* verify that a node count in arg is of a known form (count or min-max) */
 bool verify_node_count(const char *arg, int *min_nodes, int *max_nodes);

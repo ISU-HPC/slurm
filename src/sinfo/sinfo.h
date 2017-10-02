@@ -3,13 +3,13 @@
  *****************************************************************************
  *  Copyright (C) 2002-2007 The Regents of the University of California.
  *  Copyright (C) 2008-2010 Lawrence Livermore National Security.
- *  Portions Copyright (C) 2010 SchedMD <http://www.schedmd.com>.
+ *  Portions Copyright (C) 2010-2017 SchedMD <https://www.schedmd.com>.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Joey Ekstrom <ekstrom1@llnl.gov>, Morris Jette <jette1@llnl.gov>
  *  CODE-OCEC-09-009. All rights reserved.
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://slurm.schedmd.com/>.
+ *  For details, see <https://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -61,6 +61,7 @@
 
 /* Collection of data for printing reports. Like data is combined here */
 typedef struct {
+	uint16_t port;
 	uint32_t node_state;
 
 	uint32_t nodes_alloc;
@@ -95,13 +96,14 @@ typedef struct {
 	uint32_t max_cpus_per_node;
 	uint64_t alloc_memory;
 
-	char *version;
 	char *features;
 	char *features_act;
 	char *gres;
+	char *cluster_name;
 	char *reason;
 	time_t reason_time;
 	uint32_t reason_uid;
+	char *version;
 
 	hostlist_t hostnames;
 	hostlist_t node_addr;
@@ -136,6 +138,7 @@ struct sinfo_match_flags {
 	bool memory_flag;
 	bool node_addr_flag;
 	bool partition_flag;
+	bool port_flag;
 	bool preempt_mode_flag;
 	bool priority_job_factor_flag;
 	bool priority_tier_flag;
@@ -155,13 +158,15 @@ struct sinfo_match_flags {
 /* Input parameters */
 struct sinfo_parameters {
 	bool all_flag;
+	bool bg_flag;
 	List clusters;
 	uint32_t cluster_flags;
 	uint32_t convert_flags;
-	bool bg_flag;
 	bool dead_nodes;
 	bool exact_match;
+	bool federation_flag;
 	bool filtering;
+	bool local;
 	bool long_output;
 	bool no_header;
 	bool node_field_flag;
@@ -188,11 +193,13 @@ struct sinfo_parameters {
 	List  part_list;
 	List  format_list;
 	List  state_list;
+
+	slurmdb_federation_rec_t *fed;
 };
 
 extern struct sinfo_parameters params;
 
-extern void parse_command_line( int argc, char* argv[] );
+extern void parse_command_line( int argc, char* *argv );
 extern int  parse_state( char* str, uint16_t* states );
 extern void sort_sinfo_list( List sinfo_list );
 

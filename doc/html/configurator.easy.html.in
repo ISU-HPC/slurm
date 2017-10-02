@@ -5,7 +5,7 @@ Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
 Written by Morris Jette <jette1@llnl.gov> and Danny Auble <da@llnl.gov>
 
 This file is part of Slurm, a resource management program.
-For details, see <http://slurm.schedmd.com/>.
+For details, see <https://slurm.schedmd.com/>.
 
 Slurm is free software; you can redistribute it and/or modify it under
 the terms of the GNU General Public License as published by the Free
@@ -133,8 +133,8 @@ function displayfile()
    "# SCHEDULING <br>" +
    "FastSchedule=" + get_radio_value(document.config.fast_schedule) + "<br>" +
    "SchedulerType=sched/" + get_radio_value(document.config.sched_type) + "<br>" +
-   "#SchedulerPort=7321 <br>" +
    "SelectType=select/" + get_radio_value(document.config.select_type) + "<br>" +
+   get_select_type_params() + "<br>" +
    "# <br>" +
    "# <br>" +
    "# LOGGING AND ACCOUNTING <br>" +
@@ -218,7 +218,7 @@ file. It will appear on your web browser. Save the file in text format
 as <I>slurm.conf</I> for use by Slurm.
 
 <P>For more information about Slurm, see
-<A HREF="http://slurm.schedmd.com/slurm.html">http://slurm.schedmd.com/slurm.html</A>
+<A HREF="https://slurm.schedmd.com/slurm.html">https://slurm.schedmd.com/slurm.html</A>
 
 <H2>Control Machines</H2>
 Define the hostname of the computer on which the Slurm controller and
@@ -362,18 +362,12 @@ handling required (InfiniBand, Myrinet, Ethernet, etc.)<BR>
 Specify the type of MPI to be used by default. Slurm will configure environment
 variables accordingly. Users can over-ride this specification with an srun option.<BR>
 Select one value for <B>MpiDefault</B>:<BR>
-<input type="radio" name="mpi_default" value="mpichgm"> <B>MPICH-GM</B><BR>
-<input type="radio" name="mpi_default" value="mpichmx"> <B>MPICH-MX</B><BR>
-<input type="radio" name="mpi_default" value="mpich1_p4"> <B>MPICH1-P4</B><BR>
-<input type="radio" name="mpi_default" value="mpich1_shmem"> <B>MPICH1-SHMEM</B>:
-This also works for MVAPICH-SHMEM.<BR>
 <input type="radio" name="mpi_default" value="pmi2"> <B>MPI-PMI2</B>
-(For MPI2 and MVAPICH2)<BR>
+(For PMI2-supporting MPI implementations)<BR>
 <input type="radio" name="mpi_default" value="pmix"> <B>MPI-PMIx</B>
 (Exascale PMI implementation)<BR>
-<input type="radio" name="mpi_default" value="mvapich"> <B>MVAPICH</B><BR>
 <input type="radio" name="mpi_default" value="none" checked> <B>None</B>:
-+This works for most other MPI types including MPICH2, LAM MPI and Open MPI.<BR>
+ This works for most other MPI types.<BR>
 <P>
 
 <H2>Process Tracking</H2>
@@ -381,31 +375,21 @@ Define the algorithm used to identify which processes are associated with a
 given job. This is used signal, kill, and account for the processes associated
 with a job step.<BR>
 Select one value for <B>ProctrackType</B>:<BR>
-<input type="radio" name="proctrack_type" value="cgroup"> <B>Cgroup</B>:  Use
+<input type="radio" name="proctrack_type" value="cgroup" checked> <B>Cgroup</B>:  Use
 Linux <i>cgroup</i> to create a job container and track processes.
 Build a <i>cgroup.conf</i> file as well<BR>
 <input type="radio" name="proctrack_type" value="cray"> <B>Cray</B>: Cray proprietary process tracking<BR>
-<input type="radio" name="proctrack_type" value="pgid" checked> <B>Pgid</B>: Use Unix
+<input type="radio" name="proctrack_type" value="linuxproc"> <B>LinuxProc</B>: Use
+parent process ID records, processes can escape from Slurm control<BR>
+<input type="radio" name="proctrack_type" value="pgid"> <B>Pgid</B>: Use Unix
 Process Group ID, processes changing their process group ID can escape from Slurm
 control<BR>
-<input type="radio" name="proctrack_type" value="linuxproc"> <B>LinuxProc</B>: Use
-parent process ID records, required for MPICH-GM use, processes can escape
-from Slurm control<BR>
-<input type="radio" name="proctrack_type" value="rms"> <B>RMS</B>: Use Quadrics
-kernel infrastructure, recommended for systems where this is available<BR>
-<input type="radio" name="proctrack_type" value="sgi_job"> <B>SGI's PAGG
-module</B>: Use <A HREF="http://oss.sgi.com/projects/pagg/">SGI's Process
-Aggregates (PAGG) kernel module</A>, recommended where available<BR>
 <P>
 
 <H2>Resource Selection</H2>
 Define resource (node) selection algorithm to be used.<BR>
 Select one value for <B>SelectType</B>:<BR>
 <input type="radio" name="select_type" value="alps">
-<B>Alps</B>: Cray systems running ALPS only<BR>
-<input type="radio" name="select_type" value="bluegene">
-<B>BlueGene</B>: For IBM Blue Gene systems only<BR>
-<input type="radio" name="select_type" value="cons_res">
 <B>Cons_res</B>: Allocate individual processors and memory<BR>
 <input type="radio" name="select_type" value="cray">
 <B>Cray</B>: Cray systems running native Slurm without ALPS<BR>
@@ -508,7 +492,7 @@ from multiple Slurm-managed clusters.<br>
 
 <H2>Process ID Logging</H2>
 Define the location into which we can record the daemon's process ID.
-This is used for locate the appropriate daemon for signalling.
+This is used for locate the appropriate daemon for signaling.
 Specify a specify the fully qualified pathname for the file.
 <P>
 <input type="text" name="slurmctld_pid_file" value="/var/run/slurmctld.pid">
@@ -526,5 +510,5 @@ Specify a specify the fully qualified pathname for the file.
 </FORM>
 <HR>
 <a href="disclaimer.html" target="_blank" class="privacy">Legal Notices</a><br>
-Last modified 25 March 2014</P>
+Last modified 14 September 2017</P>
 </BODY>

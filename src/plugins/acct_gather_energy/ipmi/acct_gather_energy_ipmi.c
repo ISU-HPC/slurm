@@ -5,7 +5,7 @@
  *  Initially written by Thomas Cadeau @ Bull. Adapted by Yoann Blein @ Bull.
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://slurm.schedmd.com/>.
+ *  For details, see <https://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -83,7 +83,6 @@ slurmd_conf_t *conf = NULL;
 #define _DEBUG 1
 #define _DEBUG_ENERGY 1
 #define IPMI_VERSION 2		/* Data structure version number */
-#define NBFIRSTREAD 3
 #define MAX_LOG_ERRORS 5	/* Max sensor reading errors log messages */
 
 /*
@@ -775,18 +774,10 @@ static void *_cleanup_thread(void *no_data)
 static void *_thread_launcher(void *no_data)
 {
 	//what arg would countain? frequency, socket?
-	pthread_attr_t attr_run;
 	time_t begin_time;
 	int rc = SLURM_SUCCESS;
 
-	slurm_attr_init(&attr_run);
-	if (pthread_create(&thread_ipmi_id_run, &attr_run,
-			   &_thread_ipmi_run, NULL)) {
-		//if (pthread_create(... (void *)arg)) {
-		debug("energy accounting failed to create _thread_ipmi_run "
-		      "thread: %m");
-	}
-	slurm_attr_destroy(&attr_run);
+	slurm_thread_create(&thread_ipmi_id_run, _thread_ipmi_run, NULL);
 
 	begin_time = time(NULL);
 	while (rc == SLURM_SUCCESS) {
@@ -814,12 +805,8 @@ static void *_thread_launcher(void *no_data)
 		/* This is here to join the decay thread so we don't core
 		 * dump if in the sleep, since there is no other place to join
 		 * we have to create another thread to do it. */
-		slurm_attr_init(&attr_run);
-		if (pthread_create(&cleanup_handler_thread, &attr_run,
-				   _cleanup_thread, NULL))
-			fatal("pthread_create error %m");
-
-		slurm_attr_destroy(&attr_run);
+		slurm_thread_create(&cleanup_handler_thread,
+				    _cleanup_thread, NULL);
 	}
 
 	return NULL;
@@ -1336,15 +1323,8 @@ extern void acct_gather_energy_p_conf_set(s_p_hashtbl_t *tbl)
 
 		flag_init = true;
 		if (_is_thread_launcher()) {
-			pthread_attr_t attr;
-			slurm_attr_init(&attr);
-			if (pthread_create(&thread_ipmi_id_launcher, &attr,
-					   &_thread_launcher, NULL)) {
-				//if (pthread_create(... (void *)arg)) {
-				debug("energy accounting failed to create "
-				      "_thread_launcher thread: %m");
-			}
-			slurm_attr_destroy(&attr);
+			slurm_thread_create(&thread_ipmi_id_launcher,
+					    _thread_launcher, NULL);
 			if (debug_flags & DEBUG_FLAG_ENERGY)
 				info("%s thread launched", plugin_name);
 		} else

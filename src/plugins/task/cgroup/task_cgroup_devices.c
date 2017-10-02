@@ -5,7 +5,7 @@
  *  Written by Yiannis Georgiou <yiannis.georgiou@bull.fr>
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://slurm.schedmd.com/>.
+ *  For details, see <https://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -34,11 +34,21 @@
  *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301  USA.
 \*****************************************************************************/
 
+#include "config.h"
+
 #define _GNU_SOURCE
 #include <glob.h>
+#include <limits.h>
 #include <sched.h>
 #include <sys/stat.h>
 #include <sys/types.h>
+
+#ifdef MAJOR_IN_MKDEV
+#  include <sys/mkdev.h>
+#endif
+#ifdef MAJOR_IN_SYSMACROS
+#  include <sys/sysmacros.h>
+#endif
 
 #include "slurm/slurm.h"
 #include "slurm/slurm_errno.h"
@@ -51,10 +61,6 @@
 #include "src/slurmd/slurmstepd/slurmstepd_job.h"
 
 #include "task_cgroup.h"
-
-#ifndef PATH_MAX
-#define PATH_MAX 256
-#endif
 
 static char user_cgroup_path[PATH_MAX];
 static char job_cgroup_path[PATH_MAX];
@@ -95,7 +101,6 @@ extern int task_cgroup_devices_init(slurm_cgroup_conf_t *slurm_cgroup_conf)
 
 	(void) gres_plugin_node_config_load(cpunum, conf->node_name, NULL);
 
-
 	strcpy(cgroup_allowed_devices_file,
 	       slurm_cgroup_conf->allowed_devices_file);
 	if (xcgroup_ns_create(slurm_cgroup_conf, &devices_ns, "", "devices")
@@ -107,6 +112,7 @@ extern int task_cgroup_devices_init(slurm_cgroup_conf_t *slurm_cgroup_conf)
 	return SLURM_SUCCESS;
 
 error:
+	xcgroup_ns_destroy(&devices_ns);
 	xcpuinfo_fini();
 	return SLURM_ERROR;
 }
@@ -121,11 +127,38 @@ extern int task_cgroup_devices_fini(slurm_cgroup_conf_t *slurm_cgroup_conf)
         if (xcgroup_create(&devices_ns, &devices_cg,"",0,0)
 	    == XCGROUP_SUCCESS) {
                 if (xcgroup_lock(&devices_cg) == XCGROUP_SUCCESS) {
+			int i = 0, npids = 0, cnt = 0;
+			pid_t* pids = NULL;
 			/* First move slurmstepd to the root devices cg
 			 * so we can remove the step/job/user devices
 			 * cg's.  */
 			xcgroup_move_process(&devices_cg, getpid());
-                        if (xcgroup_delete(&step_devices_cg) != SLURM_SUCCESS)
+
+			/* There is a delay in the cgroup system when moving the
+			 * pid from one cgroup to another.  This is usually
+			 * short, but we need to wait to make sure the pid is
+			 * out of the step cgroup or we will occur an error
+			 * leaving the cgroup unable to be removed.
+			 */
+			do {
+				xcgroup_get_pids(&step_devices_cg,
+						 &pids, &npids);
+				for (i = 0 ; i<npids ; i++)
+					if (pids[i] == getpid()) {
+						cnt++;
+						break;
+					}
+				xfree(pids);
+			} while ((i < npids) && (cnt < MAX_MOVE_WAIT));
+
+			if (cnt < MAX_MOVE_WAIT)
+				debug3("Took %d checks before stepd pid was removed from the step cgroup.",
+				       cnt);
+			else
+				error("Pid %d is still in the step cgroup.  It might be left uncleaned after the job.",
+				      getpid());
+
+			if (xcgroup_delete(&step_devices_cg) != SLURM_SUCCESS)
                                 debug2("task/cgroup: unable to remove step "
                                        "devices : %m");
                         if (xcgroup_delete(&job_devices_cg) != XCGROUP_SUCCESS)
@@ -163,7 +196,7 @@ extern int task_cgroup_devices_fini(slurm_cgroup_conf_t *slurm_cgroup_conf)
 
 extern int task_cgroup_devices_create(stepd_step_rec_t *job)
 {
-	int f, k, rc, gres_conf_lines, allow_lines;
+	int f, k, rc, gres_conf_lines = 0, allow_lines = 0;
 	int fstatus = SLURM_ERROR;
 	char **gres_name = NULL;
 	char **gres_cgroup = NULL, **dev_path = NULL;
@@ -254,44 +287,44 @@ extern int task_cgroup_devices_create(stepd_step_rec_t *job)
 		return SLURM_ERROR;
 	}
 
-	info("task/cgroup: manage devices jor job '%u'", jobid);
+	debug2("task/cgroup: manage devices jor job '%u'", jobid);
 
 	 /*
 	  * collect info concerning the gres.conf file
 	  * the GRES devices paths and the GRES names
 	  */
-	gres_conf_lines = gres_plugin_node_config_devices_path(&dev_path,
-							       &gres_name,
-							       job->node_name);
-
-	/*
-	 * create the entry for cgroup devices subsystem with major minor
-	 */
-	gres_cgroup = xmalloc(sizeof(char *) * gres_conf_lines);
-	_calc_device_major(dev_path, gres_cgroup, gres_conf_lines);
-
-	/*
-         * create the entry with major minor for the default allowed devices
-         * read from the file
-         */
-	allow_lines = read_allowed_devices_file(allowed_devices);
-	_calc_device_major(allowed_devices, allowed_dev_major, allow_lines);
+	gres_conf_lines = gres_plugin_node_config_devices_path(
+		&dev_path, &gres_name, job->node_name);
 
 	/*
 	 * calculate the number of gres.conf records for each gres name
 	 */
-	gres_count = xmalloc(sizeof(int) * gres_conf_lines);
-	f = 0;
-	gres_count[f] = 1;
-	for (k = 0; k < gres_conf_lines; k++) {
-		if ((k+1 < gres_conf_lines) &&
-		    (xstrcmp(gres_name[k], gres_name[k+1]) == 0))
-			gres_count[f]++;
-		if ((k+1 < gres_conf_lines) &&
-		    (xstrcmp(gres_name[k], gres_name[k+1]) != 0)) {
-			f++;
-			gres_count[f] = 1;
+	if (gres_conf_lines) {
+		/*
+		 * create the entry for cgroup devices subsystem with major
+		 * minor
+		 */
+		gres_cgroup = xmalloc(sizeof(char *) * gres_conf_lines);
+		_calc_device_major(dev_path, gres_cgroup, gres_conf_lines);
+
+		gres_count = xmalloc(sizeof(int) * gres_conf_lines + 32);
+		f = 0;
+		gres_count[f] = 1;
+		for (k = 0; k < gres_conf_lines; k++) {
+			if ((k+1 < gres_conf_lines) &&
+			    (xstrcmp(gres_name[k], gres_name[k+1]) == 0))
+				gres_count[f]++;
+			if ((k+1 < gres_conf_lines) &&
+			    (xstrcmp(gres_name[k], gres_name[k+1]) != 0)) {
+				f++;
+				gres_count[f] = 1;
+			}
 		}
+
+		gres_job_bit_alloc = xmalloc(sizeof (int) *
+					     (gres_conf_lines + 32));
+		gres_plugin_job_state_file(job_gres_list, gres_job_bit_alloc,
+					   gres_count);
 	}
 
 	/*
@@ -326,10 +359,12 @@ extern int task_cgroup_devices_create(stepd_step_rec_t *job)
 		goto error;
 	}
 
-	/* fetch information concerning the gres devices allocation for the job */
-	gres_job_bit_alloc = xmalloc(sizeof (int) * (gres_conf_lines + 10));
-	gres_plugin_job_state_file(job_gres_list, gres_job_bit_alloc,
-				   gres_count);
+	/*
+         * create the entry with major minor for the default allowed devices
+         * read from the file
+         */
+	allow_lines = read_allowed_devices_file(allowed_devices);
+	_calc_device_major(allowed_devices, allowed_dev_major, allow_lines);
 
 	/*
 	 * with the current cgroup devices subsystem design (whitelist only
@@ -337,8 +372,8 @@ extern int task_cgroup_devices_create(stepd_step_rec_t *job)
 	 * to be allowed by* default.
 	 */
 	for (k = 0; k < allow_lines; k++) {
-		info("Default access allowed to device %s",
-		     allowed_dev_major[k]);
+		debug2("Default access allowed to device %s for job",
+		       allowed_dev_major[k]);
 		xcgroup_set_param(&job_devices_cg, "devices.allow",
 				  allowed_dev_major[k]);
 	}
@@ -348,11 +383,13 @@ extern int task_cgroup_devices_create(stepd_step_rec_t *job)
          */
 	for (k = 0; k < gres_conf_lines; k++) {
 		if (gres_job_bit_alloc[k] == 1) {
-			info("Allowing access to device %s", gres_cgroup[k]);
+			debug2("Allowing access to device %s for job",
+			       gres_cgroup[k]);
 			xcgroup_set_param(&job_devices_cg, "devices.allow",
                                           gres_cgroup[k]);
 		} else {
-			info("Not allowing access to device %s", gres_cgroup[k]);
+			debug2("Not allowing access to device %s for job",
+			       gres_cgroup[k]);
 			xcgroup_set_param(&job_devices_cg, "devices.deny",
 					  gres_cgroup[k]);
 		}
@@ -383,7 +420,8 @@ extern int task_cgroup_devices_create(stepd_step_rec_t *job)
 	    (job->stepid != SLURM_EXTERN_CONT)) {
 
 		/* fetch information about step GRES devices allocation */
-		gres_step_bit_alloc = xmalloc(sizeof (int) * (gres_conf_lines + 10));
+		gres_step_bit_alloc = xmalloc(sizeof (int) *
+					      (gres_conf_lines + 32));
 		gres_plugin_step_state_file(step_gres_list, gres_step_bit_alloc,
 					    gres_count);
 
@@ -393,7 +431,7 @@ extern int task_cgroup_devices_create(stepd_step_rec_t *job)
 		 * are supposed to be allowed by default.
 		 */
 		for (k = 0; k < allow_lines; k++) {
-			info("Default access allowed to device %s",
+			debug2("Default access allowed to device %s for step",
 			     allowed_dev_major[k]);
 			xcgroup_set_param(&step_devices_cg, "devices.allow",
 					  allowed_dev_major[k]);
@@ -405,14 +443,14 @@ extern int task_cgroup_devices_create(stepd_step_rec_t *job)
 		 */
 		for (k = 0; k < gres_conf_lines; k++) {
 			if (gres_step_bit_alloc[k] == 1) {
-				info("Allowing access to device %s for step",
-				     gres_cgroup[k]);
+				debug2("Allowing access to device %s for step",
+				       gres_cgroup[k]);
 				xcgroup_set_param(&step_devices_cg,
 						 "devices.allow",
 						  gres_cgroup[k]);
 			} else {
-				info("Not allowing access to device %s for step",
-				     gres_cgroup[k]);
+				debug2("Not allowing access to device %s for step",
+				       gres_cgroup[k]);
 				xcgroup_set_param(&step_devices_cg,
 						 "devices.deny",
 						  gres_cgroup[k]);
@@ -435,8 +473,17 @@ error:
 	xcgroup_destroy(&devices_cg);
 	xfree(gres_step_bit_alloc);
 	xfree(gres_job_bit_alloc);
+	xfree(gres_count);
 	xfree(gres_name);
 	xfree(dev_path);
+	for (k = 0; k < allow_lines; k++) {
+		xfree(allowed_dev_major[k]);
+	}
+	xfree(allowed_dev_major);
+
+	for (k = 0; k < gres_conf_lines; k++) {
+		xfree(gres_cgroup[k]);
+	}
 	xfree(gres_cgroup);
 
 	return fstatus;
@@ -470,7 +517,7 @@ static void _calc_device_major(char *dev_path[PATH_MAX],
 		stat(dev_path[k], &fs);
 		major = (int)major(fs.st_rdev);
 		minor = (int)minor(fs.st_rdev);
-		debug3("device : %s major %d, minor %d\n",
+		debug3("device : %s major %d, minor %d",
 			dev_path[k], major, minor);
 		memset(str1, 0, sizeof(str1));
 		if (S_ISBLK(fs.st_mode)) {
@@ -512,6 +559,7 @@ static int read_allowed_devices_file(char **allowed_devices)
 						xstrdup(globbuf.gl_pathv[l]);
 					num_lines++;
 				}
+				globfree(&globbuf);
 			}
 		}
 		fclose ( file );

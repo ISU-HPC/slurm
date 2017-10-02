@@ -5,7 +5,7 @@
  *  Written by Morris Jette <jette@schedmd.com>
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://slurm.schedmd.com>.
+ *  For details, see <https://slurm.schedmd.com>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -58,15 +58,12 @@
 
 /* This version string is defined at configure time of libsmd. The
  * META of libsmd needs to reflect this version. */
-char *version_string = "VERSION:17.02";
+char *version_string = "VERSION:17.11";
 
 /* When a remote socket closes on AIX, we have seen poll() return EAGAIN
  * indefinitely for a pending write request. Rather than locking up
  * socket, abort after _MAX_RETRIES poll() failures. */
 #define _MAX_RETRIES	10
-
-/* Maximum size of any single field returned (e.g. node list, job name). */
-#define _MAX_NAME_SIZE	256
 
 static bool thread_running = false;
 static bool thread_shutdown = false;
@@ -220,10 +217,10 @@ static void _proc_msg(int new_fd, char *msg, slurm_addr_t cli_addr)
 		NO_LOCK, WRITE_LOCK, NO_LOCK, NO_LOCK, NO_LOCK };
 	/* Locks: Write job, write node, read partition */
 	slurmctld_lock_t job_write_lock2 = {
-		NO_LOCK, WRITE_LOCK, WRITE_LOCK, READ_LOCK, NO_LOCK };
+		NO_LOCK, WRITE_LOCK, WRITE_LOCK, READ_LOCK, READ_LOCK };
 	/* Locks: Write node data */
 	slurmctld_lock_t node_write_lock = {
-		NO_LOCK, NO_LOCK, WRITE_LOCK, NO_LOCK, NO_LOCK };
+		NO_LOCK, NO_LOCK, WRITE_LOCK, NO_LOCK, READ_LOCK };
 	char *cmd_ptr, *resp = NULL, *msg_decrypted = NULL;
 	uid_t cmd_uid;
 	uint32_t protocol_version = 0;
@@ -341,7 +338,7 @@ static void *_msg_thread(void *no_data)
 			_proc_msg(new_fd, msg, cli_addr);
 			xfree(msg);
 		}
-		slurm_close(new_fd);
+		close(new_fd);
 	}
 	debug("slurmctld/nonstop: message engine shutdown");
 	if (sock_fd > 0)
@@ -352,8 +349,6 @@ static void *_msg_thread(void *no_data)
 
 extern int spawn_msg_thread(void)
 {
-	pthread_attr_t thread_attr_msg;
-
 	slurm_mutex_lock(&thread_flag_mutex);
 	if (thread_running) {
 		error("nonstop thread already running");
@@ -361,11 +356,7 @@ extern int spawn_msg_thread(void)
 		return SLURM_ERROR;
 	}
 
-	slurm_attr_init(&thread_attr_msg);
-	if (pthread_create(&msg_thread_id, &thread_attr_msg,
-	                   _msg_thread, NULL))
-		fatal("pthread_create %m");
-	slurm_attr_destroy(&thread_attr_msg);
+	slurm_thread_create(&msg_thread_id, _msg_thread, NULL);
 	thread_running = true;
 	slurm_mutex_unlock(&thread_flag_mutex);
 
@@ -389,7 +380,7 @@ extern void term_msg_thread(void)
 		fd = slurm_open_stream(&addr, true);
 		if (fd != -1) {
 			/* we don't care if the open failed */
-			slurm_close(fd);
+			close(fd);
 		}
 
 		debug2("waiting for slurmctld/nonstop thread to exit");

@@ -92,6 +92,7 @@ target_triplet = @target@
 subdir = doc/html
 ACLOCAL_M4 = $(top_srcdir)/aclocal.m4
 am__aclocal_m4_deps = $(top_srcdir)/auxdir/ax_check_zlib.m4 \
+	$(top_srcdir)/auxdir/ax_gcc_builtin.m4 \
 	$(top_srcdir)/auxdir/ax_lib_hdf5.m4 \
 	$(top_srcdir)/auxdir/ax_pthread.m4 \
 	$(top_srcdir)/auxdir/libtool.m4 \
@@ -132,6 +133,9 @@ am__aclocal_m4_deps = $(top_srcdir)/auxdir/ax_check_zlib.m4 \
 	$(top_srcdir)/auxdir/x_ac_setproctitle.m4 \
 	$(top_srcdir)/auxdir/x_ac_sgi_job.m4 \
 	$(top_srcdir)/auxdir/x_ac_slurm_ssl.m4 \
+	$(top_srcdir)/auxdir/x_ac_systemd.m4 \
+	$(top_srcdir)/auxdir/x_ac_ucx.m4 \
+	$(top_srcdir)/auxdir/x_ac_uid_gid_size.m4 \
 	$(top_srcdir)/configure.ac
 am__configure_deps = $(am__aclocal_m4_deps) $(CONFIGURE_DEPENDENCIES) \
 	$(ACLOCAL_M4)
@@ -289,6 +293,10 @@ LIBCURL_CPPFLAGS = @LIBCURL_CPPFLAGS@
 LIBOBJS = @LIBOBJS@
 LIBS = @LIBS@
 LIBTOOL = @LIBTOOL@
+LIB_SLURM = @LIB_SLURM@
+LIB_SLURMDB = @LIB_SLURMDB@
+LIB_SLURMDB_BUILD = @LIB_SLURMDB_BUILD@
+LIB_SLURM_BUILD = @LIB_SLURM_BUILD@
 LIPO = @LIPO@
 LN_S = @LN_S@
 LTLIBOBJS = @LTLIBOBJS@
@@ -372,12 +380,15 @@ SLURM_MINOR = @SLURM_MINOR@
 SLURM_PREFIX = @SLURM_PREFIX@
 SLURM_VERSION_NUMBER = @SLURM_VERSION_NUMBER@
 SLURM_VERSION_STRING = @SLURM_VERSION_STRING@
-SO_LDFLAGS = @SO_LDFLAGS@
 SSL_CPPFLAGS = @SSL_CPPFLAGS@
 SSL_LDFLAGS = @SSL_LDFLAGS@
 SSL_LIBS = @SSL_LIBS@
 STRIP = @STRIP@
 SUCMD = @SUCMD@
+SYSTEMD_TASKSMAX_OPTION = @SYSTEMD_TASKSMAX_OPTION@
+UCX_CPPFLAGS = @UCX_CPPFLAGS@
+UCX_LDFLAGS = @UCX_LDFLAGS@
+UCX_LIBS = @UCX_LIBS@
 UTIL_LIBS = @UTIL_LIBS@
 VERSION = @VERSION@
 ZLIB_CPPFLAGS = @ZLIB_CPPFLAGS@
@@ -477,11 +488,13 @@ generated_html = \
 	elastic_computing.html \
 	ext_sensorsplugins.html \
 	faq.html \
+	federation.html \
 	gang_scheduling.html \
 	gres.html \
 	gres_design.html \
 	gres_plugins.html \
 	hdf5_profile_user_guide.html \
+	heterogeneous_jobs.html \
 	high_throughput.html \
 	ibm-pe.html \
 	intel_knl.html \
@@ -497,12 +510,10 @@ generated_html = \
 	fair_tree.html \
 	mail.html \
 	man_index.html \
-	maui.html \
 	mc_support.html \
 	mcs.html \
 	mcs_plugins.html \
 	meetings.html \
-	moab.html \
 	mpi_guide.html \
 	mpiplugins.html \
 	multi_cluster.html \
@@ -555,18 +566,19 @@ html_DATA = \
 	${generated_html} \
 	allocation_pies.gif \
 	arch.gif \
-	bull.jpg \
 	coding_style.pdf \
 	configurator.html \
 	configurator.easy.html \
 	entities.gif \
 	example_usage.gif \
+	fonts.css \
+	fonts.ttf \
 	hdf5_task_attr.png \
 	hdf5_job_outline.png \
 	ibm_pe_fig1.png \
 	ibm_pe_fig2.png \
+	jquery.min.js \
 	k_function.gif \
-	linuxstyles.css \
 	mc_support.gif \
 	plane_ex1.gif \
 	plane_ex2.gif \
@@ -575,14 +587,14 @@ html_DATA = \
 	plane_ex5.gif \
 	plane_ex6.gif \
 	plane_ex7.gif \
+	reset.css \
 	slurm_logo.png \
 	schedmd.png \
-	slurm_design.pdf \
-	slurmstyles.css \
+	slurm.css \
 	Slurm_Entity.pdf \
 	Slurm_Individual.pdf \
-	sponsors.gif \
 	squeue_color.png \
+	style.css \
 	topo_ex1.gif \
 	topo_ex2.gif \
 	tutorial_intro_files.tar \

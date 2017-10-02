@@ -7,7 +7,7 @@
  *  CODE-OCEC-09-009. All rights reserved.
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://slurm.schedmd.com/>.
+ *  For details, see <https://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -50,15 +50,14 @@
 #include "src/common/macros.h"
 #include "src/common/xassert.h"
 
-/* detach and go into background.
- * caller is responsible for umasks
- *
- * if nochdir == 0, will do a chdir to /
- * if noclose == 0, will close all FDs
+/*
+ * Double-fork and go into background.
+ * Caller is responsible for umasks
  */
-int
-daemon(int nochdir, int noclose)
+int xdaemon(void)
 {
+	int devnull;
+
 	switch (fork()) {
 		case  0 : break;        /* child */
 		case -1 : return -1;
@@ -74,38 +73,22 @@ daemon(int nochdir, int noclose)
 		default: _exit(0);      /* exit parent */
 	}
 
-	if (!nochdir && chdir("/") < 0) {
-		error("chdir(/): %m");
-		return -1;
-	}
-
-	/* Close all file descriptors if requested
+	/*
+	 * dup stdin, stdout, and stderr onto /dev/null
 	 */
-	if (!noclose) {
-		closeall(0);
-		if (open("/dev/null", O_RDWR) != 0)
-			error("Unable to open /dev/null on stdin: %m");
-		dup2(0, STDOUT_FILENO);
-		dup2(0, STDERR_FILENO);
-	} else {
-		/*
-		 * Otherwise, dup stdin, stdout, and stderr onto /dev/null
-		 */
-		int devnull = open("/dev/null", O_RDWR);
-		if (devnull < 0)
-			error("Unable to open /dev/null: %m");
-		if (dup2(devnull, STDIN_FILENO) < 0)
-			error("Unable to dup /dev/null onto stdin: %m");
-		if (dup2(devnull, STDOUT_FILENO) < 0)
-			error("Unable to dup /dev/null onto stdout: %m");
-		if (dup2(devnull, STDERR_FILENO) < 0)
-			error("Unable to dup /dev/null onto stderr: %m");
-		if (close(devnull) < 0)
-			error("Unable to close /dev/null: %m");
-	}
+	devnull = open("/dev/null", O_RDWR);
+	if (devnull < 0)
+		error("Unable to open /dev/null: %m");
+	if (dup2(devnull, STDIN_FILENO) < 0)
+		error("Unable to dup /dev/null onto stdin: %m");
+	if (dup2(devnull, STDOUT_FILENO) < 0)
+		error("Unable to dup /dev/null onto stdout: %m");
+	if (dup2(devnull, STDERR_FILENO) < 0)
+		error("Unable to dup /dev/null onto stderr: %m");
+	if (close(devnull) < 0)
+		error("Unable to close /dev/null: %m");
 
 	return 0;
-
 }
 
 /*
@@ -149,6 +132,7 @@ read_pidfile(const char *pidfile, int *pidfd)
 	else
 		(void) close(fd);
 
+/*	fclose(fp);	NOTE: DO NOT CLOSE, "fd" CONTAINS FILE DESCRIPTOR */
 	return (lpid);
 }
 
@@ -192,6 +176,7 @@ create_pidfile(const char *pidfile, uid_t uid)
 	if (uid && (fchown(fd, uid, -1) < 0))
 		error ("Unable to reset owner of pidfile: %m");
 
+/*	fclose(fp);	NOTE: DO NOT CLOSE, "fd" CONTAINS FILE DESCRIPTOR */
 	return fd;
 
   error:

@@ -4,7 +4,7 @@
  *  Copyright (C) 2015-2016 SchedMD LLC.
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://slurm.schedmd.com/>.
+ *  For details, see <https://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -44,14 +44,15 @@ struct bcast_parameters {
 	uint32_t block_size;
 	uint16_t compress;
 	char *dst_fname;
-	int  fanout;
+	int fanout;
 	bool force;
-	uint32_t job_id;
+	uint32_t job_id;		/* Job ID or Pack Job ID */
+	uint32_t pack_job_offset;	/* Pack Job Offset or NO_VAL */
 	bool preserve;
 	char *src_fname;
 	uint32_t step_id;
-	int  timeout;
-	int  verbose;
+	int timeout;
+	int verbose;
 };
 
 typedef struct file_bcast_info {
@@ -62,7 +63,6 @@ typedef struct file_bcast_info {
 	gid_t gid;		/* gid of owner */
 	uint32_t job_id;	/* job id */
 	time_t last_update;	/* transfer last block received */
-	int max_blocks;		/* highest block number (when known) */
 	int received_blocks;	/* number of blocks received */
 	time_t start_time;	/* transfer start time */
 	uid_t uid;		/* uid of owner */

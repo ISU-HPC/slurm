@@ -8,7 +8,7 @@
  *  CODE-OCEC-09-009. All rights reserved.
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://slurm.schedmd.com/>.
+ *  For details, see <https://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -96,7 +96,7 @@ extern void srun_step_missing (struct step_record *step_ptr,
 			       char *node_list);
 
 /*
- * srun_step_signal - notify srun that a job step should be signalled
+ * srun_step_signal - notify srun that a job step should be signaled
  * NOTE: Needed on BlueGene/Q to signal runjob process
  * IN step_ptr  - pointer to the slurmctld job step record
  * IN signal - signal number

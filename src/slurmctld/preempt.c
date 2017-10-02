@@ -2,13 +2,13 @@
  *  preempt.c - Job preemption plugin function setup.
  *****************************************************************************
  *  Copyright (C) 2009-2010 Lawrence Livermore National Security.
- *  Portions Copyright (C) 2010 SchedMD <http://www.schedmd.com>.
+ *  Portions Copyright (C) 2010 SchedMD <https://www.schedmd.com>.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Morris Jette <jette1@llnl.gov>
  *  CODE-OCEC-09-009. All rights reserved.
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://slurm.schedmd.com/>.
+ *  For details, see <https://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -48,10 +48,6 @@
 #include "src/slurmctld/slurmctld.h"
 #include "src/slurmctld/job_scheduler.h"
 
-
-/* ************************************************************************ */
-/*  TAG(                     slurm_preempt_ops_t                        )  */
-/* ************************************************************************ */
 typedef struct slurm_preempt_ops {
 	List		(*find_jobs)	      (struct job_record *job_ptr);
 	uint16_t	(*job_preempt_mode)   (struct job_record *job_ptr);
@@ -75,9 +71,6 @@ static plugin_context_t *g_context = NULL;
 static pthread_mutex_t	    g_context_lock = PTHREAD_MUTEX_INITIALIZER;
 static bool init_run = false;
 
-/* *********************************************************************** */
-/*  TAG(                    _preempt_signal                             )  */
-/* *********************************************************************** */
 static void _preempt_signal(struct job_record *job_ptr, uint32_t grace_time)
 {
 	if (job_ptr->preempt_time)
@@ -91,10 +84,8 @@ static void _preempt_signal(struct job_record *job_ptr, uint32_t grace_time)
 	job_signal(job_ptr->job_id, SIGCONT, 0, 0, 0);
 	job_signal(job_ptr->job_id, SIGTERM, 0, 0, 0);
 }
-/* *********************************************************************** */
-/*  TAG(                    slurm_job_check_grace                       )  */
-/* *********************************************************************** */
-extern int slurm_job_check_grace(struct job_record *job_ptr)
+
+extern int slurm_job_check_grace(struct job_record *job_ptr, uint32_t preemptor)
 {
 	/* Preempt modes: -1 (unset), 0 (none), 1 (partition), 2 (QOS) */
 	static int preempt_mode = 0;
@@ -124,14 +115,17 @@ extern int slurm_job_check_grace(struct job_record *job_ptr)
 	if (preempt_mode == 1)
 		grace_time = job_ptr->part_ptr->grace_time;
 	else if (preempt_mode == 2) {
-		slurmdb_qos_rec_t *qos_ptr = (slurmdb_qos_rec_t *)
-					     job_ptr->qos_ptr;
-		grace_time = qos_ptr->grace_time;
+		if (!job_ptr->qos_ptr)
+			error("%s: Job %u has no QOS ptr!  This should never happen",
+			      __func__, job_ptr->job_id);
+		else
+			grace_time = job_ptr->qos_ptr->grace_time;
 	}
 
 	if (grace_time) {
-		debug("setting %u sec preemption grace time for job %u",
-		      grace_time, job_ptr->job_id);
+		debug("setting %u sec preemption grace time for job %u to "
+		      "reclaim resources for job %u",
+		      grace_time, job_ptr->job_id, preemptor);
 		_preempt_signal(job_ptr, grace_time);
 	} else
 		rc = SLURM_ERROR;
@@ -139,9 +133,6 @@ extern int slurm_job_check_grace(struct job_record *job_ptr)
 	return rc;
 }
 
-/* *********************************************************************** */
-/*  TAG(                    slurm_preempt_init                        )  */
-/* *********************************************************************** */
 extern int slurm_preempt_init(void)
 {
 	int retval = SLURM_SUCCESS;
@@ -176,9 +167,6 @@ done:
 	return retval;
 }
 
-/* *********************************************************************** */
-/*  TAG(                    slurm_preempt_fini                        )  */
-/* *********************************************************************** */
 extern int slurm_preempt_fini(void)
 {
 	int rc;
@@ -192,10 +180,6 @@ extern int slurm_preempt_fini(void)
 	return rc;
 }
 
-
-/* *********************************************************************** */
-/*  TAG(                  slurm_find_preemptable_jobs                 )  */
-/* *********************************************************************** */
 extern List slurm_find_preemptable_jobs(struct job_record *job_ptr)
 {
 	if (slurm_preempt_init() < 0)

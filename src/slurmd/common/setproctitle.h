@@ -7,7 +7,7 @@
  *  CODE-OCEC-09-009. All rights reserved.
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://slurm.schedmd.com/>.
+ *  For details, see <https://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -51,7 +51,7 @@ extern void setproctitle(const char *fmt, ...)
   __attribute__ ((format (printf, 1, 2)));
 #endif
 
-extern void init_setproctitle(int argc, char *argv[]);
+extern void init_setproctitle(int argc, char **argv);
 extern void fini_setproctitle(void);
 
 #endif /* _BSD_SETPROCTITLE_H */

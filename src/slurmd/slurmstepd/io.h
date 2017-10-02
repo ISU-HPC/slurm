@@ -7,7 +7,7 @@
  *  CODE-OCEC-09-009. All rights reserved.
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://slurm.schedmd.com/>.
+ *  For details, see <https://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -116,7 +116,7 @@ int io_init_tasks_stdio(stepd_step_rec_t *job);
  * and opens 2*ntask initial connections for stdout/err, also appending these
  * to job->objs list.
  */
-int io_thread_start(stepd_step_rec_t *job);
+extern void io_thread_start(stepd_step_rec_t *job);
 
 int io_dup_stdio(stepd_step_task_info_t *t);
 

@@ -6,7 +6,7 @@
  *  Written by Brian Christiansen <brian@schedmd.com>
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://slurm.schedmd.com/>.
+ *  For details, see <https://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -37,7 +37,7 @@
 
 #include "src/sacctmgr/sacctmgr.h"
 
-static int _set_cond(int *start, int argc, char *argv[],
+static int _set_cond(int *start, int argc, char **argv,
 		     slurmdb_federation_cond_t *federation_cond,
 		     List format_list)
 {
@@ -107,7 +107,7 @@ static int _set_cond(int *start, int argc, char *argv[],
 	return a_set;
 }
 
-static int _set_rec(int *start, int argc, char *argv[],
+static int _set_rec(int *start, int argc, char **argv,
 		    List name_list, slurmdb_federation_rec_t *fed)
 {
 	int i;
@@ -156,11 +156,12 @@ static int _set_rec(int *start, int argc, char *argv[],
 			}
 
 			List cluster_names = list_create(slurm_destroy_char);
-			if (!slurm_addto_mode_char_list(cluster_names,
-							argv[i]+end, option)) {
+			if (slurm_addto_mode_char_list(cluster_names,
+						       argv[i]+end, option) < 0)
+			{
 				FREE_NULL_LIST(cluster_names);
 				exit_code = 1;
-				continue;
+				break;
 			}
 			itr = list_iterator_create(cluster_names);
 			fed->cluster_list =
@@ -376,7 +377,7 @@ extern int verify_fed_clusters(List cluster_list, const char *fed_name,
 	return SLURM_SUCCESS;
 }
 
-extern int sacctmgr_add_federation(int argc, char *argv[])
+extern int sacctmgr_add_federation(int argc, char **argv)
 {
 	int rc = SLURM_SUCCESS;
 	int i = 0, limit_set = 0;
@@ -505,7 +506,7 @@ end_it:
 	return rc;
 }
 
-extern int sacctmgr_list_federation(int argc, char *argv[])
+extern int sacctmgr_list_federation(int argc, char **argv)
 {
 	int rc = SLURM_SUCCESS;
 	slurmdb_federation_cond_t *federation_cond =
@@ -542,8 +543,8 @@ extern int sacctmgr_list_federation(int argc, char *argv[])
 
 	if (!list_count(format_list)) {
 		slurm_addto_char_list(format_list,
-				      "Federation,Flags%10,Cluster,ID%2,"
-				      "Weight,FedState");
+				      "Federation,Cluster,ID%2,"
+				      "Features,FedState");
 	}
 
 	print_fields_list = sacctmgr_process_format_list(format_list);
@@ -579,7 +580,6 @@ extern int sacctmgr_list_federation(int argc, char *argv[])
 		case PRINT_FEDSTATE:
 		case PRINT_FEDSTATERAW:
 		case PRINT_ID:
-		case PRINT_WEIGHT:
 			print_clusters = true;
 			break;
 		}
@@ -636,6 +636,17 @@ extern int sacctmgr_list_federation(int argc, char *argv[])
 						field, tmp_str,
 						(curr_inx == field_count));
 					break;
+				case PRINT_FEATURES:
+				{
+					List tmp_list = NULL;
+					if (tmp_cluster)
+						tmp_list = tmp_cluster->
+							fed.feature_list;
+					field->print_routine(
+						field, tmp_list,
+						(curr_inx == field_count));
+					break;
+				}
 				case PRINT_FEDSTATE:
 					if (!tmp_cluster)
 						tmp_str = NULL;
@@ -664,16 +675,6 @@ extern int sacctmgr_list_federation(int argc, char *argv[])
 					else
 						tmp_uint32 =
 							tmp_cluster->fed.id;
-					field->print_routine(
-						field, tmp_uint32,
-						(curr_inx == field_count));
-					break;
-				case PRINT_WEIGHT:
-					if (!tmp_cluster)
-						tmp_uint32 = NO_VAL;
-					else
-						tmp_uint32 =
-							tmp_cluster->fed.weight;
 					field->print_routine(
 						field, tmp_uint32,
 						(curr_inx == field_count));
@@ -784,7 +785,7 @@ static int _change_assigns_to_adds(List cluster_list)
 	return rc;
 }
 
-extern int sacctmgr_modify_federation(int argc, char *argv[])
+extern int sacctmgr_modify_federation(int argc, char **argv)
 {
 	int rc = SLURM_SUCCESS;
 	int i=0;
@@ -924,7 +925,7 @@ end_it:
 	return rc;
 }
 
-extern int sacctmgr_delete_federation(int argc, char *argv[])
+extern int sacctmgr_delete_federation(int argc, char **argv)
 {
 	int rc = SLURM_SUCCESS;
 	slurmdb_federation_cond_t *fed_cond =

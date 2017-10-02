@@ -8,7 +8,7 @@
  *  Written by Danny Auble <da@llnl.gov>
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://slurm.schedmd.com/>.
+ *  For details, see <https://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -50,19 +50,18 @@
 #define BUFFER_SIZE 4096
 
 /* Used in job functions for getting the database index based off the
- * submit time, job and assoc id.  0 is returned if none is found
+ * submit time and job.  0 is returned if none is found
  */
 static uint64_t _get_db_index(mysql_conn_t *mysql_conn,
-			      time_t submit, uint32_t jobid, uint32_t associd)
+			      time_t submit, uint32_t jobid)
 {
 	MYSQL_RES *result = NULL;
 	MYSQL_ROW row;
 	uint64_t db_index = 0;
 	char *query = xstrdup_printf("select job_db_inx from \"%s_%s\" where "
-				     "time_submit=%d and id_job=%u "
-				     "and id_assoc=%u",
+				     "time_submit=%d and id_job=%u",
 				     mysql_conn->cluster_name, job_table,
-				     (int)submit, jobid, associd);
+				     (int)submit, jobid);
 
 	if (!(result = mysql_db_query_ret(mysql_conn, query, 0))) {
 		xfree(query);
@@ -74,10 +73,10 @@ static uint64_t _get_db_index(mysql_conn_t *mysql_conn,
 	if (!row) {
 		mysql_free_result(result);
 		debug4("We can't get a db_index for this combo, "
-		       "time_submit=%d and id_job=%u and id_assoc=%u.  "
+		       "time_submit=%d and id_job=%u.  "
 		       "We must not have heard about the start yet, "
 		       "no big deal, we will get one right after this.",
-		       (int)submit, jobid, associd);
+		       (int)submit, jobid);
 		return 0;
 	}
 	db_index = slurm_atoull(row[0]);
@@ -235,16 +234,81 @@ no_wckeyid:
 	return wckeyid;
 }
 
+static char *_set_energy_tres(mysql_conn_t *mysql_conn,
+			      struct job_record *job_ptr)
+{
+	int row_cnt = 0;
+	uint64_t *tres_alloc_cnt = NULL;
+	char *tres_alloc_str = NULL;
+	MYSQL_RES *result = NULL;
+	MYSQL_ROW row;
+	char * query = xstrdup_printf(
+		"select job.tres_alloc, SUM(consumed_energy) from "
+		"\"%s_%s\" as job left outer join \"%s_%s\" "
+		"as step on job.job_db_inx=step.job_db_inx "
+		"and (step.id_step>=0) and step.consumed_energy != %"PRIu64
+		" where job.job_db_inx=%"PRIu64";",
+		mysql_conn->cluster_name, job_table,
+		mysql_conn->cluster_name, step_table,
+		NO_VAL64, job_ptr->db_index);
+	if (debug_flags & DEBUG_FLAG_DB_USAGE)
+		DB_DEBUG(mysql_conn->conn, "query\n%s", query);
+	result = mysql_db_query_ret(mysql_conn, query, 0);
+	xfree(query);
+	if (!result)
+		return NULL;
+
+	row_cnt = mysql_num_rows(result);
+
+	if (!row_cnt) {
+		DB_DEBUG(mysql_conn->conn,
+			 "Nothing for job inx %"PRIu64" from cluster %s, this should never happen",
+			 job_ptr->db_index,
+			 mysql_conn->cluster_name);
+	} else {
+		if (row_cnt > 1)
+			error("Some how with job inx %"PRIu64" from cluster %s we got %d rows for consumed energy.  This should never happen, only taking the first one.",
+			      job_ptr->db_index,
+			      mysql_conn->cluster_name,
+			      row_cnt);
+		row = mysql_fetch_row(result);
+
+		if (job_ptr->tres_alloc_str)
+			tres_alloc_str = xstrdup(job_ptr->tres_alloc_str);
+		else if (row[0] && row[0][0])
+			tres_alloc_str = xstrdup(row[0]);
+
+		assoc_mgr_set_tres_cnt_array(
+			&tres_alloc_cnt, tres_alloc_str, 0, false);
+		xfree(tres_alloc_str);
+		if (row[1] && row[1][0]) {
+			if (tres_alloc_cnt[TRES_ARRAY_ENERGY] &&
+			    tres_alloc_cnt[TRES_ARRAY_ENERGY] != NO_VAL64)
+				debug("we had %"PRIu64" for energy, but we are over writing it with %s",
+				      tres_alloc_cnt[TRES_ARRAY_ENERGY],
+				      row[1]);
+			tres_alloc_cnt[TRES_ARRAY_ENERGY] =
+				slurm_atoull(row[1]);
+		} else if (!tres_alloc_cnt[TRES_ARRAY_ENERGY] ||
+			   tres_alloc_cnt[TRES_ARRAY_ENERGY] != NO_VAL64)
+			tres_alloc_cnt[TRES_ARRAY_ENERGY] = NO_VAL64;
+	}
+	mysql_free_result(result);
+
+	return assoc_mgr_make_tres_str_from_array(
+		tres_alloc_cnt, TRES_STR_FLAG_SIMPLE, true);
+}
 /* extern functions */
 
 extern int as_mysql_job_start(mysql_conn_t *mysql_conn,
 			      struct job_record *job_ptr)
 {
-	int rc=SLURM_SUCCESS;
+	int rc = SLURM_SUCCESS;
 	char *nodes = NULL, *jname = NULL, *node_inx = NULL;
 	int track_steps = 0;
-	char *block_id = NULL, *partition = NULL,
-		*gres_req = NULL, *gres_alloc = NULL;
+	char *block_id = NULL, *partition = NULL;
+	char *gres_req = NULL, *gres_alloc = NULL;
+	char temp_bit[BUF_SIZE];
 	char *query = NULL;
 	int reinit = 0;
 	time_t begin_time, check_time, start_time, submit_time;
@@ -255,6 +319,7 @@ extern int as_mysql_job_start(mysql_conn_t *mysql_conn,
 		(job_ptr->array_job_id) ? job_ptr->array_task_id : NO_VAL;
 	uint64_t job_db_inx = job_ptr->db_index;
 	job_array_struct_t *array_recs = job_ptr->array_recs;
+	char *tres_alloc_str = NULL;
 
 	if ((!job_ptr->details || !job_ptr->details->submit_time)
 	    && !job_ptr->resize_time) {
@@ -302,8 +367,7 @@ extern int as_mysql_job_start(mysql_conn_t *mysql_conn,
 			job_ptr->db_index = _get_db_index(mysql_conn,
 							  job_ptr->details->
 							  submit_time,
-							  job_ptr->job_id,
-							  job_ptr->assoc_id);
+							  job_ptr->job_id);
 		}
 
 		if (job_ptr->db_index)
@@ -421,8 +485,6 @@ no_rollup_change:
 		node_cnt = job_ptr->total_nodes;
 		node_inx = job_ptr->network;
 	} else {
-		char temp_bit[BUF_SIZE];
-
 		if (job_ptr->node_bitmap) {
 			node_inx = bit_fmt(temp_bit, sizeof(temp_bit),
 					   job_ptr->node_bitmap);
@@ -458,9 +520,28 @@ no_rollup_change:
 		gres_alloc = slurm_add_slash_to_quotes(job_ptr->gres_alloc);
 
 	if (!job_ptr->db_index) {
+		if (start_time && (job_state >= JOB_COMPLETE) &&
+		    (!job_ptr->tres_alloc_str &&
+		     (slurmdbd_conf &&
+		      (job_ptr->start_protocol_ver <=
+		       SLURM_17_02_PROTOCOL_VERSION)))) {
+			/* Since we now rollup from only the job table we need
+			 * to grab all the consumed_energy from the steps
+			 * running while we were on the old version of Slurm.
+			 * This only has to happen here if we have already
+			 * started the job otherwise we will just have to do it
+			 * again.  This can be removed when 17.02 is 2 versions
+			 * old.
+			 */
+			if (!(tres_alloc_str = _set_energy_tres(
+				      mysql_conn, job_ptr)))
+				goto end_it;
+		}
+
 		query = xstrdup_printf(
 			"insert into \"%s_%s\" "
 			"(id_job, mod_time, id_array_job, id_array_task, "
+			"pack_job_id, pack_job_offset, "
 			"id_assoc, id_qos, id_user, "
 			"id_group, nodelist, id_resv, timelimit, "
 			"time_eligible, time_submit, time_start, "
@@ -490,19 +571,22 @@ no_rollup_change:
 		else
 			xstrcat(query, ", array_task_str, array_task_pending");
 
-		if (job_ptr->tres_alloc_str)
+		if (job_ptr->tres_alloc_str || tres_alloc_str)
 			xstrcat(query, ", tres_alloc");
 		if (job_ptr->tres_req_str)
 			xstrcat(query, ", tres_req");
+		if (job_ptr->details->work_dir)
+			xstrcat(query, ", work_dir");
 
 		xstrfmtcat(query,
 			   ") values (%u, UNIX_TIMESTAMP(), "
-			   "%u, %u, %u, %u, %u, %u, "
+			   "%u, %u, %u, %u, %u, %u, %u, %u, "
 			   "'%s', %u, %u, %ld, %ld, %ld, "
 			   "'%s', %u, %u, %u, %u, %u, %"PRIu64"",
-			   job_ptr->job_id, job_ptr->array_job_id,
-			   array_task_id, job_ptr->assoc_id,
-			   job_ptr->qos_id,
+			   job_ptr->job_id,
+			   job_ptr->array_job_id, array_task_id,
+			   job_ptr->pack_job_id, job_ptr->pack_job_offset,
+			   job_ptr->assoc_id, job_ptr->qos_id,
 			   job_ptr->user_id, job_ptr->group_id, nodes,
 			   job_ptr->resv_id, job_ptr->time_limit,
 			   begin_time, submit_time, start_time,
@@ -535,31 +619,37 @@ no_rollup_change:
 		else
 			xstrcat(query, ", NULL, 0");
 
-		if (job_ptr->tres_alloc_str)
+		if (tres_alloc_str)
+			xstrfmtcat(query, ", '%s'", tres_alloc_str);
+		else if (job_ptr->tres_alloc_str)
 			xstrfmtcat(query, ", '%s'", job_ptr->tres_alloc_str);
 		if (job_ptr->tres_req_str)
 			xstrfmtcat(query, ", '%s'", job_ptr->tres_req_str);
+		if (job_ptr->details->work_dir)
+			xstrfmtcat(query, ", '%s'", job_ptr->details->work_dir);
 
 		xstrfmtcat(query,
 			   ") on duplicate key update "
 			   "job_db_inx=LAST_INSERT_ID(job_db_inx), "
-			   "id_user=%u, id_group=%u, "
+			   "id_assoc=%u, id_user=%u, id_group=%u, "
 			   "nodelist='%s', id_resv=%u, timelimit=%u, "
 			   "time_submit=%ld, time_eligible=%ld, "
 			   "time_start=%ld, mod_time=UNIX_TIMESTAMP(), "
 			   "job_name='%s', track_steps=%u, id_qos=%u, "
 			   "state=greatest(state, %u), priority=%u, "
 			   "cpus_req=%u, nodes_alloc=%u, "
-			   "mem_req=%"PRIu64", id_array_job=%u, id_array_task=%u",
-			   job_ptr->user_id, job_ptr->group_id, nodes,
+			   "mem_req=%"PRIu64", id_array_job=%u, id_array_task=%u, "
+			   "pack_job_id=%u, pack_job_offset=%u",
+			   job_ptr->assoc_id, job_ptr->user_id,
+			   job_ptr->group_id, nodes,
 			   job_ptr->resv_id, job_ptr->time_limit,
 			   submit_time, begin_time, start_time,
 			   jname, track_steps, job_ptr->qos_id, job_state,
 			   job_ptr->priority, job_ptr->details->min_cpus,
 			   node_cnt,
 			   job_ptr->details->pn_min_memory,
-			   job_ptr->array_job_id,
-			   array_task_id);
+			   job_ptr->array_job_id, array_task_id,
+			   job_ptr->pack_job_id, job_ptr->pack_job_offset);
 
 		if (wckeyid)
 			xstrfmtcat(query, ", id_wckey=%u", wckeyid);
@@ -587,12 +677,17 @@ no_rollup_change:
 			xstrfmtcat(query, ", array_task_str=NULL, "
 				   "array_task_pending=0");
 
-		if (job_ptr->tres_alloc_str)
+		if (tres_alloc_str)
+			xstrfmtcat(query, ", tres_alloc='%s'", tres_alloc_str);
+		else if (job_ptr->tres_alloc_str)
 			xstrfmtcat(query, ", tres_alloc='%s'",
 				   job_ptr->tres_alloc_str);
 		if (job_ptr->tres_req_str)
 			xstrfmtcat(query, ", tres_req='%s'",
 				   job_ptr->tres_req_str);
+		if (job_ptr->details->work_dir)
+			xstrfmtcat(query, ", work_dir='%s'",
+				   job_ptr->details->work_dir);
 
 		if (debug_flags & DEBUG_FLAG_DB_JOB)
 			DB_DEBUG(mysql_conn->conn, "query\n%s", query);
@@ -641,18 +736,24 @@ no_rollup_change:
 			xstrfmtcat(query, "array_task_str=NULL, "
 				   "array_task_pending=0, ");
 
-		if (job_ptr->tres_alloc_str)
+		if (tres_alloc_str)
+			xstrfmtcat(query, "tres_alloc='%s', ", tres_alloc_str);
+		else if (job_ptr->tres_alloc_str)
 			xstrfmtcat(query, "tres_alloc='%s', ",
 				   job_ptr->tres_alloc_str);
 		if (job_ptr->tres_req_str)
 			xstrfmtcat(query, "tres_req='%s', ",
 				   job_ptr->tres_req_str);
+		if (job_ptr->details->work_dir)
+			xstrfmtcat(query, "work_dir='%s', ",
+				   job_ptr->details->work_dir);
 
 		xstrfmtcat(query, "time_start=%ld, job_name='%s', state=%u, "
 			   "nodes_alloc=%u, id_qos=%u, "
 			   "id_assoc=%u, id_resv=%u, "
 			   "timelimit=%u, mem_req=%"PRIu64", "
 			   "id_array_job=%u, id_array_task=%u, "
+			   "pack_job_id=%u, pack_job_offset=%u, "
 			   "time_eligible=%ld, mod_time=UNIX_TIMESTAMP() "
 			   "where job_db_inx=%"PRIu64,
 			   start_time, jname, job_state,
@@ -660,8 +761,8 @@ no_rollup_change:
 			   job_ptr->assoc_id,
 			   job_ptr->resv_id, job_ptr->time_limit,
 			   job_ptr->details->pn_min_memory,
-			   job_ptr->array_job_id,
-			   array_task_id,
+			   job_ptr->array_job_id, array_task_id,
+			   job_ptr->pack_job_id, job_ptr->pack_job_offset,
 			   begin_time, job_ptr->db_index);
 
 		if (debug_flags & DEBUG_FLAG_DB_JOB)
@@ -669,19 +770,20 @@ no_rollup_change:
 		rc = mysql_db_query(mysql_conn, query);
 	}
 
-	xfree(block_id);
-	xfree(partition);
-	xfree(gres_req);
-	xfree(gres_alloc);
-	xfree(jname);
-	xfree(query);
-
 	/* now we will reset all the steps */
 	if (IS_JOB_RESIZING(job_ptr)) {
 		/* FIXME : Verify this is still needed */
 		if (IS_JOB_SUSPENDED(job_ptr))
 			as_mysql_suspend(mysql_conn, job_db_inx, job_ptr);
 	}
+end_it:
+	xfree(tres_alloc_str);
+	xfree(block_id);
+	xfree(partition);
+	xfree(gres_req);
+	xfree(gres_alloc);
+	xfree(jname);
+	xfree(query);
 
 	return rc;
 }
@@ -801,6 +903,7 @@ extern int as_mysql_job_complete(mysql_conn_t *mysql_conn,
 	int rc = SLURM_SUCCESS, job_state;
 	time_t submit_time, end_time;
 	uint32_t exit_code = 0;
+	char *tres_alloc_str = NULL;
 
 	if (!job_ptr->db_index
 	    && ((!job_ptr->details || !job_ptr->details->submit_time)
@@ -843,6 +946,8 @@ extern int as_mysql_job_complete(mysql_conn_t *mysql_conn,
 
 		if (IS_JOB_REQUEUED(job_ptr))
 			job_state = JOB_REQUEUE;
+		else if (IS_JOB_REVOKED(job_ptr))
+			job_state = JOB_REVOKED;
 		else
 			job_state = job_ptr->job_state & JOB_STATE_BASE;
 	}
@@ -869,8 +974,7 @@ extern int as_mysql_job_complete(mysql_conn_t *mysql_conn,
 		if (!(job_ptr->db_index =
 		      _get_db_index(mysql_conn,
 				    submit_time,
-				    job_ptr->job_id,
-				    job_ptr->assoc_id))) {
+				    job_ptr->job_id))) {
 			/* Comment is overloaded in job_start to be
 			   the block_id, so we will need to store this
 			   for later.
@@ -889,6 +993,19 @@ extern int as_mysql_job_complete(mysql_conn_t *mysql_conn,
 			}
 			job_ptr->comment = comment;
 		}
+	} else if (!job_ptr->tres_alloc_str &&
+		   (slurmdbd_conf &&
+		    (job_ptr->start_protocol_ver <=
+		     SLURM_17_02_PROTOCOL_VERSION))) {
+		/* Since we now rollup from only the job table we need to grab
+		 * all the consumed_energy from the steps running while we were
+		 * on the old version of Slurm.
+		 * This only has to happen here if we have already started the
+		 * job otherwise we will just have to do it again.
+		 * This can be removed when 17.02 is 2 versions old.
+		 */
+		if (!(tres_alloc_str = _set_energy_tres(mysql_conn, job_ptr)))
+			goto end_it;
 	}
 
 	/*
@@ -904,15 +1021,27 @@ extern int as_mysql_job_complete(mysql_conn_t *mysql_conn,
 	if (job_ptr->derived_ec != NO_VAL)
 		xstrfmtcat(query, ", derived_ec=%u", job_ptr->derived_ec);
 
+	if (tres_alloc_str)
+		xstrfmtcat(query, ", tres_alloc='%s'", tres_alloc_str);
+	else if (job_ptr->tres_alloc_str)
+		xstrfmtcat(query, ", tres_alloc='%s'", job_ptr->tres_alloc_str);
+
 	if (job_ptr->comment) {
 		char *comment = slurm_add_slash_to_quotes(job_ptr->comment);
 		xstrfmtcat(query, ", derived_es='%s'", comment);
 		xfree(comment);
 	}
 
+	if (job_ptr->admin_comment) {
+		char *comment = slurm_add_slash_to_quotes(
+			job_ptr->admin_comment);
+		xstrfmtcat(query, ", admin_comment='%s'", comment);
+		xfree(comment);
+	}
+
 	exit_code = job_ptr->exit_code;
 	if (exit_code == 1) {
-		/* This wasn't signalled, it was set by Slurm so don't
+		/* This wasn't signaled, it was set by Slurm so don't
 		 * treat it like a signal.
 		 */
 		exit_code = 256;
@@ -927,7 +1056,8 @@ extern int as_mysql_job_complete(mysql_conn_t *mysql_conn,
 		DB_DEBUG(mysql_conn->conn, "query\n%s", query);
 	rc = mysql_db_query(mysql_conn, query);
 	xfree(query);
-
+end_it:
+	xfree(tres_alloc_str);
 	return rc;
 }
 
@@ -935,7 +1065,8 @@ extern int as_mysql_step_start(mysql_conn_t *mysql_conn,
 			       struct step_record *step_ptr)
 {
 	int tasks = 0, nodes = 0, task_dist = 0;
-	int rc=SLURM_SUCCESS;
+	int rc = SLURM_SUCCESS;
+	char temp_bit[BUF_SIZE];
 	char node_list[BUFFER_SIZE];
 	char *node_inx = NULL, *step_name = NULL;
 	time_t start_time, submit_time;
@@ -972,8 +1103,6 @@ extern int as_mysql_step_start(mysql_conn_t *mysql_conn,
 		task_dist = step_ptr->step_layout->task_dist;
 		node_inx = step_ptr->network;
 	} else if (step_ptr->step_id == SLURM_BATCH_SCRIPT) {
-		char temp_bit[BUF_SIZE];
-
 		if (step_ptr->step_node_bitmap) {
 			node_inx = bit_fmt(temp_bit, sizeof(temp_bit),
 					   step_ptr->step_node_bitmap);
@@ -991,7 +1120,6 @@ extern int as_mysql_step_start(mysql_conn_t *mysql_conn,
 				   TRES_NODE, 1);
 	} else {
 		char *ionodes = NULL, *temp_nodes = NULL;
-		char temp_bit[BUF_SIZE];
 
 		if (step_ptr->step_node_bitmap) {
 			node_inx = bit_fmt(temp_bit, sizeof(temp_bit),
@@ -1046,8 +1174,7 @@ extern int as_mysql_step_start(mysql_conn_t *mysql_conn,
 		if (!(step_ptr->job_ptr->db_index =
 		      _get_db_index(mysql_conn,
 				    submit_time,
-				    step_ptr->job_ptr->job_id,
-				    step_ptr->job_ptr->assoc_id))) {
+				    step_ptr->job_ptr->job_id))) {
 			/* If we get an error with this just fall
 			 * through to avoid an infinite loop
 			 */
@@ -1161,7 +1288,9 @@ extern int as_mysql_step_complete(mysql_conn_t *mysql_conn,
 	exit_code = step_ptr->exit_code;
 	comp_status = step_ptr->state & JOB_STATE_BASE;
 	if (comp_status < JOB_COMPLETE) {
-		if (WIFSIGNALED(exit_code)) {
+		if (exit_code == SIG_OOM) {
+			comp_status = JOB_OOM;
+		} else if (WIFSIGNALED(exit_code)) {
 			comp_status = JOB_CANCELLED;
 		} else if (exit_code)
 			comp_status = JOB_FAILED;
@@ -1175,8 +1304,7 @@ extern int as_mysql_step_complete(mysql_conn_t *mysql_conn,
 		if (!(step_ptr->job_ptr->db_index =
 		      _get_db_index(mysql_conn,
 				    submit_time,
-				    step_ptr->job_ptr->job_id,
-				    step_ptr->job_ptr->assoc_id))) {
+				    step_ptr->job_ptr->job_id))) {
 			/* If we get an error with this just fall
 			 * through to avoid an infinite loop
 			 */
@@ -1292,6 +1420,20 @@ extern int as_mysql_step_complete(mysql_conn_t *mysql_conn,
 	rc = mysql_db_query(mysql_conn, query);
 	xfree(query);
 
+	/* set the energy for the entire job. */
+	if (step_ptr->job_ptr->tres_alloc_str) {
+		query = xstrdup_printf(
+			"update \"%s_%s\" set tres_alloc='%s' where "
+			"job_db_inx=%"PRIu64,
+			mysql_conn->cluster_name, job_table,
+			step_ptr->job_ptr->tres_alloc_str,
+			step_ptr->job_ptr->db_index);
+		if (debug_flags & DEBUG_FLAG_DB_STEP)
+			DB_DEBUG(mysql_conn->conn, "query\n%s", query);
+		rc = mysql_db_query(mysql_conn, query);
+		xfree(query);
+	}
+
 	return rc;
 }
 
@@ -1316,8 +1458,7 @@ extern int as_mysql_suspend(mysql_conn_t *mysql_conn,
 		if (!(job_ptr->db_index =
 		      _get_db_index(mysql_conn,
 				    submit_time,
-				    job_ptr->job_id,
-				    job_ptr->assoc_id))) {
+				    job_ptr->job_id))) {
 			/* If we get an error with this just fall
 			 * through to avoid an infinite loop
 			 */
@@ -1427,20 +1568,21 @@ extern int as_mysql_flush_jobs_on_cluster(
 		if (state == JOB_SUSPENDED) {
 			if (suspended_char)
 				xstrfmtcat(suspended_char,
-					   " || job_db_inx=%s", row[0]);
+					   ", %s", row[0]);
 			else
-				xstrfmtcat(suspended_char, "job_db_inx=%s",
+				xstrfmtcat(suspended_char, "job_db_inx in (%s",
 					   row[0]);
 		}
 
 		if (id_char)
-			xstrfmtcat(id_char, " || job_db_inx=%s", row[0]);
+			xstrfmtcat(id_char, ", %s", row[0]);
 		else
-			xstrfmtcat(id_char, "job_db_inx=%s", row[0]);
+			xstrfmtcat(id_char, "job_db_inx in (%s", row[0]);
 	}
 	mysql_free_result(result);
 
 	if (suspended_char) {
+		xstrfmtcat(suspended_char, ")");
 		xstrfmtcat(query,
 			   "update \"%s_%s\" set "
 			   "time_suspended=%ld-time_suspended "
@@ -1461,6 +1603,7 @@ extern int as_mysql_flush_jobs_on_cluster(
 		xfree(suspended_char);
 	}
 	if (id_char) {
+		xstrfmtcat(id_char, ")");
 		xstrfmtcat(query,
 			   "update \"%s_%s\" set state=%d, "
 			   "time_end=%ld where %s;",

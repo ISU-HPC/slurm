@@ -10,7 +10,7 @@
  *  CODE-OCEC-09-009. All rights reserved.
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://slurm.schedmd.com/>.
+ *  For details, see <https://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -47,11 +47,13 @@
 #include <time.h>
 
 #include "slurm/slurm_errno.h"
+#include "slurm/slurm.h"
 
 #include "src/common/log.h"
 #include "src/common/macros.h"
 #include "src/common/pack.h"
 #include "src/common/xmalloc.h"
+#include "src/common/xassert.h"
 
 /*
  * Define slurm-specific aliases for use by plugins, see slurm_xlator.h
@@ -93,7 +95,7 @@ strong_alias(unpackmem_array,	slurm_unpackmem_array);
 /* Basic buffer management routines */
 /* create_buf - create a buffer with the supplied contents, contents must
  * be xalloc'ed */
-Buf create_buf(char *data, int size)
+Buf create_buf(char *data, uint32_t size)
 {
 	Buf my_buf;
 
@@ -123,7 +125,7 @@ void free_buf(Buf my_buf)
 }
 
 /* Grow a buffer by the specified amount */
-void grow_buf (Buf buffer, int size)
+void grow_buf (Buf buffer, uint32_t size)
 {
 	if ((buffer->size + size) > MAX_BUF_SIZE) {
 		error("%s: Buffer size limit exceeded (%u > %u)",
@@ -136,7 +138,7 @@ void grow_buf (Buf buffer, int size)
 }
 
 /* init_buf - create an empty buffer of the given size */
-Buf init_buf(int size)
+Buf init_buf(uint32_t size)
 {
 	Buf my_buf;
 
@@ -378,6 +380,8 @@ void pack16_array(uint16_t * valp, uint32_t size_val, Buf buffer)
 {
 	uint32_t i = 0;
 
+	xassert(valp || !size_val);
+
 	pack32(size_val, buffer);
 
 	for (i = 0; i < size_val; i++) {
@@ -393,6 +397,8 @@ int unpack16_array(uint16_t ** valp, uint32_t * size_val, Buf buffer)
 
 	if (unpack32(size_val, buffer))
 		return SLURM_ERROR;
+	if ((*size_val) > NO_VAL32)
+		return SLURM_ERROR;
 
 	*valp = xmalloc_nz((*size_val) * sizeof(uint16_t));
 	for (i = 0; i < *size_val; i++) {
@@ -406,6 +412,8 @@ int unpack16_array(uint16_t ** valp, uint32_t * size_val, Buf buffer)
 void pack32_array(uint32_t * valp, uint32_t size_val, Buf buffer)
 {
 	uint32_t i = 0;
+
+	xassert(valp || !size_val);
 
 	pack32(size_val, buffer);
 
@@ -422,6 +430,8 @@ int unpack32_array(uint32_t ** valp, uint32_t * size_val, Buf buffer)
 
 	if (unpack32(size_val, buffer))
 		return SLURM_ERROR;
+	if ((*size_val) > NO_VAL32)
+		return SLURM_ERROR;
 
 	*valp = xmalloc_nz((*size_val) * sizeof(uint32_t));
 	for (i = 0; i < *size_val; i++) {
@@ -436,6 +446,8 @@ void pack64_array(uint64_t * valp, uint32_t size_val, Buf buffer)
 {
 	uint32_t i = 0;
 
+	xassert(valp || !size_val);
+
 	pack32(size_val, buffer);
 
 	for (i = 0; i < size_val; i++) {
@@ -448,6 +460,8 @@ void pack64_array(uint64_t * valp, uint32_t size_val, Buf buffer)
 void pack64_array_as_32(uint64_t * valp, uint32_t size_val, Buf buffer)
 {
 	uint32_t i = 0;
+
+	xassert(valp || !size_val);
 
 	pack32(size_val, buffer);
 
@@ -463,6 +477,8 @@ int unpack64_array(uint64_t ** valp, uint32_t * size_val, Buf buffer)
 	uint32_t i = 0;
 
 	if (unpack32(size_val, buffer))
+		return SLURM_ERROR;
+	if ((*size_val) > NO_VAL32)
 		return SLURM_ERROR;
 
 	*valp = xmalloc_nz((*size_val) * sizeof(uint64_t));
@@ -481,6 +497,8 @@ int unpack64_array_from_32(uint64_t ** valp, uint32_t * size_val, Buf buffer)
 
 	if (unpack32(size_val, buffer))
 		return SLURM_ERROR;
+	if ((*size_val) > NO_VAL32)
+		return SLURM_ERROR;
 
 	*valp = xmalloc_nz((*size_val) * sizeof(uint64_t));
 	for (i = 0; i < *size_val; i++) {
@@ -495,6 +513,8 @@ void packdouble_array(double *valp, uint32_t size_val, Buf buffer)
 {
 	uint32_t i = 0;
 
+	xassert(valp || !size_val);
+
 	pack32(size_val, buffer);
 
 	for (i = 0; i < size_val; i++) {
@@ -507,6 +527,8 @@ int unpackdouble_array(double **valp, uint32_t* size_val, Buf buffer)
 	uint32_t i = 0;
 
 	if (unpack32(size_val, buffer))
+		return SLURM_ERROR;
+	if ((*size_val) > NO_VAL32)
 		return SLURM_ERROR;
 
 	*valp = xmalloc_nz((*size_val) * sizeof(double));
@@ -521,6 +543,8 @@ void packlongdouble_array(long double *valp, uint32_t size_val, Buf buffer)
 {
 	uint32_t i = 0;
 
+	xassert(valp || !size_val);
+
 	pack32(size_val, buffer);
 
 	for (i = 0; i < size_val; i++) {
@@ -533,6 +557,8 @@ int unpacklongdouble_array(long double **valp, uint32_t* size_val, Buf buffer)
 	uint32_t i = 0;
 
 	if (unpack32(size_val, buffer))
+		return SLURM_ERROR;
+	if ((*size_val) > NO_VAL32)
 		return SLURM_ERROR;
 
 	*valp = xmalloc_nz((*size_val) * sizeof(long double));

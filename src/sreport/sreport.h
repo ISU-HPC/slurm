@@ -9,7 +9,7 @@
  *  CODE-OCEC-09-009. All rights reserved.
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://slurm.schedmd.com/>.
+ *  For details, see <https://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -86,6 +86,7 @@ extern char *time_format_string;
 extern char *command_name;
 extern int exit_code;	/* sacctmgr's exit code, =1 on any error at any time */
 extern int exit_flag;	/* program to terminate if =1 */
+extern char *fed_name;	/* Set if operating in federation mode */
 extern int input_words;	/* number of words of input permitted */
 extern int quiet_flag;	/* quiet=1, verbose=-1, normal=0 */
 extern char *tres_str;	/* --tres= value */
@@ -125,5 +126,17 @@ extern void sreport_set_usage_col_width(print_field_t *field, uint64_t number);
 extern void sreport_set_usage_column_width(print_field_t *usage_field,
 					   print_field_t *energy_field,
 					   List slurmdb_report_cluster_list);
+
+/* For duplicate user/account records, combine TRES records into the original
+ * list and purge the duplicate records */
+extern void combine_assoc_tres(List first_assoc_list, List new_assoc_list);
+
+/* Given two TRES lists, combine the content of the second with the first,
+ * adding the counts for duplicate TRES IDs */
+extern void combine_tres_list(List orig_tres_list, List dup_tres_list);
+
+/* For duplicate user/account records, combine TRES records into the original
+ * list and purge the duplicate records */
+extern void combine_user_tres(List first_user_list, List new_user_list);
 
 #endif /* HAVE_SREPORT_H */

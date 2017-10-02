@@ -7,7 +7,7 @@
  *  CODE-OCEC-09-009. All rights reserved.
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://slurm.schedmd.com/>.
+ *  For details, see <https://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -61,8 +61,8 @@ typedef enum {
 	DBD_FLUSH_JOBS, 	/* End jobs that are still running
 				 * when a controller is restarted.	*/
 	DBD_GET_ACCOUNTS,	/* Get account information		*/
-	DBD_GET_ASSOCS,         /* Get association information   	*/
-	DBD_GET_ASSOC_USAGE,  	/* Get assoc usage information  	*/
+	DBD_GET_ASSOCS,         /* #1410, Get association information   */
+	DBD_GET_ASSOC_USAGE,  	/* Get assoc usage information   	*/
 	DBD_GET_CLUSTERS,	/* Get account information		*/
 	DBD_GET_CLUSTER_USAGE, 	/* Get cluster usage information	*/
 	DBD_RECONFIG,   	/* Reread the slurmdbd.conf     	*/
@@ -71,7 +71,7 @@ typedef enum {
 	DBD_GOT_ASSOCS, 	/* Response to DBD_GET_ASSOCS   	*/
 	DBD_GOT_ASSOC_USAGE,  	/* Response to DBD_GET_ASSOC_USAGE    	*/
 	DBD_GOT_CLUSTERS,	/* Response to DBD_GET_CLUSTERS		*/
-	DBD_GOT_CLUSTER_USAGE, 	/* Response to DBD_GET_CLUSTER_USAGE   	*/
+	DBD_GOT_CLUSTER_USAGE, 	/* #1420, Response to DBD_GET_CLUSTER_USAGE */
 	DBD_GOT_JOBS,		/* Response to DBD_GET_JOBS		*/
 	DBD_GOT_LIST,           /* Response to DBD_MODIFY/REMOVE MOVE_* */
 	DBD_GOT_USERS,  	/* Response to DBD_GET_USERS		*/
@@ -83,7 +83,7 @@ typedef enum {
 	DBD_JOB_SUSPEND,	/* Record job suspension		*/
 	DBD_MODIFY_ACCOUNTS,    /* Modify existing account              */
 	DBD_MODIFY_ASSOCS,      /* Modify existing association          */
-	DBD_MODIFY_CLUSTERS,    /* 1430 Modify existing cluster         */
+	DBD_MODIFY_CLUSTERS,    /* #1430, Modify existing cluster       */
 	DBD_MODIFY_USERS,       /* Modify existing user                 */
 	DBD_NODE_STATE,		/* Record node state transition		*/
 	DBD_RC, 		/* DEFUNCT, use PERSIST_RC instead.	*/
@@ -94,7 +94,7 @@ typedef enum {
 	DBD_REMOVE_ASSOCS,      /* Remove existing association          */
 	DBD_REMOVE_CLUSTERS,    /* Remove existing cluster              */
 	DBD_REMOVE_USERS,       /* Remove existing user                 */
-	DBD_ROLL_USAGE,         /* Roll up usage                        */
+	DBD_ROLL_USAGE,         /* #1440 Roll up usage                  */
 	DBD_STEP_COMPLETE,	/* Record step completion		*/
 	DBD_STEP_START,		/* Record step starting			*/
 	DBD_UPDATE_SHARES_USED,	/* Doesn't do anything but
@@ -106,7 +106,7 @@ typedef enum {
 	DBD_ADD_QOS,		/* Add QOS information   	        */
 	DBD_GET_QOS,		/* Get QOS information   	        */
 	DBD_GOT_QOS,		/* Got QOS information   	        */
-	DBD_REMOVE_QOS,		/* Remove QOS information   	        */
+	DBD_REMOVE_QOS,		/* #1450, Remove QOS information        */
 	DBD_MODIFY_QOS,         /* Modify existing QOS                  */
 	DBD_ADD_WCKEYS,		/* Add WCKEY information   	        */
 	DBD_GET_WCKEYS,		/* Get WCKEY information   	        */
@@ -117,7 +117,7 @@ typedef enum {
 	DBD_GOT_WCKEY_USAGE,  	/* Get wckey usage information  	*/
 	DBD_ARCHIVE_DUMP,    	/* issue a request to dump jobs to
 				 * archive */
-	DBD_ARCHIVE_LOAD,    	/* 1460 load an archive file   	        */
+	DBD_ARCHIVE_LOAD,    	/* #1460, load an archive file          */
 	DBD_ADD_RESV,    	/* add a reservation                    */
 	DBD_REMOVE_RESV,    	/* remove a reservation                 */
 	DBD_MODIFY_RESV,    	/* modify a reservation                 */
@@ -127,7 +127,7 @@ typedef enum {
 	DBD_GOT_CONFIG,		/* Response to DBD_GET_CONFIG		*/
 	DBD_GET_PROBS,  	/* Get problems existing in accounting	*/
 	DBD_GOT_PROBS,		/* Response to DBD_GET_PROBS		*/
-	DBD_GET_EVENTS, 	/* Get event information		*/
+	DBD_GET_EVENTS, 	/* #1470, Get event information		*/
 	DBD_GOT_EVENTS, 	/* Response to DBD_GET_EVENTS		*/
 	DBD_SEND_MULT_JOB_START,/* Send multiple job starts		*/
 	DBD_GOT_MULT_JOB_START,	/* Get response to DBD_SEND_MULT_JOB_START */
@@ -137,17 +137,17 @@ typedef enum {
 	DBD_ADD_RES,    	/* Add new system resource to the mix   */
 	DBD_GET_RES,		/* Get resource information		*/
 	DBD_GOT_RES,		/* Got resource information		*/
-	DBD_REMOVE_RES,     	/* Remove existing resource      	*/
+	DBD_REMOVE_RES,     	/* #1480, Remove existing resource      */
 	DBD_MODIFY_RES,     	/* Modify existing resource      	*/
 	DBD_ADD_CLUS_RES,    	/* Add cluster using a resource    	*/
 	DBD_REMOVE_CLUS_RES,   	/* Remove existing cluster resource    	*/
 	DBD_MODIFY_CLUS_RES,   	/* Modify existing cluster resource   	*/
-	DBD_ADD_TRES,         /* Add tres to the database           */
-	DBD_GET_TRES,         /* Get tres from the database         */
-	DBD_GOT_TRES,         /* Got tres from the database         */
+	DBD_ADD_TRES,           /* Add tres to the database           */
+	DBD_GET_TRES,           /* Get tres from the database         */
+	DBD_GOT_TRES,           /* Got tres from the database         */
 	DBD_FIX_RUNAWAY_JOB,    /* Fix any runaway jobs */
 	DBD_GET_STATS,		/* Get daemon statistics */
-	DBD_GOT_STATS,		/* 1490 Got daemon statistics data */
+	DBD_GOT_STATS,		/* #1490 ,Got daemon statistics data */
 	DBD_CLEAR_STATS,	/* Clear daemon statistics */
 	DBD_SHUTDOWN,		/* Shutdown daemon */
 	DBD_ADD_FEDERATIONS,    /* Add new federation to the mix        */
@@ -230,6 +230,7 @@ typedef struct dbd_fini_msg {
 } dbd_fini_msg_t;
 
 typedef struct dbd_job_comp_msg {
+	char *	 admin_comment;	/* job admin comment field */
 	uint32_t assoc_id;	/* accounting association id needed to
 				 * find job record in db */
 	char *	 comment;	/* job comment field */
@@ -244,6 +245,7 @@ typedef struct dbd_job_comp_msg {
 	time_t   start_time;	/* job start time */
 	time_t   submit_time;	/* job submit time needed to find job
 				 * record in db */
+	char    *tres_alloc_str;/* Simple comma separated list of TRES */
 } dbd_job_comp_msg_t;
 
 typedef struct dbd_job_start_msg {
@@ -267,6 +269,8 @@ typedef struct dbd_job_start_msg {
 	char *   nodes;		/* hosts allocated to the job */
 	char *   node_inx;      /* ranged bitmap string of hosts
 				 * allocated to the job */
+	uint32_t pack_job_id;	/* ID of pack job leader or 0 */
+	uint32_t pack_job_offset; /* Pack job component ID, zero-origin */
 	char *   partition;	/* partition job is running on */
 	uint32_t priority;	/* job priority */
 	uint32_t qos_id;        /* qos job is running with */
@@ -286,6 +290,7 @@ typedef struct dbd_job_start_msg {
 	char    *tres_alloc_str;/* Simple comma separated list of TRES */
 	char    *tres_req_str;  /* Simple comma separated list of TRES */
 	char *   wckey;		/* wckey name */
+	char    *work_dir;      /* work dir of job */
 } dbd_job_start_msg_t;
 
 /* returns a uint32_t along with a return code */
@@ -350,6 +355,10 @@ typedef struct dbd_step_comp_msg {
 	uint32_t job_id;	/* job ID */
 	time_t   job_submit_time;/* job submit time needed to find job record
 				  * in db */
+	char    *job_tres_alloc_str;/* Simple comma separated list of TRES for
+				     * the job (primarily for the energy of the
+				     * completing job.  This is only filled in
+				     * on the last step in the job. */
 	uint32_t req_uid;	/* requester user ID */
 	time_t   start_time;	/* step start time */
 	uint16_t state;         /* current state of node.  Used to get
@@ -403,6 +412,9 @@ extern int slurm_open_slurmdbd_conn(const slurm_trigger_callbacks_t *callbacks);
 
 /* Close the SlurmDBD socket connection */
 extern int slurm_close_slurmdbd_conn(void);
+
+/* Return true if connection to slurmdbd is active, false otherwise. */
+extern bool slurmdbd_conn_active(void);
 
 /* Send an RPC to the SlurmDBD. Do not wait for the reply. The RPC
  * will be queued and processed later if the SlurmDBD is not responding.

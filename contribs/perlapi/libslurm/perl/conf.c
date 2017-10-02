@@ -24,8 +24,8 @@ slurm_ctl_conf_to_hv(slurm_ctl_conf_t *conf, HV *hv)
 		STORE_FIELD(hv, conf, acct_gather_energy_type, charp);
 	if (conf->acct_gather_filesystem_type)
 		STORE_FIELD(hv, conf, acct_gather_filesystem_type, charp);
-	if (conf->acct_gather_infiniband_type)
-		STORE_FIELD(hv, conf, acct_gather_infiniband_type, charp);
+	if (conf->acct_gather_interconnect_type)
+		STORE_FIELD(hv, conf, acct_gather_interconnect_type, charp);
 	STORE_FIELD(hv, conf, acct_gather_node_freq, uint16_t);
 	if (conf->acct_gather_profile_type)
 		STORE_FIELD(hv, conf, acct_gather_profile_type, charp);
@@ -120,7 +120,8 @@ slurm_ctl_conf_to_hv(slurm_ctl_conf_t *conf, HV *hv)
 	if (conf->gres_plugins)
 		STORE_FIELD(hv, conf, gres_plugins, charp);
 
-	STORE_FIELD(hv, conf, group_info, uint16_t);
+	STORE_FIELD(hv, conf, group_time, uint16_t);
+	STORE_FIELD(hv, conf, group_force, uint16_t);
 
 	STORE_FIELD(hv, conf, hash_val, uint32_t);
 
@@ -309,8 +310,6 @@ slurm_ctl_conf_to_hv(slurm_ctl_conf_t *conf, HV *hv)
 	STORE_FIELD(hv, conf, sched_time_slice, uint16_t);
 	if (conf->schedtype)
 		STORE_FIELD(hv, conf, schedtype, charp);
-	STORE_FIELD(hv, conf, schedport, uint16_t);
-	STORE_FIELD(hv, conf, schedrootfltr, uint16_t);
 
 	STORE_PTR_FIELD(hv, conf, select_conf_key_pairs, "Slurm::List"); /* TODO: Think about memory management */
 	if (conf->select_type)
@@ -396,10 +395,6 @@ slurm_ctl_conf_to_hv(slurm_ctl_conf_t *conf, HV *hv)
 	STORE_FIELD(hv, conf, vsize_factor, uint16_t);
 	STORE_FIELD(hv, conf, wait_time, uint16_t);
 
-	STORE_FIELD(hv, conf, z_16, uint16_t);
-	STORE_FIELD(hv, conf, z_32, uint32_t);
-	if (conf->z_char)
-		STORE_FIELD(hv, conf, z_char, charp);
 	return 0;
 }
 
@@ -415,7 +410,7 @@ hv_to_slurm_ctl_conf(HV *hv, slurm_ctl_conf_t *conf)
 	FETCH_FIELD(hv, conf, acct_gather_conf, charp, FALSE);
 	FETCH_FIELD(hv, conf, acct_gather_energy_type, charp, FALSE);
 	FETCH_FIELD(hv, conf, acct_gather_filesystem_type, charp, FALSE);
-	FETCH_FIELD(hv, conf, acct_gather_infiniband_type, charp, FALSE);
+	FETCH_FIELD(hv, conf, acct_gather_interconnect_type, charp, FALSE);
 	FETCH_FIELD(hv, conf, acct_gather_node_freq, uint16_t, FALSE);
 	FETCH_FIELD(hv, conf, acct_gather_profile_type, charp, FALSE);
 	FETCH_FIELD(hv, conf, acctng_store_job_comment, uint16_t, FALSE);
@@ -462,7 +457,8 @@ hv_to_slurm_ctl_conf(HV *hv, slurm_ctl_conf_t *conf)
 	FETCH_FIELD(hv, conf, fs_dampening_factor, uint16_t, FALSE);
 	FETCH_FIELD(hv, conf, get_env_timeout, uint16_t, TRUE);
 	FETCH_FIELD(hv, conf, gres_plugins, charp, FALSE);
-	FETCH_FIELD(hv, conf, group_info, uint16_t, TRUE);
+	FETCH_FIELD(hv, conf, group_time, uint16_t, TRUE);
+	FETCH_FIELD(hv, conf, group_force, uint16_t, TRUE);
 	FETCH_FIELD(hv, conf, hash_val, uint32_t, TRUE);
 	FETCH_FIELD(hv, conf, health_check_interval, uint16_t, TRUE);
 	FETCH_FIELD(hv, conf, health_check_node_state, uint32_t, TRUE);
@@ -558,8 +554,6 @@ hv_to_slurm_ctl_conf(HV *hv, slurm_ctl_conf_t *conf)
 	FETCH_FIELD(hv, conf, sched_params, charp, FALSE);
 	FETCH_FIELD(hv, conf, sched_time_slice, uint16_t, TRUE);
 	FETCH_FIELD(hv, conf, schedtype, charp, FALSE);
-	FETCH_FIELD(hv, conf, schedport, uint16_t, TRUE);
-	FETCH_FIELD(hv, conf, schedrootfltr, uint16_t, TRUE);
 	FETCH_FIELD(hv, conf, select_conf_key_pairs, charp, FALSE);
 	FETCH_FIELD(hv, conf, select_type, charp, FALSE);
 	FETCH_FIELD(hv, conf, select_type_param, uint16_t, TRUE);
@@ -611,9 +605,7 @@ hv_to_slurm_ctl_conf(HV *hv, slurm_ctl_conf_t *conf)
 	FETCH_FIELD(hv, conf, version, charp, FALSE);
 	FETCH_FIELD(hv, conf, vsize_factor, uint16_t, TRUE);
 	FETCH_FIELD(hv, conf, wait_time, uint16_t, TRUE);
-	FETCH_FIELD(hv, conf, z_16, uint16_t, FALSE);
-	FETCH_FIELD(hv, conf, z_32, uint32_t, FALSE);
-	FETCH_FIELD(hv, conf, z_char, charp, FALSE);
+
 	return 0;
 }
 

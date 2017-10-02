@@ -8,7 +8,7 @@
  *  CODE-OCEC-09-009. All rights reserved.
  *  
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://slurm.schedmd.com/>.
+ *  For details, see <https://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *  
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -34,11 +34,13 @@
 #include <time.h>
 
 #include "src/common/macros.h"
+#include "src/common/parse_time.h"
 #include "src/common/xmalloc.h"
 #include "src/common/xstring.h"
 #include "src/common/read_config.h"
 #include "src/slurmd/common/job_container_plugin.h"
 #include "src/slurmd/slurmstepd/step_terminate_monitor.h"
+#include "src/slurmd/slurmstepd/slurmstepd.h"
 
 static pthread_mutex_t lock = PTHREAD_MUTEX_INITIALIZER;
 static pthread_cond_t cond = PTHREAD_COND_INITIALIZER;
@@ -51,12 +53,11 @@ static uint32_t recorded_jobid = NO_VAL;
 static uint32_t recorded_stepid = NO_VAL;
 
 static void *_monitor(void *);
-static int _call_external_program(void);
+static int _call_external_program(stepd_step_rec_t *job);
 
-void step_terminate_monitor_start(uint32_t jobid, uint32_t stepid)
+void step_terminate_monitor_start(stepd_step_rec_t *job)
 {
 	slurm_ctl_conf_t *conf;
-	pthread_attr_t attr;
 
 	slurm_mutex_lock(&lock);
 
@@ -66,26 +67,17 @@ void step_terminate_monitor_start(uint32_t jobid, uint32_t stepid)
 	}
 
 	conf = slurm_conf_lock();
-	if (conf->unkillable_program == NULL) {
-		/* do nothing */
-		slurm_conf_unlock();
-		slurm_mutex_unlock(&lock);
-		return;
-	}
 	timeout = conf->unkillable_timeout;
 	program_name = xstrdup(conf->unkillable_program);
 	slurm_conf_unlock();
 
-	slurm_attr_init(&attr);
-	pthread_create(&tid, &attr, _monitor, NULL);
-	slurm_attr_destroy(&attr);
+	slurm_thread_create(&tid, _monitor, job);
+
 	running_flag = 1;
-	recorded_jobid = jobid;
-	recorded_stepid = stepid;
+	recorded_jobid = job->jobid;
+	recorded_stepid = job->stepid;
 
 	slurm_mutex_unlock(&lock);
-
-	return;
 }
 
 void step_terminate_monitor_stop(void)
@@ -103,7 +95,7 @@ void step_terminate_monitor_stop(void)
 	}
 
 	stop_flag = 1;
-	debug("step_terminate_monitor_stop signalling condition");
+	debug("step_terminate_monitor_stop signaling condition");
 	slurm_cond_signal(&cond);
 	slurm_mutex_unlock(&lock);
 
@@ -116,12 +108,13 @@ void step_terminate_monitor_stop(void)
 }
 
 
-static void *_monitor(void *notused)
+static void *_monitor(void *arg)
 {
+	stepd_step_rec_t *job = (stepd_step_rec_t *)arg;
 	struct timespec ts = {0, 0};
 	int rc;
 
-	info("_monitor is running");
+	debug2("step_terminate_monitor will run for %d secs", timeout);
 
 	ts.tv_sec = time(NULL) + 1 + timeout;
 
@@ -131,30 +124,58 @@ static void *_monitor(void *notused)
 
 	rc = pthread_cond_timedwait(&cond, &lock, &ts);
 	if (rc == ETIMEDOUT) {
-		_call_external_program();
+		char entity[24], time_str[24];
+		time_t now = time(NULL);
+		int rc;
+
+		_call_external_program(job);
+
+		if (job->stepid == SLURM_BATCH_SCRIPT) {
+			snprintf(entity, sizeof(entity),
+				 "JOB %u", job->jobid);
+		} else if (job->stepid == SLURM_EXTERN_CONT) {
+			snprintf(entity, sizeof(entity),
+				 "EXTERN STEP FOR %u", job->jobid);
+		} else {
+			snprintf(entity, sizeof(entity), "STEP %u.%u",
+				 job->jobid, job->stepid);
+		}
+		slurm_make_time_str(&now, time_str, sizeof(time_str));
+
+		if (job->state < SLURMSTEPD_STEP_RUNNING) {
+			error("*** %s STEPD TERMINATED ON %s AT %s DUE TO JOB NOT RUNNING ***",
+			      entity, job->node_name, time_str);
+			rc = ESLURMD_JOB_NOTRUNNING;
+		} else {
+			error("*** %s STEPD TERMINATED ON %s AT %s DUE TO JOB NOT ENDING WITH SIGNALS ***",
+			      entity, job->node_name, time_str);
+			rc = ESLURMD_KILL_TASK_FAILED;
+		}
+
+	        exit(stepd_cleanup(NULL, job, NULL, NULL, rc, 0));
 	} else if (rc != 0) {
 		error("Error waiting on condition in _monitor: %m");
 	}
 done:
 	slurm_mutex_unlock(&lock);
 
-	info("_monitor is stopping");
+	debug2("step_terminate_monitor is stopping");
 	return NULL;
 }
 
 
-static int _call_external_program(void)
+static int _call_external_program(stepd_step_rec_t *job)
 {
 	int status, rc, opt;
 	pid_t cpid;
 	int max_wait = 300; /* seconds */
 	int time_remaining;
 
-	debug("step_terminate_monitor: unkillable after %d sec, calling: %s",
-	     timeout, program_name);
-
 	if (program_name == NULL || program_name[0] == '\0')
 		return 0;
+
+	debug("step_terminate_monitor: unkillable after %d sec, calling: %s",
+	     timeout, program_name);
 
 	if (access(program_name, R_OK | X_OK) < 0) {
 		debug("step_terminate_monitor not running %s: %m",

@@ -7,7 +7,7 @@
  *  CODE-OCEC-09-009. All rights reserved.
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://slurm.schedmd.com/>.
+ *  For details, see <https://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -67,8 +67,6 @@ strong_alias(time_str2secs, slurm_time_str2secs);
 strong_alias(secs2time_str, slurm_secs2time_str);
 strong_alias(mins2time_str, slurm_mins2time_str);
 strong_alias(mon_abbr, slurm_mon_abbr);
-
-#define _RUN_STAND_ALONE 0
 
 time_t     time_now;
 struct tm *time_now_tm;
@@ -145,17 +143,22 @@ _is_valid_timespec(const char *s)
 	int digit;
 	int dash;
 	int colon;
-
+	bool already_digit = false;
 	digit = dash = colon = 0;
 
 	while (*s) {
 		if (*s >= '0' && *s <= '9') {
-			++digit;
+			if (!already_digit) {
+				++digit;
+				already_digit = true;
+			}
 		} else if (*s == '-') {
+			already_digit = false;
 			++dash;
 			if (colon)
 				return false;
 		} else if (*s == ':') {
+			already_digit = false;
 			++colon;
 		} else {
 			return false;
@@ -171,9 +174,6 @@ _is_valid_timespec(const char *s)
 		return false;
 
 	if (dash) {
-		if (colon == 0
-		    && digit < 1)
-			return false;
 		if (colon == 1
 		    && digit < 3)
 			return false;
@@ -644,23 +644,6 @@ extern time_t parse_time(char *time_str, int past)
 	errno = ESLURM_INVALID_TIME_VALUE;
 	return (time_t) 0;
 }
-
-#if _RUN_STAND_ALONE
-int main(int argc, char *argv[])
-{
-	char in_line[128];
-	time_t when;
-
-	while (1) {
-		printf("time> ");
-		if ((fgets(in_line, sizeof(in_line), stdin) == NULL)
-		||  (in_line[0] == '\n'))
-			break;
-		when = parse_time(in_line);
-		printf("%s", slurm_asctime(slurm_localtime(&when)));
-	}
-}
-#endif
 
 /*
  * Smart date for @epoch, relative to current date.

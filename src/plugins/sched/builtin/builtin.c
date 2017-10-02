@@ -12,7 +12,7 @@
  *  CODE-OCEC-09-009. All rights reserved.
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://slurm.schedmd.com/>.
+ *  For details, see <https://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -203,7 +203,7 @@ static void _compute_start_times(void)
 		}
 
 		j = job_test_resv(job_ptr, &now, true, &avail_bitmap,
-				  &exc_core_bitmap, &resv_overlap);
+				  &exc_core_bitmap, &resv_overlap, false);
 		if (j != SLURM_SUCCESS) {
 			FREE_NULL_BITMAP(avail_bitmap);
 			FREE_NULL_BITMAP(exc_core_bitmap);
@@ -260,7 +260,7 @@ extern void *builtin_agent(void *args)
 	static time_t last_sched_time = 0;
 	/* Read config, nodes and partitions; Write jobs */
 	slurmctld_lock_t all_locks = {
-		READ_LOCK, WRITE_LOCK, READ_LOCK, READ_LOCK, NO_LOCK };
+		READ_LOCK, WRITE_LOCK, READ_LOCK, READ_LOCK, READ_LOCK };
 
 	_load_config();
 	last_sched_time = time(NULL);

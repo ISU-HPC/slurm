@@ -27,10 +27,6 @@ The <i>scontrol</i>, <i>smap</i> and <i>sview</i> commands can be used
 to view reservations.
 The man pages for the various commands contain details.</p>
 
-<p>Note for users of Maui or Moab schedulers: <br>
-Maui and Moab are not integrated with Slurm's resource reservation system,
-but should use their own advanced reservation system.</p>
-
 <h2>Reservation Creation</h2>
 
 <p>One common mode of operation for a reservation would be to reserve
@@ -271,7 +267,7 @@ $ scontrol delete ReservationName=alan_6
 <p>By default, reservations must not overlap. They must either include
 different nodes or operate at different times. If specific nodes
 are not specified when a reservation is created, Slurm will
-automatically select nodes to avoid overlap and insure that
+automatically select nodes to avoid overlap and ensure that
 the selected nodes are available when the reservation begins.</p>
 
 <p>There is very limited support for overlapping reservations
@@ -294,7 +290,7 @@ reservation except that is it not logged in the accounting system as nodes
 reserved for maintenance.
 It requires the use of the "overlap" flag when creating the second
 reservation.
-This might be used to insure availability of resources for a specific
+This might be used to ensure availability of resources for a specific
 user within a group having a reservation.
 Using the previous example of alan and brenda having a 10 node reservation
 for 60 minutes, we might want to reserve 4 nodes of that for for brenda
@@ -433,7 +429,7 @@ considering the initiation of jobs.
 This will prevent the initiation of some jobs which would complete execution
 before a reservation given fewer jobs to time-slice with.</p>
 
-<p style="text-align: center;">Last modified 28 January 2016</p>
+<p style="text-align: center;">Last modified 15 December 2016</p>
 
 <!--#include virtual="footer.txt"-->
 
