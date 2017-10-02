@@ -7,7 +7,7 @@
  *  CODE-OCEC-09-009. All rights reserved.
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://slurm.schedmd.com/>.
+ *  For details, see <https://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -57,10 +57,12 @@
 #include "src/common/log.h"
 #include "src/common/macros.h"
 #include "src/common/strnatcmp.h"
+#include "src/common/strlcpy.h"
 #include "src/common/timers.h"
 #include "src/common/working_cluster.h"
 #include "src/common/xassert.h"
 #include "src/common/xmalloc.h"
+#include "src/common/xstring.h"
 
 /*
  * Define slurm-specific aliases for use by plugins, see slurm_xlator.h
@@ -473,7 +475,7 @@ bracket: 	open_bracket = strchr(parse, '[');
 	}
 
 	/* nullify consecutive separators and push str beyond them */
-	while ((**str != '\0') && (strchr(sep, **str) != '\0'))
+	while ((**str != '\0') && (strchr(sep, **str) != NULL))
 		*(*str)++ = '\0';
 
 	return tok;
@@ -776,7 +778,7 @@ static hostrange_t hostrange_delete_host(hostrange_t hr, unsigned long n)
 	hostrange_t new = NULL;
 
 	assert(hr != NULL);
-	assert(n >= hr->lo && n <= hr->hi);
+	assert((n >= hr->lo) && (n <= hr->hi));
 
 	if (n == hr->lo)
 		hr->lo++;
@@ -1100,7 +1102,7 @@ static int hostrange_hn_within(hostrange_t hr, hostname_t hn)
 			strncat(hn->prefix, hn->suffix, ldiff);
 			/* Now adjust the suffix of the hostname object. */
 			hn->suffix += ldiff;
-			/* And the numeric representation just incase
+			/* And the numeric representation just in case
 			 * whatever we just tacked on to the prefix
 			 * had something other than 0 in it.
 			 *
@@ -1425,7 +1427,7 @@ static void hostlist_delete_range(hostlist_t hl, int n)
 
 	assert(hl != NULL);
 	assert(hl->magic == HOSTLIST_MAGIC);
-	assert(n < hl->nranges && n >= 0);
+	assert((n < hl->nranges) && (n >= 0));
 
 	old = hl->hr[n];
 	for (i = n; i < hl->nranges - 1; i++)
@@ -1791,7 +1793,7 @@ _push_range_list(hostlist_t hl, char *prefix, struct _range *range,
 	char *p, *q;
 	char new_prefix[1024], tmp_prefix[1024];
 
-	strncpy(tmp_prefix, prefix, sizeof(tmp_prefix));
+	strlcpy(tmp_prefix, prefix, sizeof(tmp_prefix));
 	if (((p = strrchr(tmp_prefix, '[')) != NULL) &&
 	    ((q = strrchr(p, ']')) != NULL)) {
 		struct _range *prefix_range = NULL;
@@ -1864,8 +1866,7 @@ _hostlist_create_bracketed(const char *hostlist, char *sep,
 	struct _range *ranges = NULL;
 	int capacity = 0;
 	int nr, err;
-	char *p, *tok, *str, *orig;
-	char cur_tok[1024];
+	char *cur_tok = NULL, *p, *tok, *str, *orig;
 
 	if (hostlist == NULL)
 		return new;
@@ -1876,7 +1877,6 @@ _hostlist_create_bracketed(const char *hostlist, char *sep,
 	}
 
 	while ((tok = _next_tok(sep, &str)) != NULL) {
-		strncpy(cur_tok, tok, 1024);
 		if ((p = strrchr(tok, '[')) != NULL) {
 			char *q, *prefix = tok;
 			*p++ = '\0';
@@ -1900,17 +1900,20 @@ _hostlist_create_bracketed(const char *hostlist, char *sep,
 				 * Not likely what the user
 				 * wanted. We will just tack one on
 				 * the end. */
-				strcat(cur_tok, "]");
-				if (prefix && prefix[0])
+				if (prefix && prefix[0]) {
+					xstrfmtcat(cur_tok, "%s]", tok);
 					hostlist_push_host_dims(
 						new, cur_tok, dims);
-				else
+					xfree(cur_tok);
+				} else {
 					hostlist_push_host_dims(new, p, dims);
+				}
 
 			}
 
-		} else
-			hostlist_push_host_dims(new, cur_tok, dims);
+		} else {
+			hostlist_push_host_dims(new, tok, dims);
+		}
 	}
 	xfree(ranges);
 

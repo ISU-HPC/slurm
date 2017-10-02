@@ -8,7 +8,7 @@
  *  CODE-OCEC-09-009. All rights reserved.
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://slurm.schedmd.com/>.
+ *  For details, see <https://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -43,9 +43,10 @@
 #include <sys/types.h>
 #include <unistd.h>
 
-extern char **command_argv;
-extern int command_argc;
-extern pid_t command_pid;
+extern char **  command_argv;
+extern int      command_argc;
+extern pid_t    command_pid;
+extern uint64_t debug_flags;
 
 enum possible_allocation_states {NOT_GRANTED, GRANTED, REVOKED};
 extern enum possible_allocation_states allocation_state;

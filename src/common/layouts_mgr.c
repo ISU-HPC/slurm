@@ -7,7 +7,7 @@
  *  Enhanced by Matthieu Hautreux <matthieu.hautreux@cea.fr> for slurm-15.x.
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://slurm.schedmd.com/>.
+ *  For details, see <https://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -38,6 +38,7 @@
 
 #include <ctype.h>
 #include <pthread.h>
+#include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
 
@@ -72,8 +73,6 @@
 /*****************************************************************************\
  *                            STRUCTURES AND TYPES                           *
 \*****************************************************************************/
-
-void free(void*);
 
 /*
  * layouts_conf_spec_t - structure used to keep track of layouts conf details
@@ -267,7 +266,7 @@ static char* _cat(char* dest, const char* src, size_t n)
 	return r;
 }
 
-static char* trim(char* str)
+static char* _trim(char* str)
 {
 	char* str_modifier;
 	if (!str)
@@ -551,6 +550,9 @@ int _layouts_entity_set_kv(layout_t* l, entity_t* e, char* key, void* value,
 	case L_T_LONG_DOUBLE:
 		size = sizeof(long double);
 		break;
+	default:
+		value = NULL;
+		return SLURM_ERROR;
 	}
 	return entity_set_data(e, key_keydef, value, size);
 }
@@ -672,17 +674,16 @@ int _layouts_entity_get_mkv(layout_t* l, entity_t* e, char* keys, void* value,
 	while ((key = hostlist_shift(kl))) {
 		if (processed >= length) {
 			rc++;
-			continue;
-		}
-		if (_layouts_entity_get_kv_size(l, e, key, &elt_size) ||
-		    (processed + elt_size) > length ||
-		    _layouts_entity_get_kv(l, e, key, value, key_type)) {
+		} else if (_layouts_entity_get_kv_size(l, e, key, &elt_size) ||
+			   (processed + elt_size) > length ||
+			   _layouts_entity_get_kv(l, e, key, value, key_type)) {
 			rc++;
 			processed = length;
-			continue;
+		} else {
+			value += elt_size;
+			processed += elt_size;
 		}
-		value += elt_size;
-		processed += elt_size;
+		free(key);
 	}
 	hostlist_destroy(kl);
 
@@ -734,15 +735,14 @@ int _layouts_entity_get_mkv_ref(layout_t* l, entity_t* e, char* keys,
 	while ((key = hostlist_shift(kl))) {
 		if (processed >= length) {
 			rc++;
-			continue;
-		}
-		if (_layouts_entity_get_kv_ref(l, e, key, value, key_type)) {
+		} else if (_layouts_entity_get_kv_ref(l, e, key, value, key_type)) {
 			rc++;
 			processed = length;
-			continue;
+		} else {
+			value += elt_size;
+			processed += elt_size;
 		}
-		value += elt_size;
-		processed += elt_size;
+		free(key);
 	}
 	hostlist_destroy(kl);
 
@@ -891,7 +891,7 @@ static void _layouts_mgr_parse_global_conf(layouts_mgr_t* mgr)
 {
 	char* layouts;
 	char* parser;
-	char* saveptr;
+	char* saveptr = NULL;
 	char* slash;
 	layouts_conf_spec_t* nspec;
 
@@ -901,14 +901,14 @@ static void _layouts_mgr_parse_global_conf(layouts_mgr_t* mgr)
 	while (parser) {
 		nspec = (layouts_conf_spec_t*)xmalloc(
 			sizeof(layouts_conf_spec_t));
-		nspec->whole_name = xstrdup(trim(parser));
+		nspec->whole_name = xstrdup(_trim(parser));
 		slash = strchr(parser, '/');
 		if (slash) {
 			*slash = 0;
-			nspec->type = xstrdup(trim(parser));
-			nspec->name = xstrdup(trim(slash+1));
+			nspec->type = xstrdup(_trim(parser));
+			nspec->name = xstrdup(_trim(slash+1));
 		} else {
-			nspec->type = xstrdup(trim(parser));
+			nspec->type = xstrdup(_trim(parser));
 			nspec->name = xstrdup("default");
 		}
 		list_append(mgr->layouts_desc, nspec);
@@ -1151,10 +1151,10 @@ static int _layouts_read_config_post(layout_plugin_t* plugin,
 			xfree(root_nodename);
 			return SLURM_ERROR;
 		}
-		e = xhash_get(mgr->entities, trim(root_nodename));
+		e = xhash_get(mgr->entities, _trim(root_nodename));
 		if (!e) {
 			error("layouts: unable to find specified root "
-			      "entity `%s'", trim(root_nodename));
+			      "entity `%s'", _trim(root_nodename));
 			xfree(root_nodename);
 			return SLURM_ERROR;
 		}
@@ -1887,8 +1887,8 @@ static int _autoupdate_entity_kv(layouts_keydef_t* keydef,
 /*
  * helper function used to update KVs of an entity using its xtree_node
  * looking for known inheritance in the neighborhood (parents/children) */
-static void _tree_update_node_entity_data(void* item, void* arg) {
-
+static void _tree_update_node_entity_data(void* item, void* arg)
+{
 	uint32_t action;
 	entity_data_t* data;
 	_autoupdate_tree_args_t *pargs;
@@ -1952,6 +1952,8 @@ static void _tree_update_node_entity_data(void* item, void* arg) {
 
 		/* get current node value reference */
 		oldvalue = entity_get_data_ref(cnode->entity, keydef->key);
+		if (!oldvalue)
+			return;
 
 		/* get siblings count */
 		child = node->start;
@@ -1986,6 +1988,8 @@ static void _tree_update_node_entity_data(void* item, void* arg) {
 
 		/* get current node value reference */
 		oldvalue = entity_get_data_ref(cnode->entity, keydef->key);
+		if (!oldvalue)
+			return;
 
 		/* get children count */
 		node = (xtree_node_t*)cnode->node;

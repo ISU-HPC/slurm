@@ -9,7 +9,7 @@
  *  CODE-OCEC-09-009. All rights reserved.
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://slurm.schedmd.com/>.
+ *  For details, see <https://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -292,6 +292,11 @@ static print_field_t *_get_print_field(char *object)
 		field->name = xstrdup("Event");
 		field->len = 7;
 		field->print_routine = print_fields_str;
+	} else if (!strncasecmp("Features", object, MAX(command_len, 3))) {
+		field->type = PRINT_FEATURES;
+		field->name = xstrdup("Features");
+		field->len = 20;
+		field->print_routine = print_fields_char_list;
 	} else if (!strncasecmp("Federation", object, MAX(command_len, 3))) {
 		field->type = PRINT_FEDERATION;
 		field->name = xstrdup("Federation");
@@ -420,8 +425,10 @@ static print_field_t *_get_print_field(char *object)
 		field->name = xstrdup("MaxCPUsPU");
 		field->len = 9;
 		field->print_routine = print_fields_uint;
-	} else if (!strncasecmp("MaxTRESPerJob",
-				object, MAX(command_len, 7))) {
+	} else if (!strncasecmp("MaxTRES",
+				object, MAX(command_len, 7)) ||
+		   !strncasecmp("MaxTRESPerJob",
+				object, MAX(command_len, 11))) {
 		field->type = PRINT_MAXT;
 		field->name = xstrdup("MaxTRES");
 		field->len = 13;
@@ -467,7 +474,9 @@ static print_field_t *_get_print_field(char *object)
 		field->len = 13;
 		field->print_routine = sacctmgr_print_tres;
 	} else if (!strncasecmp("MaxTRESPerUser", object,
-				MAX(command_len, 11))) {
+				MAX(command_len, 11)) ||
+		   !strncasecmp("MaxTRESPU", object,
+				MAX(command_len, 9))) {
 		field->type = PRINT_MAXTU;
 		field->name = xstrdup("MaxTRESPU");
 		field->len = 13;
@@ -488,9 +497,9 @@ static print_field_t *_get_print_field(char *object)
 		field->len = 9;
 		field->print_routine = print_fields_uint;
 	} else if (!strncasecmp("MaxJobsPerUser", object,
-				MAX(command_len, 8)) ||
+				MAX(command_len, 11)) ||
 		   !strncasecmp("MaxJobsPU", object,
-				MAX(command_len, 8))) {
+				MAX(command_len, 9))) {
 		field->type = PRINT_MAXJ; /* used same as MaxJobs */
 		field->name = xstrdup("MaxJobsPU");
 		field->len = 9;
@@ -707,11 +716,6 @@ static print_field_t *_get_print_field(char *object)
 		field->name = xstrdup("User");
 		field->len = 10;
 		field->print_routine = print_fields_str;
-	} else if (!strncasecmp("Weight", object, MAX(command_len, 3))) {
-		field->type = PRINT_WEIGHT;
-		field->name = xstrdup("Weight");
-		field->len = 10;
-		field->print_routine = print_fields_uint;
 	} else if (!strncasecmp("WCKeys", object, MAX(command_len, 2))) {
 		field->type = PRINT_WCKEYS;
 		field->name = xstrdup("WCKeys");
@@ -733,21 +737,14 @@ static print_field_t *_get_print_field(char *object)
 	return field;
 }
 
-extern int notice_thread_init()
+extern void notice_thread_init()
 {
-	pthread_attr_t attr;
-
-	slurm_attr_init(&attr);
-	if (pthread_create(&lock_warning_thread, &attr,
-			   &_print_lock_warn, NULL))
-		error ("pthread_create error %m");
-	slurm_attr_destroy(&attr);
-	return SLURM_SUCCESS;
+	slurm_thread_create(&lock_warning_thread, _print_lock_warn, NULL);
 }
 
-extern int notice_thread_fini()
+extern void notice_thread_fini()
 {
-	return pthread_cancel(lock_warning_thread);
+	pthread_cancel(lock_warning_thread);
 }
 
 extern int commit_check(char *warning)
@@ -807,6 +804,12 @@ extern int sacctmgr_remove_assoc_usage(slurmdb_assoc_cond_t *assoc_cond)
 	slurmdb_update_object_t* update_obj = NULL;
 	slurmdb_cluster_cond_t cluster_cond;
 	int rc = SLURM_SUCCESS;
+
+	if (!assoc_cond || !assoc_cond->acct_list ||
+	    !list_count(assoc_cond->acct_list)) {
+		error("An association name is required to remove usage");
+		return SLURM_ERROR;
+	}
 
 	if (!assoc_cond->cluster_list)
 		assoc_cond->cluster_list = list_create(slurm_destroy_char);
@@ -871,6 +874,8 @@ extern int sacctmgr_remove_assoc_usage(slurmdb_assoc_cond_t *assoc_cond)
 						      cluster, account,
 						      user);
 						rc = SLURM_ERROR;
+						slurmdb_destroy_update_object(
+							update_obj);
 						goto end_it;
 					}
 					list_append(update_obj->objects, rec);
@@ -889,6 +894,8 @@ extern int sacctmgr_remove_assoc_usage(slurmdb_assoc_cond_t *assoc_cond)
 					      "database",
 					      cluster, account);
 					rc = SLURM_ERROR;
+					slurmdb_destroy_update_object(
+						update_obj);
 					goto end_it;
 				}
 				list_append(update_obj->objects, rec);
@@ -903,7 +910,10 @@ extern int sacctmgr_remove_assoc_usage(slurmdb_assoc_cond_t *assoc_cond)
 				cluster_rec->control_host,
 				cluster_rec->control_port,
 				cluster_rec->rpc_version);
+		} else {
+			slurmdb_destroy_update_object(update_obj);
 		}
+		update_obj = NULL;
 		FREE_NULL_LIST(update_list);
 	}
 end_it:
@@ -931,7 +941,6 @@ extern int sacctmgr_remove_qos_usage(slurmdb_qos_cond_t *qos_cond)
 	slurmdb_update_object_t* update_obj = NULL;
 	slurmdb_cluster_cond_t cluster_cond;
 	int rc = SLURM_SUCCESS;
-	bool free_cluster_name = 0;
 
 	cluster_list = qos_cond->description_list;
 	qos_cond->description_list = NULL;
@@ -987,6 +996,7 @@ extern int sacctmgr_remove_qos_usage(slurmdb_qos_cond_t *qos_cond)
 			if (!rec) {
 				error("Failed to find QOS %s", qos_name);
 				rc = SLURM_ERROR;
+				slurmdb_destroy_update_object(update_obj);
 				goto end_it;
 			}
 			list_append(update_obj->objects, rec);
@@ -1000,6 +1010,8 @@ extern int sacctmgr_remove_qos_usage(slurmdb_qos_cond_t *qos_cond)
 				cluster_rec->control_host,
 				cluster_rec->control_port,
 				cluster_rec->rpc_version);
+		} else {
+			slurmdb_destroy_update_object(update_obj);
 		}
 		FREE_NULL_LIST(update_list);
 	}
@@ -1009,9 +1021,7 @@ end_it:
 
 	FREE_NULL_LIST(update_list);
 	FREE_NULL_LIST(local_qos_list);
-
-	if (free_cluster_name)
-		xfree(cluster_name);
+	xfree(cluster_name);
 
 	return rc;
 }
@@ -1802,6 +1812,17 @@ extern void sacctmgr_print_assoc_limits(slurmdb_assoc_rec_t *assoc)
 
 }
 
+static int _print_cluster_features(void *object, void *arg)
+{
+	char *feature = (char *)object;
+	if (feature[0] == '+' || feature[0] == '-')
+		printf("  Feature     %c= %s\n", feature[0], feature + 1);
+	else
+		printf("  Feature       = %s\n", feature);
+
+	return SLURM_SUCCESS;
+}
+
 extern void sacctmgr_print_cluster(slurmdb_cluster_rec_t *cluster)
 {
 	if (!cluster)
@@ -1812,6 +1833,15 @@ extern void sacctmgr_print_cluster(slurmdb_cluster_rec_t *cluster)
 	if (cluster->classification)
 		printf("  Classification = %s\n",
 		       get_classification_str(cluster->classification));
+
+	if (cluster->fed.feature_list) {
+		if (!list_count(cluster->fed.feature_list))
+			printf("  Feature     = \n");
+		else
+			list_for_each(cluster->fed.feature_list,
+				      _print_cluster_features, NULL);
+	}
+
 	if (cluster->fed.name)
 		printf("  Federation     = %s\n", cluster->fed.name);
 	if (cluster->fed.state != NO_VAL) {
@@ -1819,8 +1849,6 @@ extern void sacctmgr_print_cluster(slurmdb_cluster_rec_t *cluster)
 						cluster->fed.state);
 		printf("  FedState       = %s\n", tmp_str);
 	}
-	if (cluster->fed.weight != NO_VAL)
-		printf("  Weight         = %u\n", cluster->fed.weight);
 }
 
 extern void sacctmgr_print_federation(slurmdb_federation_rec_t *fed)

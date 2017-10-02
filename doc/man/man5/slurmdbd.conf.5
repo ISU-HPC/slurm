@@ -1,4 +1,4 @@
-.TH "slurmdbd.conf" "5" "Slurm Configuration File" "April 2015" "Slurm Configuration File"
+.TH "slurmdbd.conf" "5" "Slurm Configuration File" "July 2015" "Slurm Configuration File"
 
 .SH "NAME"
 slurmdbd.conf \- Slurm Database Daemon (SlurmDBD) configuration file
@@ -81,6 +81,12 @@ Time of last step start to archive.
 \fBSLURM_ARCHIVE_SUSPEND\fR
 1 for archive suspend data 0 otherwise.
 .TP
+\fBSLURM_ARCHIVE_TXN\fR
+1 for archive transaction data 0 otherwise.
+.TP
+\fBSLURM_ARCHIVE_USAGE\fR
+1 for archive usage data 0 otherwise.
+.TP
 \fBSLURM_ARCHIVE_LAST_SUSPEND\fR
 Time of last suspend start to archive.
 .TP
@@ -95,6 +101,16 @@ no otherwise.  Default is no.
 \fBArchiveSuspend\fR
 When purging suspend data also archive it.  Boolean, yes to archive
 suspend data, no otherwise.  Default is no.
+
+.TP
+\fBArchiveTXN\fR
+When purging transaction data also archive it.  Boolean, yes to archive
+transaction data, no otherwise.  Default is no.
+
+.TP
+\fBArchiveUsage\fR
+When purging usage data (Cluster, Association and WCKey) also archive it.
+Boolean, yes to archive transaction data, no otherwise.  Default is no.
 
 .TP
 \fBAuthInfo\fR
@@ -252,6 +268,52 @@ Log errors and verbose informational messages and even more debugging messages
 .RE
 
 .TP
+\fBDebugLevelSyslog\fR
+The slurmdbd daemon will log events to the syslog file at the specified
+level of detail (the \fBLogFile\fR file will include log messages
+at level of details specified be \fBDebugLevel\fR configuration parameter).
+If the slurmdbd daemon is run in the foreground (started with the \fB\-D\fR
+command line option) the \fBDebugLevelSyslog\fR configuration parameter
+will be ignored.
+The default value is \fBquiet\fR unless there is no configured
+\fBSlurmdLogFile\fR, in which case the default value will be \fBfatal\bR so
+that fatal errors are logged somewhere.
+
+.RS
+.TP 10
+\fBquiet\fR
+Log nothing
+.TP
+\fBfatal\fR
+Log only fatal errors
+.TP
+\fBerror\fR
+Log only errors
+.TP
+\fBinfo\fR
+Log errors and general informational messages
+.TP
+\fBverbose\fR
+Log errors and verbose informational messages
+.TP
+\fBdebug\fR
+Log errors and verbose informational messages and debugging messages
+.TP
+\fBdebug2\fR
+Log errors and verbose informational messages and more debugging messages
+.TP
+\fBdebug3\fR
+Log errors and verbose informational messages and even more debugging messages
+.TP
+\fBdebug4\fR
+Log errors and verbose informational messages and even more debugging messages
+.TP
+\fBdebug5\fR
+Log errors and verbose informational messages and even more debugging messages
+.RE
+
+
+.TP
 \fBDefaultQOS\fR
 When adding a new cluster this will be used as the qos for the cluster
 unless something is explicitly set by the admin with the create.
@@ -278,6 +340,15 @@ with the C standard clock() function. The "short" format is a short
 date and time format. The "thread_id" format shows the timestamp
 in the C standard ctime() function form without the year but
 including the microseconds, the daemon's process ID and the current thread ID.
+
+.TP
+\fBMaxQueryTimeLimit\fR
+Return an error if a query is against too large of a time span, to prevent
+ill-formed queries from causing performance problems within SlurmDBD.
+Default value is INFINITE which allows any queries to proceed.
+User \fBSlurmUser\fR and \fBroot\fR are exempt from this restriction.
+Note that queries which attempt to return over 3GB of data will still
+fail to complete with ESLURM_RESULT_TOO_LARGE.
 
 .TP
 \fBMessageTimeout\fR
@@ -310,6 +381,10 @@ Acceptable values include:
 \fBaccounts\fR
 prevents users from viewing any account definitions unless they are
 coordinators of them.
+.TP
+\fBevents\fR
+prevents users from viewing event information unless they have operator status
+or above.
 .TP
 \fBjobs\fR
 prevents users from viewing job records belonging
@@ -348,7 +423,7 @@ If not set (default), then job step records are never purged.
 .TP
 \fBPurgeJobAfter\fR
 Individual job records over this age are purged from the database.
-Aggregated information will be preserved indefinitely.
+Aggregated information will be preserved to "PurgeUsageAfter".
 The time is a numeric value and is a number of months.  If you want to purge
 more often you can include "hours", or "days" behind the numeric value to get
 those more frequent purges (i.e. a value of "12hours" would purge
@@ -361,7 +436,7 @@ If not set (default), then job records are never purged.
 .TP
 \fBPurgeResvAfter\fR
 Individual reservation records over this age are purged from the database.
-Aggregated information will be preserved indefinitely.
+Aggregated information will be preserved to "PurgeUsageAfter".
 The time is a numeric value and is a number of months.  If you want to purge
 more often you can include "hours", or "days" behind the numeric value to get
 those more frequent purges (i.e. a value of "12hours" would purge
@@ -374,7 +449,7 @@ If not set (default), then reservation records are never purged.
 .TP
 \fBPurgeStepAfter\fR
 Individual job step records over this age are purged from the database.
-Aggregated information will be preserved indefinitely.
+Aggregated information will be preserved to "PurgeUsageAfter".
 The time is a numeric value and is a number of months.  If you want to purge
 more often you can include "hours", or "days" behind the numeric value to get
 those more frequent purges (i.e. a value of "12hours" would purge
@@ -388,7 +463,32 @@ If not set (default), then job step records are never purged.
 \fBPurgeSuspendAfter\fR
 Records of individual suspend times for jobs over this age are purged from the
 database.
-Aggregated information will be preserved indefinitely.
+Aggregated information will be preserved to "PurgeUsageAfter".
+The time is a numeric value and is a number of months.  If you want to purge
+more often you can include "hours", or "days" behind the numeric value to get
+those more frequent purges (i.e. a value of "12hours" would purge
+everything older than 12 hours).
+The purge takes place at the start of the each purge interval.
+For example, if the purge time is 2 months, the purge would happen at the
+beginning of each month.
+If not set (default), then job step records are never purged.
+
+.TP
+\fBPurgeTXNAfter\fR
+Records of individual transaction times for transactions over this age are purged from the database.
+The time is a numeric value and is a number of months.  If you want to purge
+more often you can include "hours", or "days" behind the numeric value to get
+those more frequent purges (i.e. a value of "12hours" would purge
+everything older than 12 hours).
+The purge takes place at the start of the each purge interval.
+For example, if the purge time is 2 months, the purge would happen at the
+beginning of each month.
+If not set (default), then job step records are never purged.
+
+.TP
+\fBPurgeUsageAfter\fR
+Usage Records (Cluster, Association and WCKey) over this age are purged from the
+database.
 The time is a numeric value and is a number of months.  If you want to purge
 more often you can include "hours", or "days" behind the numeric value to get
 those more frequent purges (i.e. a value of "12hours" would purge
@@ -486,6 +586,10 @@ ArchiveSteps=no
 .br
 ArchiveSuspend=no
 .br
+ArchiveTXN=no
+.br
+ArchiveUsage=no
+.br
 #ArchiveScript=/usr/sbin/slurm.dbd.archive
 .br
 AuthInfo=/var/run/munge/munge.socket.2
@@ -506,6 +610,10 @@ PurgeStepAfter=1month
 .br
 PurgeSuspendAfter=1month
 .br
+PurgeTXNAfter=12month
+.br
+PurgeUsageAfter=24month
+.br
 LogFile=/var/log/slurmdbd.log
 .br
 PidFile=/var/tmp/jette/slurmdbd.pid
@@ -525,7 +633,7 @@ Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
 Copyright (C) 2010\-2014 SchedMD LLC.
 .LP
 This file is part of Slurm, a resource management program.
-For details, see <http://slurm.schedmd.com/>.
+For details, see <https://slurm.schedmd.com/>.
 .LP
 Slurm is free software; you can redistribute it and/or modify it under
 the terms of the GNU General Public License as published by the Free

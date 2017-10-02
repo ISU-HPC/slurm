@@ -2,7 +2,7 @@
  * Fork apbasil process as co-process, parse output.
  *
  * Copyright (c) 2009-2011 Centro Svizzero di Calcolo Scientifico (CSCS)
- * Portions Copyright (C) 2011 SchedMD <http://www.schedmd.com>.
+ * Portions Copyright (C) 2011 SchedMD <https://www.schedmd.com>.
  * Licensed under the GPLv2.
  */
 #include "../basil_interface.h"
@@ -274,10 +274,10 @@ int basil_request(struct basil_parse_data *bp)
 
 	switch (bp->method) {
 	case BM_engine:
-		_write_xml(apbasil, "type=\"ENGINE\"/>");
+		_write_xml(apbasil, "type=\"ENGINE\"/>\n");
 		break;
 	case BM_inventory:
-		_write_xml(apbasil, "type=\"INVENTORY\"/>");
+		_write_xml(apbasil, "type=\"INVENTORY\"/>\n");
 		break;
 	case BM_reserve:
 		_write_xml(apbasil, ">\n");

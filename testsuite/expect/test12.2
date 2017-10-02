@@ -13,7 +13,7 @@
 # CODE-OCEC-09-009. All rights reserved.
 #
 # This file is part of SLURM, a resource management program.
-# For details, see <http://slurm.schedmd.com/>.
+# For details, see <https://slurm.schedmd.com/>.
 # Please also read the included file: DISCLAIMER.
 #
 # SLURM is free software; you can redistribute it and/or modify it under
@@ -45,7 +45,7 @@ set aix         0
 
 # job parameters
 set mem_size    1024000
-set sleep_time  25
+set sleep_time  32
 set ret_code    42
 set file_size   10485760
 print_header $test_id
@@ -183,8 +183,10 @@ proc _get_file_size {prog} {
 		send_user "\nFAILURE: AveDiskRead not reported\n"
 		return 1
 	}
-
-	if { $max_disk_write != $max_disk_read } {
+	# Compute error in MB
+	set diff_io [expr $max_disk_write - $max_disk_read]
+	set error_io [expr abs($diff_io)]
+	if { $error_io > 0.3 } {
 		send_user "\nFAILURE: written file size does not match read size "
 		send_user "file_size:$mb_file_size MB "
 		send_user "max_disk_write:$max_disk_write MB "
@@ -192,16 +194,18 @@ proc _get_file_size {prog} {
 		return 1
 	}
 
-	if { $ave_disk_write != $ave_disk_read } {
+	set diff_io [expr $ave_disk_write - $ave_disk_read]
+	set error_io [expr abs($diff_io)] 
+	if { $error_io > 0.3 } {
 		send_user "\nFAILURE: average written file size "
 		send_user "does not match average read size "
 		send_user "file_size:$mb_file_size MB "
-		send_user "ave_disk_write:$ave_disk_write MB"
+		send_user "ave_disk_write:$ave_disk_write MB "
 		send_user "ave_disk_read:$ave_disk_read MB\n"
 		return 1
 	}
 
-	send_user "\SUCCESS: $prog reported correct written and read file size\n"
+	send_user "\nSUCCESS: $prog reported correct written and read file size\n"
 	send_user "file_size:$mb_file_size MB max_disk_write:$max_disk_write MB "
 	send_user "max_disk_read:$max_disk_read MB\n"
 
@@ -326,6 +330,11 @@ if {[wait_for_job $job_id "DONE"] != 0} {
 	send_user "\nFAILURE: waiting for job to complete\n"
 	set exit_code 1
 }
+
+#
+# Wait for accounting data to be propagated to slurmdbd
+#
+sleep 10
 
 #
 # Report basic sacct info

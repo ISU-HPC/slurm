@@ -13,7 +13,7 @@
 # CODE-OCEC-09-009. All rights reserved.
 #
 # This file is part of SLURM, a resource management program.
-# For details, see <http://slurm.schedmd.com/>.
+# For details, see <https://slurm.schedmd.com/>.
 # Please also read the included file: DISCLAIMER.
 #
 # SLURM is free software; you can redistribute it and/or modify it under
@@ -69,10 +69,12 @@ exec $bin_cc -fPIC -shared -I${slurm_dir}/include -o ${file_prog}.so ${file_prog
 #
 log_user 0
 set config_dir ""
+set ctld_slurm_ver ""
 spawn $scontrol show config
 expect {
-	-re "SLURM_CONF.*= (/.*)/slurm.conf.*SLURM_VERSION" {
+	-re "SLURM_CONF.*= (.*)/slurm.conf.*SLURM_VERSION *= ($float)" {
 		set config_dir $expect_out(1,string)
+		set ctld_slurm_ver $expect_out(2,string)
 		exp_continue
 	}
 	eof {
@@ -84,6 +86,27 @@ if {[string compare $config_dir ""] == 0} {
 	send_user "\nFAILURE: Could not locate slurm.conf directory\n"
 	exit 1
 }
+
+log_user 0
+set loc_slurm_ver ""
+spawn $scontrol -V
+expect {
+	-re "slurm ($float)" {
+		set loc_slurm_ver $expect_out(1,string)
+		exp_continue
+	}
+	eof {
+		wait
+	}
+}
+log_user 1
+
+if {[string compare $ctld_slurm_ver $loc_slurm_ver]} {
+	send_user "\nWARNING: slurmctld ($ctld_slurm_ver) and local Slurm ($loc_slurm_ver) versions are not the same, can not continue.\n"
+	exit 0
+}
+
+
 set spank_conf_file ${config_dir}/plugstack.conf
 exec $bin_rm -f $orig_spank_conf $new_spank_conf $file_out $spank_out
 if {[file exists $spank_conf_file]} {
@@ -100,16 +123,16 @@ if {[file exists $spank_conf_file]} {
 		}
 	}
 
-	exec $bin_cp $spank_conf_file $orig_spank_conf
-	exec $bin_cp $spank_conf_file $new_spank_conf
+	exec $bin_cp -f $spank_conf_file $orig_spank_conf
+	exec $bin_cp -f $spank_conf_file $new_spank_conf
 	exec $bin_chmod 700 $spank_conf_file
 	exec $bin_chmod 700 $new_spank_conf
 } else {
-	exec $bin_cp /dev/null $new_spank_conf
+	exec $bin_cp -f /dev/null $new_spank_conf
 }
 
 exec $bin_echo "required ${file_prog}.so ${spank_out}" >>$new_spank_conf
-spawn $bin_cp $new_spank_conf $spank_conf_file
+spawn $bin_cp -f $new_spank_conf $spank_conf_file
 expect {
 	-re "Permission denied" {
 		send_user "\nWARNING: User lacks permission to update plugstack_conf file\n"
@@ -120,10 +143,6 @@ expect {
 	}
 }
 
-# Allow enough time for configuration file in NFS to be propagated
-# to all nodes of cluster
-exec sleep 60
-
 #
 # Test of srun help message
 #
@@ -131,8 +150,9 @@ exec sleep 60
 #       directly, so we build a script containing a pipe to tail
 #
 
-make_bash_script $file_in "$srun --help | $bin_grep test"
+send_user "\n\nTesting srun help message..........\n\n"
 
+make_bash_script $file_in "$srun --help | $bin_grep test"
 set matches 0
 set srun_pid [spawn $file_in]
 expect {
@@ -159,14 +179,15 @@ if {$matches != 2} {
 }
 
 #
-# Test of alloc help message
+# Test of salloc help message
 #
 # NOTE: Expect parsing failures have been noted running "$salloc --help"
 #       directly, so we build a script containing a pipe to tail
 #
 
-make_bash_script $file_in "$salloc --help | $bin_grep test"
+send_user "\n\nTesting salloc help message..........\n\n"
 
+make_bash_script $file_in "$salloc --help | $bin_grep test"
 set matches 0
 set srun_pid [spawn $file_in]
 expect {
@@ -184,7 +205,7 @@ expect {
 	}
 }
 if {$matches != 1} {
-	send_user "\nFAILURE: spank help message not in salloc help message\n"
+	send_user "\nFAILURE: spank help message not in salloc help message ($matches != 1)\n"
 	set exit_code 1
 }
 
@@ -195,8 +216,9 @@ if {$matches != 1} {
 #       directly, so we build a script containing a pipe to tail
 #
 
-make_bash_script $file_in "$sbatch --help | $bin_grep test"
+send_user "\n\nTesting sbatch help message..........\n\n"
 
+make_bash_script $file_in "$sbatch --help | $bin_grep test"
 set matches 0
 set srun_pid [spawn $file_in]
 expect {
@@ -214,7 +236,7 @@ expect {
 	}
 }
 if {$matches != 1} {
-	send_user "\nFAILURE: spank help message not in sbatch help message\n"
+	send_user "\nFAILURE: spank help message not in sbatch help message ($matches != 1)\n"
 	set exit_code 1
 }
 exec $bin_rm -f $file_in
@@ -224,19 +246,30 @@ exec $bin_rm -f $file_in
 # We update the plugstatck.conf in this script since NFS delays may
 # prevent it from having the same state as the submit host.
 #
+
+send_user "\n\nTest locally logged messages..........\n\n"
+
 make_bash_script $file_in "
-  $bin_cp $new_spank_conf $spank_conf_file
+  $bin_rm -f $spank_conf_file
+  $bin_cp -f $new_spank_conf $spank_conf_file
+  $bin_sleep 8
   $srun --test_suite=5 $bin_uname
   if test -f $orig_spank_conf
   then
-    $bin_cp $orig_spank_conf $spank_conf_file
+    $bin_rm -f $spank_conf_file
+    $bin_cp -f $orig_spank_conf $spank_conf_file
   fi
 "
+set job_id 0
 set matches 0
 spawn $sbatch --test_suite_reg=4 -N1 -t1 -o $file_out $file_in
 expect {
 	-re "_test_opt_process: test_suite: opt_arg=4" {
 		incr matches
+		exp_continue
+	}
+	-re "Submitted batch job ($number)" {
+		set job_id $expect_out(1,string)
 		exp_continue
 	}
 	-re "slurm_spank_exit: opt_arg=4" {
@@ -251,8 +284,21 @@ expect {
 		wait
 	}
 }
+if {$job_id == 0} {
+	send_user "\nFAILURE: batch submit failure\n"
+	set exit_code 1
+}
 if {$matches != 2} {
-	send_user "\nFAILURE: spank options not processed by sbatch\n"
+	send_user "\nFAILURE: spank options not processed by sbatch ($matches != 2)\n"
+	set exit_code 1
+}
+
+#
+# Wait for job to complete and check for files
+#
+if {[wait_for_job $job_id "DONE"] != 0} {
+	send_user "\nFAILURE: waiting for job to complete\n"
+	[cancel_job $job_id]
 	set exit_code 1
 }
 
@@ -285,8 +331,9 @@ if {[wait_for_file $file_out] == 0} {
 			wait
 		}
 	}
-	if {[expr $match1 + $match2 + $match3] != 3} {
-		send_user "\nFAILURE: local (srun) spank plugin failure\n"
+	set match [expr $match1 + $match2 + $match3]
+	if {$match != 3} {
+		send_user "\nFAILURE: local (srun) spank plugin failure ($match != 3)\n"
 		set exit_code 1
 	} else {
 		send_user "\nlocal (srun) spank plugin success\n"
@@ -336,13 +383,13 @@ if {[wait_for_file $spank_out] == 0} {
 		}
 	}
 	if {$matches_sbatch != 2} {
-		send_user "\nFAILURE: remote (slurmd) sbatch spank plugin failure ($matches_sbatch)\n"
+		send_user "\nFAILURE: remote (slurmd) sbatch spank plugin failure ($matches_sbatch != 2)\n"
 		set exit_code 1
 	} elseif {$matches_srun != 2} {
-		send_user "\nFAILURE: remote (slurmd) srun spank plugin failure ($matches_srun)\n"
+		send_user "\nFAILURE: remote (slurmd) srun spank plugin failure ($matches_srun != 2)\n"
 		set exit_code 1
 	} elseif {$matches != 4} {
-		send_user "\nFAILURE: remote (slurmd) spank plugin failure ($matches)\n"
+		send_user "\nFAILURE: remote (slurmd) spank plugin failure ($matches != 4)\n"
 		set exit_code 1
 	} else {
 		send_user "\n remote (slurmd) spank plugin success\n"
@@ -358,7 +405,7 @@ if {[wait_for_file $spank_out] == 0} {
 # Restore the original plugstack
 #
 if {[file exists $orig_spank_conf]} {
-	exec $bin_cp $orig_spank_conf $spank_conf_file
+	exec $bin_cp -f $orig_spank_conf $spank_conf_file
 } else {
 	exec $bin_rm -f $spank_conf_file
 }

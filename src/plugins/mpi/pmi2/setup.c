@@ -7,9 +7,10 @@
  *  Portions copyright (C) 2015 Mellanox Technologies Inc.
  *  Written by Artem Y. Polyakov <artemp@mellanox.com>.
  *  All rights reserved.
+ *  Portions copyright (C) 2017 SchedMD LLC.
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://slurm.schedmd.com/>.
+ *  For details, see <https://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -100,17 +101,29 @@ _setup_stepd_job_info(const stepd_step_rec_t *job, char ***env)
 
 	memset(&job_info, 0, sizeof(job_info));
 
-	job_info.jobid  = job->jobid;
-	job_info.stepid = job->stepid;
-	job_info.nnodes = job->nnodes;
-	job_info.nodeid = job->nodeid;
-	job_info.ntasks = job->ntasks;
-	job_info.ltasks = job->node_tasks;
-	job_info.gtids = xmalloc(job->node_tasks * sizeof(uint32_t));
-	for (i = 0; i < job->node_tasks; i ++) {
-		job_info.gtids[i] = job->task[i]->gtid;
+	if (job->pack_jobid && (job->pack_jobid != NO_VAL)) {
+		job_info.jobid  = job->pack_jobid;
+		job_info.stepid = job->stepid;
+		job_info.nnodes = job->pack_nnodes;
+		job_info.nodeid = job->nodeid + job->node_offset;
+		job_info.ntasks = job->pack_ntasks;
+		job_info.ltasks = job->node_tasks;
+		job_info.gtids = xmalloc(job_info.ltasks * sizeof(uint32_t));
+		for (i = 0; i < job_info.ltasks; i ++) {
+			job_info.gtids[i] = job->task[i]->gtid;
+		}
+	} else {
+		job_info.jobid  = job->jobid;
+		job_info.stepid = job->stepid;
+		job_info.nnodes = job->nnodes;
+		job_info.nodeid = job->nodeid;
+		job_info.ntasks = job->ntasks;
+		job_info.ltasks = job->node_tasks;
+		job_info.gtids = xmalloc(job_info.ltasks * sizeof(uint32_t));
+		for (i = 0; i < job_info.ltasks; i ++) {
+			job_info.gtids[i] = job->task[i]->gtid;
+		}
 	}
-	job_info.switch_job = (void*)job->switch_job;
 
 	p = getenvp(*env, PMI2_PMI_DEBUGGED_ENV);
 	if (p) {
@@ -272,7 +285,16 @@ _setup_stepd_sockets(const stepd_step_rec_t *job, char ***env)
 	}
 	sa.sun_family = PF_UNIX;
 
-	spool = slurm_get_slurmd_spooldir();
+	/* tree_sock_addr has to remain unformatted since the formatting
+	 * happens on the slurmd side */
+	spool = slurm_get_slurmd_spooldir(NULL);
+	snprintf(tree_sock_addr, sizeof(tree_sock_addr), PMI2_SOCK_ADDR_FMT,
+		 spool, job->jobid, job->stepid);
+	/* Make sure we adjust for the spool dir coming in on the address to
+	 * point to the right spot.
+	 */
+	xstrsubstitute(spool, "%n", job->node_name);
+	xstrsubstitute(spool, "%h", job->node_name);
 	snprintf(sa.sun_path, sizeof(sa.sun_path), PMI2_SOCK_ADDR_FMT,
 		 spool, job->jobid, job->stepid);
 	unlink(sa.sun_path);    /* remove possible old socket */
@@ -288,9 +310,6 @@ _setup_stepd_sockets(const stepd_step_rec_t *job, char ***env)
 		unlink(sa.sun_path);
 		return SLURM_ERROR;
 	}
-
-	/* remove the tree socket file on exit */
-	strncpy(tree_sock_addr, sa.sun_path, 128);
 
 	task_socks = xmalloc(2 * job->node_tasks * sizeof(int));
 	for (i = 0; i < job->node_tasks; i ++) {
@@ -542,8 +561,6 @@ _setup_srun_job_info(const mpi_plugin_client_info_t *job)
 	job_info.ntasks = job->step_layout->task_cnt;
 	job_info.ltasks = 0;	/* not used */
 	job_info.gtids = NULL;	/* not used */
-	job_info.switch_job = NULL; /* not used */
-
 
 	p = getenv(PMI2_PMI_DEBUGGED_ENV);
 	if (p) {
@@ -628,7 +645,9 @@ _setup_srun_tree_info(const mpi_plugin_client_info_t *job)
 	} else
 		tree_info.srun_addr = NULL;
 
-	spool = slurm_get_slurmd_spooldir();
+	/* FIXME: We need to handle %n and %h in the spool dir, but don't have
+	 * the node name here */
+	spool = slurm_get_slurmd_spooldir(NULL);
 	snprintf(tree_sock_addr, 128, PMI2_SOCK_ADDR_FMT,
 		 spool, job->jobid, job->stepid);
 	xfree(spool);
@@ -725,63 +744,43 @@ _task_launch_detection(void *unused)
 	return NULL;
 }
 
-static int
-_setup_srun_task_launch_detection(void)
-{
-	int retries = 0;
-	pthread_t tid;
-	pthread_attr_t attr;
-
-	pthread_attr_init(&attr);
-	pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_DETACHED);
-	while ((errno = pthread_create(&tid, &attr,
-				       &_task_launch_detection, NULL))) {
-		if (++retries > 5) {
-			error ("mpi/pmi2: pthread_create error %m");
-			slurm_attr_destroy(&attr);
-			return SLURM_ERROR;
-		}
-		sleep(1);
-	}
-	slurm_attr_destroy(&attr);
-	debug("mpi/pmi2: task launch detection thread (%lu) started",
-	      (unsigned long) tid);
-
-	return SLURM_SUCCESS;
-}
-
 extern int
 pmi2_setup_srun(const mpi_plugin_client_info_t *job, char ***env)
 {
-	int rc;
+	static pthread_mutex_t setup_mutex = PTHREAD_MUTEX_INITIALIZER;
+	static pthread_cond_t setup_cond  = PTHREAD_COND_INITIALIZER;
+	static int global_rc = NO_VAL16;
+	int rc = SLURM_SUCCESS;
 
 	run_in_stepd = false;
+	if ((job->pack_jobid == NO_VAL) || (job->pack_jobid == job->jobid)) {
+		rc = _setup_srun_job_info(job);
+		if (rc == SLURM_SUCCESS)
+			rc = _setup_srun_tree_info(job);
+		if (rc == SLURM_SUCCESS)
+			rc = _setup_srun_socket(job);
+		if (rc == SLURM_SUCCESS)
+			rc = _setup_srun_kvs(job);
+		if (rc == SLURM_SUCCESS)
+			rc = _setup_srun_environ(job, env);
+		if ((rc == SLURM_SUCCESS) && job_info.spawn_seq) {
+			slurm_thread_create_detached(NULL,
+						     _task_launch_detection,
+						     NULL);
+		}
+		slurm_mutex_lock(&setup_mutex);
+		global_rc = rc;
+		slurm_cond_broadcast(&setup_cond);
+		slurm_mutex_unlock(&setup_mutex);
+	} else {
+		slurm_mutex_lock(&setup_mutex);
+		while (global_rc == NO_VAL16)
+			slurm_cond_wait(&setup_cond, &setup_mutex);
+		rc = global_rc;
+		slurm_mutex_unlock(&setup_mutex);
+		if (rc == SLURM_SUCCESS)
+			rc = _setup_srun_environ(job, env);
+ 	}
 
-	rc = _setup_srun_job_info(job);
-	if (rc != SLURM_SUCCESS)
-		return rc;
-
-	rc = _setup_srun_tree_info(job);
-	if (rc != SLURM_SUCCESS)
-		return rc;
-
-	rc = _setup_srun_socket(job);
-	if (rc != SLURM_SUCCESS)
-		return rc;
-
-	rc = _setup_srun_kvs(job);
-	if (rc != SLURM_SUCCESS)
-		return rc;
-
-	rc = _setup_srun_environ(job, env);
-	if (rc != SLURM_SUCCESS)
-		return rc;
-
-	if (job_info.spawn_seq) {
-		rc = _setup_srun_task_launch_detection();
-		if (rc != SLURM_SUCCESS)
-			return rc;
-	}
-
-	return SLURM_SUCCESS;
+	return rc;
 }

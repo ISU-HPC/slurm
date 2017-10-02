@@ -2,12 +2,12 @@
  *  select_cons_res.h
  *****************************************************************************
  *  Copyright (C) 2006 Hewlett-Packard Development Company, L.P.
- *  Portions Copyright (C) 2010 SchedMD <http://www.schedmd.com>.
+ *  Portions Copyright (C) 2010 SchedMD <https://www.schedmd.com>.
  *  Written by Susanne M. Balle, <susanne.balle@hp.com>
  *  CODE-OCEC-09-009. All rights reserved.
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://slurm.schedmd.com/>.
+ *  For details, see <https://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -111,6 +111,7 @@ extern bool     preempt_by_part;
 extern bool     preempt_by_qos;
 extern uint64_t select_debug_flags;
 extern uint16_t select_fast_schedule;
+extern bool     spec_cores_first;
 extern bool     topo_optional;
 
 extern struct part_res_record *select_part_record;
@@ -119,5 +120,6 @@ extern struct node_use_record *select_node_usage;
 
 extern void cr_sort_part_rows(struct part_res_record *p_ptr);
 extern uint32_t cr_get_coremap_offset(uint32_t node_index);
+extern int cr_cpus_per_core(struct job_details *details, int node_inx);
 
 #endif /* !_CONS_RES_H */

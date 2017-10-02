@@ -8,7 +8,7 @@
  *  CODE-OCEC-09-009. All rights reserved.
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://slurm.schedmd.com/>.
+ *  For details, see <https://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -120,7 +120,7 @@ static gboolean _open_node(GtkWidget *widget, GdkEventButton *event,
 			   grid_button_t *grid_button)
 {
 	if (event->button == 1) {
-		popup_all_node_name(grid_button->node_name, INFO_PAGE);
+		popup_all_node_name(grid_button->node_name, INFO_PAGE, NULL);
 	} else if (event->button == 3) {
 		/* right click */
 		admin_menu_node_name(grid_button->node_name, event);
@@ -133,7 +133,7 @@ static void _open_block(GtkWidget *widget, GdkEventButton *event,
 			grid_button_t *grid_button)
 {
 	GError *error = NULL;
-	char title[100];
+	char title[100] = {0};
 	ListIterator itr = NULL;
 	popup_info_t *popup_win = NULL;
 
@@ -1067,9 +1067,9 @@ extern grid_button_t *create_grid_button_from_another(
 }
 
 /* start == -1 for all */
-extern char *change_grid_color(List button_list, int start, int end,
-			       int color_inx, bool only_change_unused,
-			       enum node_states state_override)
+extern void change_grid_color(List button_list, int start, int end,
+			      int color_inx, bool only_change_unused,
+			      enum node_states state_override)
 {
 	ListIterator itr = NULL;
 	grid_button_t *grid_button = NULL;
@@ -1077,7 +1077,7 @@ extern char *change_grid_color(List button_list, int start, int end,
 	char *new_col = NULL;
 
 	if (!button_list)
-		return NULL;
+		return;
 
 	if (color_inx >= 0) {
 		color_inx %= sview_colors_cnt;
@@ -1102,8 +1102,6 @@ extern char *change_grid_color(List button_list, int start, int end,
 				     color, only_change_unused, state_override);
 	}
 	list_iterator_destroy(itr);
-
-	return sview_colors[color_inx];
 }
 
 /* This variation of change_grid_color() is faster when changing many

@@ -4,17 +4,27 @@ AUTOMAKE_OPTIONS = foreign
 
 PLUGIN_FLAGS = -module -avoid-version --export-dynamic
 
-AM_CPPFLAGS = -I$(top_srcdir) -I$(top_srcdir)/src/common $(HWLOC_CPPFLAGS)
+AM_CPPFLAGS = -I$(top_srcdir) -I$(top_srcdir)/src/common $(HWLOC_CPPFLAGS) \
+	$(UCX_CPPFLAGS)
 
-pmix_src = mpi_pmix.c pmixp_agent.c pmixp_client.c pmixp_coll.c pmixp_nspaces.c pmixp_info.c \
-			pmixp_server.c pmixp_state.c pmixp_io.c pmixp_utils.c pmixp_dmdx.c \
-			pmixp_agent.h pmixp_client.h pmixp_coll.h pmixp_nspaces.h pmixp_info.h \
-			pmixp_server.h pmixp_state.h pmixp_io.h pmixp_utils.h pmixp_common.h pmixp_dmdx.h
+pmix_src = mpi_pmix.c \
+	pmixp_common.h \
+	pmixp_agent.c pmixp_client.c pmixp_coll.c pmixp_nspaces.c pmixp_info.c \
+	pmixp_agent.h pmixp_client.h pmixp_coll.h pmixp_nspaces.h pmixp_info.h \
+	pmixp_server.c pmixp_state.c pmixp_io.c pmixp_utils.c pmixp_dmdx.c \
+	pmixp_server.h pmixp_state.h pmixp_io.h pmixp_utils.h pmixp_dmdx.h \
+	pmixp_conn.c pmixp_dconn.c pmixp_dconn_tcp.c \
+	pmixp_conn.h pmixp_dconn.h pmixp_dconn_tcp.h
 
-pmix_internal_libs = $(top_builddir)/src/slurmd/common/libslurmd_reverse_tree_math.la
+if HAVE_UCX
+pmix_src += pmixp_dconn_ucx.c pmixp_dconn_ucx.h
+endif
 
-pmix_ldflags = $(SO_LDFLAGS) $(PLUGIN_FLAGS) $(HWLOC_LDFLAGS)
-pmix_libadd = $(pmix_internal_libs) $(PMIX_LIBS) $(HWLOC_LIBS)
+pmix_internal_libs = \
+	$(top_builddir)/src/slurmd/common/libslurmd_reverse_tree_math.la
+
+pmix_ldflags = $(PLUGIN_FLAGS) $(HWLOC_LDFLAGS) $(UCX_LDFLAGS)
+pmix_libadd = $(pmix_internal_libs) $(PMIX_LIBS) $(HWLOC_LIBS) $(UCX_LIBS)
 
 # pkglib_v#dir is needed in each one of the below because of the way we
 # use pkglib_v#_LTLIBRARIES even though it is the same for each one it still
@@ -57,8 +67,8 @@ $(pmix_internal_libs): force
 	@cd `dirname $@` && $(MAKE) `basename $@`
 
 install-exec-hook:
-	rm -rf $(pkglibdir)/mpi_pmix.so
-	$(LN_S) ./$(mpi_pmix_so)  $(pkglibdir)/mpi_pmix.so
+	rm -rf $(DESTDIR)$(pkglibdir)/mpi_pmix.so
+	$(LN_S) ./$(mpi_pmix_so)  $(DESTDIR)$(pkglibdir)/mpi_pmix.so
 
 uninstall-hook:
-	rm -rf $(pkglibdir)/mpi_pmix.so
+	rm -rf $(DESTDIR)$(pkglibdir)/mpi_pmix.so

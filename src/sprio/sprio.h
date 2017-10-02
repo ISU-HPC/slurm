@@ -7,7 +7,7 @@
  *  CODE-OCEC-09-009. All rights reserved.
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://slurm.schedmd.com/>.
+ *  For details, see <https://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -58,10 +58,13 @@
 #include "src/sprio/print.h"
 
 struct sprio_parameters {
+	bool federation;
 	bool job_flag;
+	bool local;
 	bool long_list;
 	bool no_header;
 	bool normalized;
+	bool sibling;
 	bool weights;
 
 	int  verbose;
@@ -70,6 +73,7 @@ struct sprio_parameters {
 
 	char* format;
 	char* jobs;
+	char* parts;
 	char* users;
 
 	List  format_list;
@@ -89,7 +93,7 @@ extern uint32_t weight_part; /* weight for Partition factor */
 extern uint32_t weight_qos; /* weight for QOS factor */
 extern char    *weight_tres; /* weight str TRES factors */
 
-extern void parse_command_line( int argc, char* argv[] );
+extern void parse_command_line( int argc, char* *argv );
 extern int  parse_format( char* format );
 
 #endif

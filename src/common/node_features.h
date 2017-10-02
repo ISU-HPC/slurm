@@ -6,7 +6,7 @@
  *  Written by Morris Jette <jette@schedmd.com>
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://slurm.schedmd.com/>.
+ *  For details, see <https://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -64,11 +64,14 @@ extern int node_features_g_job_valid(char *job_features);
  * RET node boot options, must be xfreed */
 extern char *node_features_g_job_xlate(char *job_features);
 
-/* Return true if the plugin requires RebootProgram for booting nodes */
-extern bool node_features_g_node_reboot(void);
-
 /* Return true if the plugin requires PowerSave mode for booting nodes */
 extern bool node_features_g_node_power(void);
+
+/* Set's the node's active features based upon job constraints.
+ * NOTE: Executed by the slurmd daemon.
+ * IN active_features - New active features
+ * RET error code */
+extern int node_features_g_node_set(char *active_features);
 
 /* Get this node's current and available MCDRAM and NUMA settings from BIOS.
  * avail_modes IN/OUT - available modes, must be xfreed
@@ -84,17 +87,29 @@ extern int node_features_g_node_update(char *active_features,
 				       bitstr_t *node_bitmap);
 
 /* Translate a node's feature specification by replacing any features associated
- * with this plugin in the original value with the new values, preserving any
- * features that are not associated with this plugin
- * IN new_features - newly specific features (active or available)
- * IN orig_features - original features (active or available)
- * IN mode - 1=registration, 2=update
+ *	with this plugin in the original value with the new values, preserving
+ *	andy features that are not associated with this plugin
+ * IN new_features - newly active features
+ * IN orig_features - original active features
+ * IN avail_features - original available features
  * RET node's new merged features, must be xfreed */
-extern char *node_features_g_node_xlate(char *new_features,char *orig_features,
-					int mode);
+extern char *node_features_g_node_xlate(char *new_features, char *orig_features,
+					char *avail_features);
+
+/* Translate a node's new feature specification into a "standard" ordering
+ * RET node's new merged features, must be xfreed */
+extern char *node_features_g_node_xlate2(char *new_features);
+
+/* Perform set up for step launch
+ * mem_sort IN - Trigger sort of memory pages (KNL zonesort)
+ * numa_bitmap IN - NUMA nodes allocated to this job */
+extern void node_features_g_step_config(bool mem_sort, bitstr_t *numa_bitmap);
 
 /* Determine if the specified user can modify the currently available node
  * features */
 extern bool node_features_g_user_update(uid_t uid);
+
+/* Return estimated reboot time, in seconds */
+extern uint32_t node_features_g_boot_time(void);
 
 #endif /* !_NODE_FEATURES_H */

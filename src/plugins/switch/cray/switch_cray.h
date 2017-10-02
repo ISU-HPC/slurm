@@ -6,7 +6,7 @@
  *  Written by Danny Auble <da@schedmd.com>
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://slurm.schedmd.com/>.
+ *  For details, see <https://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -64,7 +64,7 @@
  * path that does not vary regardless of where Slurm is installed.
  */
 #ifndef LEGACY_SPOOL_DIR
-#define LEGACY_SPOOL_DIR	"/var/spool/alps/"
+#define LEGACY_SPOOL_DIR	"/var/opt/cray/alps/spool/"
 #endif
 
 // Magic value signifying that jobinfo wasn't NULL
@@ -150,9 +150,9 @@ extern int list_str_to_array(char *list, int *cnt, int32_t **numbers);
 extern void alpsc_debug(const char *file, int line, const char *func,
 			int rc, int expected_rc, const char *alpsc_func,
 			char **err_msg);
+extern int remove_spool_files(uint64_t apid);
 extern int create_apid_dir(uint64_t apid, uid_t uid, gid_t gid);
 extern int set_job_env(stepd_step_rec_t *job, slurm_cray_jobinfo_t *sw_job);
-extern void recursive_rmdir(const char *dirnm);
 
 extern void print_jobinfo(slurm_cray_jobinfo_t *job);
 

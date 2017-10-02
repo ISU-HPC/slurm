@@ -7,7 +7,7 @@
  *  CODE-OCEC-09-009. All rights reserved.
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://slurm.schedmd.com/>.
+ *  For details, see <https://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -200,23 +200,5 @@ extern void slurm_pack_slurm_addr ( slurm_addr_t * slurm_address ,
  */
 extern int slurm_unpack_slurm_addr_no_alloc (
 	slurm_addr_t * slurm_address , Buf buffer ) ;
-
-
-/*******************************\
- ** BSD LINUX SOCKET FUNCTIONS  **
- \*******************************/
-
-/* Put the address of the peer connected to socket FD into *ADDR
- * (which is *LEN bytes long), and its actual length into *LEN.  */
-extern int slurm_getpeername (int __fd, struct sockaddr * __addr,
-			      socklen_t *__restrict __len) ;
-
-/* Set socket FD's option OPTNAME at protocol level LEVEL
- * to *OPTVAL (which is OPTLEN bytes long).
- * Returns 0 on success, -1 for errors.  */
-extern int slurm_setsockopt (int __fd, int __level, int __optname,
-			     __const void *__optval, socklen_t __optlen) ;
-
-extern int slurm_close (int __fd ) ;
 
 #endif /* !_SLURM_PROTOCOL_INTERFACE_H */

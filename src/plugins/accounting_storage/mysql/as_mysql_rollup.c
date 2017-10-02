@@ -9,7 +9,7 @@
  *  CODE-OCEC-09-009. All rights reserved.
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://slurm.schedmd.com/>.
+ *  For details, see <https://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -176,7 +176,10 @@ static local_tres_usage_t *_add_time_tres(List tres_list, int type, uint32_t id,
 {
 	local_tres_usage_t *loc_tres;
 
-	if (!time)
+	/* Energy TRES could have a NO_VAL64, we want to skip those as it is the
+	 * same as a 0 since nothing was gathered.
+	 */
+	if (!time || (time == NO_VAL64))
 		return NULL;
 
 	loc_tres = list_find_first(tres_list, _find_loc_tres, &id);
@@ -310,7 +313,7 @@ static void _add_tres_2_list(List tres_list, char *tres_str, int seconds)
 /* This will destroy the *loc_tres given after it is transfered */
 static void _transfer_loc_tres(List *loc_tres, local_id_usage_t *usage)
 {
-	if (!usage) {
+	if (!usage || !*loc_tres || !list_count(*loc_tres)) {
 		FREE_NULL_LIST(*loc_tres);
 		return;
 	}
@@ -363,10 +366,16 @@ static void _add_tres_time_2_list(List tres_list, char *tres_str,
 				loc_seconds = 0;
 		}
 
-		count = slurm_atoull(++tmp_str);
-		time = count * loc_seconds;
+		time = count = slurm_atoull(++tmp_str);
+		/* ENERGY is already totalled for the entire job so don't
+		 * multiple with time.
+		 */
+		if (id != TRES_ENERGY)
+			time *= loc_seconds;
+
 		loc_tres = _add_time_tres(tres_list, type, id,
 					  time, times_count);
+
 		if (loc_tres && !loc_tres->count)
 			loc_tres->count = count;
 
@@ -423,6 +432,14 @@ static int _process_purge(mysql_conn_t *mysql_conn,
 		arch_cond.purge_suspend = slurmdbd_conf->purge_suspend;
 	else
 		arch_cond.purge_suspend = NO_VAL;
+	if (purge_period & slurmdbd_conf->purge_txn)
+		arch_cond.purge_txn = slurmdbd_conf->purge_txn;
+	else
+		arch_cond.purge_txn = NO_VAL;
+	if (purge_period & slurmdbd_conf->purge_usage)
+		arch_cond.purge_usage = slurmdbd_conf->purge_usage;
+	else
+		arch_cond.purge_usage = NO_VAL;
 
 	job_cond.cluster_list = list_create(NULL);
 	list_append(job_cond.cluster_list, cluster_name);
@@ -919,8 +936,7 @@ extern int as_mysql_hourly_rollup(mysql_conn_t *mysql_conn,
 		"job.time_suspended",
 		"job.cpus_req",
 		"job.id_resv",
-		"job.tres_alloc",
-		"SUM(step.consumed_energy)"
+		"job.tres_alloc"
 	};
 	char *job_str = NULL;
 	enum {
@@ -936,7 +952,6 @@ extern int as_mysql_hourly_rollup(mysql_conn_t *mysql_conn,
 		JOB_REQ_RCPU,
 		JOB_REQ_RESVID,
 		JOB_REQ_TRES,
-		JOB_REQ_ENERGY,
 		JOB_REQ_COUNT
 	};
 
@@ -1123,9 +1138,6 @@ extern int as_mysql_hourly_rollup(mysql_conn_t *mysql_conn,
 
 		/* now get the jobs during this time only  */
 		query = xstrdup_printf("select %s from \"%s_%s\" as job "
-				       "left outer join \"%s_%s\" as step on "
-				       "job.job_db_inx=step.job_db_inx "
-				       "and (step.id_step>=0) "
 				       "where (job.time_eligible && "
 				       "job.time_eligible < %ld && "
 				       "(job.time_end >= %ld || "
@@ -1134,7 +1146,6 @@ extern int as_mysql_hourly_rollup(mysql_conn_t *mysql_conn,
 				       "order by job.id_assoc, "
 				       "job.time_eligible",
 				       job_str, cluster_name, job_table,
-				       cluster_name, step_table,
 				       curr_end, curr_start);
 
 		if (debug_flags & DEBUG_FLAG_DB_USAGE)
@@ -1158,12 +1169,9 @@ extern int as_mysql_hourly_rollup(mysql_conn_t *mysql_conn,
 			time_t row_end = slurm_atoul(row[JOB_REQ_END]);
 			uint32_t row_rcpu = slurm_atoul(row[JOB_REQ_RCPU]);
 			List loc_tres = NULL;
-			uint64_t row_energy = 0;
 			int loc_seconds = 0;
 			int seconds = 0, suspend_seconds = 0;
 
-			if (row[JOB_REQ_ENERGY])
-				row_energy = slurm_atoull(row[JOB_REQ_ENERGY]);
 			if (row_start && (row_start < curr_start))
 				row_start = curr_start;
 
@@ -1199,6 +1207,7 @@ extern int as_mysql_hourly_rollup(mysql_conn_t *mysql_conn,
 					      mysql_conn,
 					      query, 0))) {
 					rc = SLURM_ERROR;
+					mysql_free_result(result);
 					goto end_it;
 				}
 				xfree(query);
@@ -1274,15 +1283,6 @@ extern int as_mysql_hourly_rollup(mysql_conn_t *mysql_conn,
 						      row[JOB_REQ_TRES],
 						      TIME_ALLOC, seconds,
 						      suspend_seconds, 0);
-
-			_add_time_tres(loc_tres,
-				       TIME_ALLOC, TRES_ENERGY,
-				       row_energy, 0);
-			if (w_usage)
-				_add_time_tres(
-					w_usage->loc_tres,
-					TIME_ALLOC, TRES_ENERGY,
-					row_energy, 0);
 
 			/* Now figure out there was a disconnected
 			   slurmctld durning this job.

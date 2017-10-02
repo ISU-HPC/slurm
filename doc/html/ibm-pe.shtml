@@ -70,9 +70,15 @@ SLURM_NETWORK environment variable. Supported network options include:</p>
   <li><b>lapi</b> Low-level Application Programming Interface</li>
   <li><b>mpi</b> Message Passing Interface (default)</li>
   <li><b>pami</b> Parallel Active Message Interface</li>
+  <li><b>pgas</b> Partitioned Global Address Programming</li>
   <li><b>shmem</b> OpenSHMEM interface</li>
+  <li><b>test</b> Test Protocol</li>
   <li><b>upc</b> Unified Parallel C Interface</li>
+  <br>
+  <b>NOTE:</b> Slurm supports the values listed above, and does not
+    support poe user_defined_parallelAPI values.
   </ul>
+
 <li>Other options</li>
   <ul>
   <li><b>bulk_xfer [=<i>resources</i>]</b>
@@ -165,28 +171,7 @@ set even if the command is executed from within an existing Slurm allocation
 
 <h3>Checkpoint</h3>
 
-<p>Checkpoint/restart is only supported with LoadLeveler.
-The <b>checkpoint/poe</b> plugin is based Slurm support for checkpoint support
-of poe in in the 2005 time frame and does not work with the current versions
-of poe.</p>
-
-<!--
-<p>In order to enable checkpoint, the shell executing the poe command must
-itself be initiated with the environment variable <b>CHECKPOINT=yes</b>.
-One file is written for each node on which the job is executing, plus
-another for the script executing poe.
-By default, the checkpoint files will be written to the current working
-directory of the job.
-Names and locations of these files can be controlled using the
-environment variables <b>MP_CKPTFILE</b> and <b>MP_CKPTDIR</b>.
-Use the squeue command to identify the job and job step of interest.
-To initiate a checkpoint in which the job step will continue execution,
-use the command: <br>
-<b>scontrol check create <i>job_id.step_id</i></b><br>
-To initiate a checkpoint in which the job step will terminate afterwards,
-use the command: <br>
-<b>scontrol check vacate <i>job_id.step_id</i></b></p>
--->
+<p>Checkpoint/restart is only supported with LoadLeveler.</p>
 
 <h3>Unsupported Options</h3>
 
@@ -356,7 +341,7 @@ instead of the users tasks.  The exit code of the job allocation if
 started with srun will be correct as we will grab the exit code from
 the wrapped poe.</p>
 
-<p>Use of the srun command rather than the poe command is recommeded to launch
+<p>Use of the srun command rather than the poe command is recommended to launch
 tasks. If the poe command is used with a hostlist file (e.g. "-hfile" option or
 "MP_HOSTFILE" environment variable or a "host.list" file in the current working
 directory), the resd option must be set to yes (e.g. "-resd yes" option or

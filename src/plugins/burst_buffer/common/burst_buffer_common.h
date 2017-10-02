@@ -11,7 +11,7 @@
  *  Written by Morris Jette <jette@schedmd.com>
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://slurm.schedmd.com/>.
+ *  For details, see <https://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -204,7 +204,9 @@ typedef struct bb_state {
 	uint64_t	total_space;	/* units are bytes */
 	int		tres_id;	/* TRES ID, for limits */
 	int		tres_pos;	/* TRES index, for limits */
-	uint64_t	used_space;	/* units are bytes */
+	uint64_t	used_space;	/* Allocated space, in bytes */
+	uint64_t	unfree_space;	/* Includes alloc_space (above) plus
+					 * drained, units are bytes */
 } bb_state_t;
 
 /* Allocate burst buffer hash tables */
@@ -308,9 +310,6 @@ extern int bb_pack_usage(uid_t uid, bb_state_t *state_ptr, Buf buffer,
 /* Sort preempt_bb_recs in order of DECREASING use_time */
 extern int bb_preempt_queue_sort(void *x, void *y);
 
-/* Return count of child processes */
-extern int bb_proc_count(void);
-
 /* Set the bb_state's tres_pos for limit enforcement.
  * Value is set to -1 if not found. */
 extern void bb_set_tres_pos(bb_state_t *state_ptr);
@@ -319,26 +318,17 @@ extern void bb_set_tres_pos(bb_state_t *state_ptr);
  * use is expected to begin (i.e. each job's expected start time) */
 extern void bb_set_use_time(bb_state_t *state_ptr);
 
-/* Terminate any child processes */
-extern void bb_shutdown(void);
-
 /* Sleep function, also handles termination signal */
 extern void bb_sleep(bb_state_t *state_ptr, int add_secs);
 
-/* Execute a script, wait for termination and return its stdout.
- * script_type IN - Type of program being run (e.g. "StartStageIn")
- * script_path IN - Fully qualified pathname of the program to execute
- * script_args IN - Arguments to the script
- * max_wait IN - Maximum time to wait in milliseconds,
- *		 -1 for no limit (asynchronous)
- * status OUT - Job exit code
- * Return stdout+stderr of spawned program, value must be xfreed. */
-extern char *bb_run_script(char *script_type, char *script_path,
-			   char **script_argv, int max_wait, int *status);
-
-/* Make claim against resource limit for a user */
+/* Make claim against resource limit for a user
+ * user_id IN - Owner of burst buffer
+ * bb_size IN - Size of burst buffer
+ * pool IN - Pool containing the burst buffer
+ * state_ptr IN - Global state to update
+ * update_pool_unfree IN - If true, update the pool's unfree space */
 extern void bb_limit_add(uint32_t user_id, uint64_t bb_size, char *pool,
-			 bb_state_t *state_ptr);
+			 bb_state_t *state_ptr, bool update_pool_unfree);
 
 /* Release claim against resource limit for a user */
 extern void bb_limit_rem(uint32_t user_id, uint64_t bb_size, char *pool,

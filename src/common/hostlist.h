@@ -7,7 +7,7 @@
  *  CODE-OCEC-09-009. All rights reserved.
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://slurm.schedmd.com/>.
+ *  For details, see <https://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -223,7 +223,10 @@ int hostlist_push_list(hostlist_t hl1, hostlist_t hl2);
  */
 char * hostlist_pop(hostlist_t hl);
 
-
+/*
+ * Return n-th element from hostlist
+ * Release memory using free()
+ */
 char * hostlist_nth(hostlist_t hl, int n);
 
 /* hostlist_shift():
@@ -547,6 +550,10 @@ int hostset_count(hostset_t set);
  */
 int hostset_find(hostset_t set, const char *hostname);
 
+/*
+ * Return n-th element from hostset
+ * Release memory using free()
+ */
 char * hostset_nth(hostset_t set, int n);
 
 /* hostset_ranged_string():

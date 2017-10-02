@@ -10,7 +10,7 @@
  *  CODE-OCEC-09-009. All rights reserved.
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://slurm.schedmd.com/>.
+ *  For details, see <https://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -97,6 +97,21 @@ static char *keyvalue_pattern =
 					    * or unquoted and no whitespace */
 	"([[:space:]]|$)";
 static bool keyvalue_initialized = false;
+
+/* The following mutex and atfork() handler protect against receiving
+ * a corrupted keyvalue_re state in a forked() child. While regexec() itself
+ * appears to be thread-safe (due to internal locking), a process fork()'d
+ * while a regexec() is running in a separate thread will inherit an internally
+ * locked keyvalue_re leading to deadlock. This appears to have been fixed in
+ * glibc with a release in 2013, although I do not know the exact version.
+ */
+static pthread_mutex_t s_p_lock = PTHREAD_MUTEX_INITIALIZER;
+
+static void _s_p_atfork_child(void)
+{
+	slurm_mutex_init(&s_p_lock);
+	keyvalue_initialized = false;
+}
 
 struct s_p_values {
 	char *key;
@@ -275,18 +290,32 @@ void s_p_hashtbl_destroy(s_p_hashtbl_t *hashtbl) {
 		}
 	}
 	xfree(hashtbl);
+
+	/*
+	 * Now clear the global variables to free their memory as well.
+	 */
+	slurm_mutex_lock(&s_p_lock);
+	if (keyvalue_initialized) {
+		regfree(&keyvalue_re);
+		keyvalue_initialized = false;
+	}
+	slurm_mutex_unlock(&s_p_lock);
+
 }
 
 static void _keyvalue_regex_init(void)
 {
+	slurm_mutex_lock(&s_p_lock);
 	if (!keyvalue_initialized) {
 		if (regcomp(&keyvalue_re, keyvalue_pattern,
 			    REG_EXTENDED) != 0) {
 			/* FIXME - should be fatal? */
 			error("keyvalue regex compilation failed");
 		}
+		pthread_atfork(NULL, NULL, _s_p_atfork_child);
 		keyvalue_initialized = true;
 	}
+	slurm_mutex_unlock(&s_p_lock);
 }
 
 /*
@@ -1073,57 +1102,6 @@ static char *_parse_for_format(s_p_hashtbl_t *f_hashtbl, char *path)
 				break;
 			}
 			xstrtolower(tmp_str);
-
-#if 0
-	char hostname[BUFFER_SIZE] = "";
-	char ip_str[BUFFER_SIZE] = "";
-	slurm_addr_t ip_addr;
-	char *ip, *port;
-
-/* Disable modifiers for hostname and IP address as doing offers little benefit,
- * but provides ample opportunity for failures due to bad configurations which
- * would be very difficult to diagnose.
- */
-		} else if ((format = strstr(filename, "%h"))) { /* Hostname */
-			if (gethostname_short(hostname, sizeof(hostname))) {
-				error("%s: Did not get hostname for include "
-				      "path", __func__);
-				xfree(filename);
-				break;
-			}
-			tmp_str = hostname;
-
-		} else if ((format = strstr(filename, "%i"))) { /* IP Address */
-			if (gethostname(hostname, sizeof(hostname))) {
-				error("%s: Did not get IP address for include "
-				      "path", __func__);
-				xfree(filename);
-				break;
-			}
-			_slurm_set_addr_char(&ip_addr, 0, hostname);
-			_slurm_print_slurm_addr(&ip_addr, ip_str,
-						sizeof(ip_str));
-			if (!xstrncmp(ip_str, "127.0.0.1", 9) ||
-			    !xstrncmp(ip_str, "127.0.1.1", 9)) {
-				/* Got address for loopback */
-				error("%s: Could not get unique IP address for "
-				      "include path (hostname=%s)",
-				      __func__, hostname);
-				xfree(filename);
-				break;
-			}
-			ip = strrchr(ip_str, '.');
-			port = strstr(ip, ":");
-			if (!ip || !port) {
-				error("%s: Did not get IP address for include "
-				      "path (hostname=%s)", __func__, hostname);
-				xfree(filename);
-				break;
-			}
-			port[0] = '\0';	/* Exclude the port number */
-			tmp_str = ip + 1;
-#endif
-
 		} else {	/* No special characters */
 			break;
 		}

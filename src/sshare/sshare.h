@@ -8,7 +8,7 @@
  *  CODE-OCEC-09-009. All rights reserved.
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://slurm.schedmd.com/>.
+ *  For details, see <https://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -96,7 +96,8 @@ enum {
 	PRINT_RAWU,
 	PRINT_RUNMINS,
 	PRINT_USER,
-	PRINT_LEVELFS
+	PRINT_LEVELFS,
+	PRINT_GRPTRESRAW
 };
 
 extern int exit_code;	/* sshare's exit code, =1 on any error at any time */

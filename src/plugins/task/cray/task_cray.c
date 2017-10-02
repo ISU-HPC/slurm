@@ -6,7 +6,7 @@
  *  Copyright 2013 Cray Inc. All Rights Reserved.
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://slurm.schedmd.com/>.
+ *  For details, see <https://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -159,6 +159,16 @@ static int track_status = 1;
 extern int init (void)
 {
 	debug("%s loaded.", plugin_name);
+
+	char *task_plugin = slurm_get_task_plugin();
+	char *task_cgroup = strstr(task_plugin, "cgroup");
+	char *task_cray = strstr(task_plugin, "cray");
+
+	if (!task_cgroup || !task_cray || task_cgroup < task_cray)
+		fatal("task/cgroup must be used with, and listed after, "
+		      "task/cray in TaskPlugin");
+
+	xfree(task_plugin);
 
 #ifdef HAVE_NATIVE_CRAY
 	int rc;
@@ -314,8 +324,8 @@ extern int task_p_pre_launch (stepd_step_rec_t *job)
 
 	START_TIMER;
 	apid = SLURM_ID_HASH(job->jobid, job->stepid);
-	debug("task_p_pre_launch: %u.%u, apid %"PRIu64", task %d",
-	      job->jobid, job->stepid, apid, job->envtp->procid);
+	debug2("task_p_pre_launch: %u.%u, apid %"PRIu64", task %d",
+	       job->jobid, job->stepid, apid, job->envtp->procid);
 
 	/*
 	 * Send the rank to the application's PMI layer via an environment
@@ -369,7 +379,7 @@ extern int task_p_pre_launch (stepd_step_rec_t *job)
  * task_p_pre_launch_priv() is called prior to exec of application task.
  * in privileged mode, just after slurm_spank_task_init_privileged
  */
-extern int task_p_pre_launch_priv (stepd_step_rec_t *job)
+extern int task_p_pre_launch_priv(stepd_step_rec_t *job, pid_t pid)
 {
 	int rc = SLURM_SUCCESS;
 	DEF_TIMERS;
@@ -405,7 +415,7 @@ extern int task_p_post_term (stepd_step_rec_t *job,
 
 #ifdef HAVE_NATIVE_CRAY
 	debug("task_p_post_term: %u.%u, task %d",
-	      job->jobid, job->stepid, job->envtp->procid);
+	      job->jobid, job->stepid, task->id);
 
 	if (track_status) {
 		rc = _check_status_file(job, task);
@@ -434,9 +444,9 @@ extern int task_p_post_step (stepd_step_rec_t *job)
 	START_TIMER;
 
 	if (track_status) {
+		uint64_t apid = SLURM_ID_HASH(job->jobid, job->stepid);
 		// Get the lli file name
-		snprintf(llifile, sizeof(llifile), LLI_STATUS_FILE,
-			 SLURM_ID_HASH(job->jobid, job->stepid));
+		snprintf(llifile, sizeof(llifile), LLI_STATUS_FILE, apid);
 
 		// Unlink the file
 		errno = 0;
@@ -444,7 +454,19 @@ extern int task_p_post_step (stepd_step_rec_t *job)
 		if (rc == -1 && errno != ENOENT) {
 			CRAY_ERR("unlink(%s) failed: %m", llifile);
 		} else if (rc == 0) {
-			info("Unlinked %s", llifile);
+			debug("Unlinked %s", llifile);
+		}
+
+		// Unlink the backwards compatibility symlink
+		if (apid != SLURM_ID_HASH_LEGACY(apid)) {
+			snprintf(llifile, sizeof(llifile), LLI_STATUS_FILE,
+				 SLURM_ID_HASH_LEGACY(apid));
+			rc = unlink(llifile);
+			if (rc == -1 && errno != ENOENT) {
+				CRAY_ERR("unlink(%s) failed: %m", llifile);
+			} else if (rc == 0) {
+				debug("Unlinked %s", llifile);
+			}
 		}
 	}
 
@@ -500,13 +522,16 @@ extern int task_p_post_step (stepd_step_rec_t *job)
 
 	rc = _get_numa_nodes(path, &cnt, &numa_nodes);
 	if (rc < 0) {
-		CRAY_ERR("get_numa_nodes failed. Return code: %d", rc);
+		/* Failure common due to race condition in releasing cgroups */
+		debug("%s: _get_numa_nodes failed. Return code: %d",
+		      __func__, rc);
 		return SLURM_ERROR;
 	}
 
 	rc = _get_cpu_masks(cnt, numa_nodes, &cpuMasks);
 	if (rc < 0) {
-		CRAY_ERR("get_cpu_masks failed. Return code: %d", rc);
+		CRAY_ERR("_get_cpu_masks failed. Return code: %d", rc);
+		xfree(numa_nodes);
 		return SLURM_ERROR;
 	}
 
@@ -521,9 +546,8 @@ extern int task_p_post_step (stepd_step_rec_t *job)
 	xfree(numa_nodes);
 	xfree(cpuMasks);
 
-	if (rc != 1) {
+	if (rc != 1)
 		return SLURM_ERROR;
-	}
 	END_TIMER;
 	if (debug_flags & DEBUG_FLAG_TIME_CRAY)
 		INFO_LINE("call took: %s", TIME_STR);
@@ -559,11 +583,12 @@ static void _alpsc_debug(const char *file, int line, const char *func,
 static int _make_status_file(stepd_step_rec_t *job)
 {
 	char llifile[LLI_STATUS_FILE_BUF_SIZE];
+	char oldllifile[LLI_STATUS_FILE_BUF_SIZE];
 	int rv, fd;
+	uint64_t apid = SLURM_ID_HASH(job->jobid, job->stepid);
 
 	// Get the lli file name
-	snprintf(llifile, sizeof(llifile), LLI_STATUS_FILE,
-		 SLURM_ID_HASH(job->jobid, job->stepid));
+	snprintf(llifile, sizeof(llifile), LLI_STATUS_FILE, apid);
 
 	// Make the file
 	errno = 0;
@@ -592,9 +617,21 @@ static int _make_status_file(stepd_step_rec_t *job)
 		TEMP_FAILURE_RETRY(close(fd));
 		return SLURM_ERROR;
 	}
-	info("Created file %s", llifile);
+	debug("Created file %s", llifile);
 
 	TEMP_FAILURE_RETRY(close(fd));
+
+	// Create a backwards compatibility link
+	if (apid != SLURM_ID_HASH_LEGACY(apid)) {
+		snprintf(oldllifile, sizeof(oldllifile), LLI_STATUS_FILE,
+			 SLURM_ID_HASH_LEGACY(apid));
+		rv = symlink(llifile, oldllifile);
+		if (rv == -1) {
+			CRAY_ERR("symlink(%s, %s) failed: %m",
+				 llifile, oldllifile);
+			return SLURM_ERROR;
+		}
+	}
 	return SLURM_SUCCESS;
 }
 
@@ -608,9 +645,6 @@ static int _check_status_file(stepd_step_rec_t *job,
 	char llifile[LLI_STATUS_FILE_BUF_SIZE];
 	char status;
 	int rv, fd;
-
-	debug("task_p_post_term: %u.%u, task %d",
-	      job->jobid, job->stepid, job->envtp->procid);
 
 	// We only need to special case termination with exit(0)
 	// srun already handles abnormal exit conditions fine
@@ -646,7 +680,7 @@ static int _check_status_file(stepd_step_rec_t *job,
 	}
 
 	// Seek to the correct offset
-	rv = lseek(fd, job->envtp->localid + 1, SEEK_SET);
+	rv = lseek(fd, task->id + 1, SEEK_SET);
 	if (rv == -1) {
 		CRAY_ERR("lseek failed: %m");
 		TEMP_FAILURE_RETRY(close(fd));
@@ -703,14 +737,14 @@ static int _get_numa_nodes(char *path, int *cnt, int32_t **numa_array) {
 	char *lin = NULL;
 
 	rc = snprintf(buffer, sizeof(buffer), "%s/%s", path, "mems");
-	if (rc < 0) {
+	if (rc < 0)
 		CRAY_ERR("snprintf failed. Return code: %d", rc);
-	}
 
 	f = fopen(buffer, "r");
-	if (f == NULL ) {
-		CRAY_ERR("Failed to open file %s: %m", buffer);
-		return -1;
+	if (f == NULL) {
+		/* Failure common due to race condition in releasing cgroups */
+		debug("%s: Failed to open file %s: %m", __func__, buffer);
+		return SLURM_ERROR;
 	}
 
 	lsz = getline(&lin, &sz, f);
@@ -719,14 +753,14 @@ static int _get_numa_nodes(char *path, int *cnt, int32_t **numa_array) {
 			lin[strlen(lin) - 1] = '\0';
 		}
 		bm = numa_parse_nodestring(lin);
-		if (bm == NULL ) {
+		if (bm == NULL) {
 			CRAY_ERR("Error numa_parse_nodestring:"
 				 " Invalid node string: %s", lin);
 			free(lin);
 			return SLURM_ERROR;
 		}
 	} else {
-		CRAY_ERR("Reading %s failed", buffer);
+		debug("%s: Reading %s failed", __func__, buffer);
 		return SLURM_ERROR;
 	}
 	free(lin);
@@ -1049,6 +1083,7 @@ static int _step_epilogue(void)
 	}
 	return SLURM_SUCCESS;
 }
+#endif
 
 /*
  * Keep track a of a pid.
@@ -1057,5 +1092,3 @@ extern int task_p_add_pid (pid_t pid)
 {
 	return SLURM_SUCCESS;
 }
-
-#endif

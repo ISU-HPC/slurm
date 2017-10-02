@@ -7,7 +7,7 @@
  *  CODE-OCEC-09-009. All rights reserved.
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://slurm.schedmd.com/>.
+ *  For details, see <https://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -1593,7 +1593,8 @@ extern int adapt_layouts(job_resources_t *job_resrcs_ptr, uint32_t cpu_freq_max,
 							  "power",
 							  ename,
 							  "CurrentCorePower",
-							  &zero, L_T_UINT32);		
+							  &zero,
+							  L_T_UINT32);		
 					layouts_entity_get_kv("power",
 							  ename,
 							  "CurrentCorePower",
@@ -1612,6 +1613,7 @@ extern int adapt_layouts(job_resources_t *job_resrcs_ptr, uint32_t cpu_freq_max,
 						  L_T_UINT32);	
 		}
 	}
+	xfree(desalloc_cores);
 
 	return 1;
 }

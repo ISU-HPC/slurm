@@ -7,7 +7,7 @@
  *  CODE-OCEC-09-009. All rights reserved.
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://slurm.schedmd.com/>.
+ *  For details, see <https://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -208,7 +208,7 @@ static bool _use_local_device_index(void)
 		return use_local_index;
 
 	/* Read and parse cgroup.conf */
-	bzero(&slurm_cgroup_conf, sizeof(slurm_cgroup_conf_t));
+	memset(&slurm_cgroup_conf, 0, sizeof(slurm_cgroup_conf_t));
 	if (read_slurm_cgroup_conf(&slurm_cgroup_conf) != SLURM_SUCCESS)
 		return use_local_index;
 	if (slurm_cgroup_conf.constrain_devices)
@@ -222,7 +222,7 @@ static bool _use_local_device_index(void)
  * Set environment variables as appropriate for a job (i.e. all tasks) based
  * upon the job's GRES state.
  */
-extern void job_set_env(char ***job_env_ptr, void *gres_ptr)
+extern void job_set_env(char ***job_env_ptr, void *gres_ptr, int node_inx)
 {
 	int i, len, local_inx = 0;
 	char *dev_list = NULL;
@@ -230,12 +230,12 @@ extern void job_set_env(char ***job_env_ptr, void *gres_ptr)
 	bool use_local_dev_index = _use_local_device_index();
 
 	if ((gres_job_ptr != NULL) &&
-	    (gres_job_ptr->node_cnt == 1) &&
+	    (node_inx >= 0) && (node_inx < gres_job_ptr->node_cnt) &&
 	    (gres_job_ptr->gres_bit_alloc != NULL) &&
-	    (gres_job_ptr->gres_bit_alloc[0] != NULL)) {
-		len = bit_size(gres_job_ptr->gres_bit_alloc[0]);
+	    (gres_job_ptr->gres_bit_alloc[node_inx] != NULL)) {
+		len = bit_size(gres_job_ptr->gres_bit_alloc[node_inx]);
 		for (i = 0; i < len; i++) {
-			if (!bit_test(gres_job_ptr->gres_bit_alloc[0], i))
+			if (!bit_test(gres_job_ptr->gres_bit_alloc[node_inx],i))
 				continue;
 			if (!dev_list)
 				dev_list = xmalloc(128);

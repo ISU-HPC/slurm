@@ -2,11 +2,11 @@
  **  pmix_agent.c - PMIx agent thread
  *****************************************************************************
  *  Copyright (C) 2014-2015 Artem Polyakov. All rights reserved.
- *  Copyright (C) 2015      Mellanox Technologies. All rights reserved.
+ *  Copyright (C) 2015-2017 Mellanox Technologies. All rights reserved.
  *  Written by Artem Y. Polyakov <artpol84@gmail.com, artemp@mellanox.com>.
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://slurm.schedmd.com/>.
+ *  For details, see <https://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -48,11 +48,28 @@
 #include "pmixp_debug.h"
 #include "pmixp_nspaces.h"
 #include "pmixp_utils.h"
+#include "pmixp_dconn.h"
 
-#define MAX_RETRIES 5
+static volatile bool _agent_is_running = false;
+static volatile bool _timer_is_running = false;
+static pthread_mutex_t _flag_mutex = PTHREAD_MUTEX_INITIALIZER;
 
-static int _agent_is_running = 0;
-static int _timer_is_running = 0;
+static void _run_flag_set(volatile bool *flag, bool val)
+{
+	slurm_mutex_lock(&_flag_mutex);
+	*flag = val;
+	slurm_mutex_unlock(&_flag_mutex);
+}
+
+static bool _run_flag_get(volatile bool *flag)
+{
+	bool rc;
+	slurm_mutex_lock(&_flag_mutex);
+	rc = *flag;
+	slurm_mutex_unlock(&_flag_mutex);
+	return rc;
+}
+
 static eio_handle_t *_io_handle = NULL;
 
 static int _agent_spawned = 0, _timer_spawned = 0;
@@ -108,7 +125,9 @@ static int _server_conn_read(eio_obj_t *obj, List objs)
 			if (shutdown) {
 				obj->shutdown = true;
 				if (shutdown < 0) {
-					PMIXP_ERROR_NO(shutdown, "sd=%d failure", obj->fd);
+					PMIXP_ERROR_NO(shutdown,
+						       "sd=%d failure",
+						       obj->fd);
 				}
 			}
 			return 0;
@@ -122,13 +141,23 @@ static int _server_conn_read(eio_obj_t *obj, List objs)
 			if ((errno == ECONNABORTED) || (errno == EWOULDBLOCK)) {
 				return 0;
 			}
-			PMIXP_ERROR_STD("accept()ing connection sd=%d", obj->fd);
+			PMIXP_ERROR_STD("accept()ing connection sd=%d",
+					obj->fd);
 			return 0;
 		}
 
-		PMIXP_DEBUG("accepted connection: sd=%d", fd);
-		/* read command from socket and handle it */
-		pmix_server_new_conn(fd);
+		if (pmixp_info_srv_usock_fd() == obj->fd) {
+			PMIXP_DEBUG("SLURM PROTO: accepted connection: sd=%d",
+				    fd);
+			/* read command from socket and handle it */
+			pmixp_server_slurm_conn(fd);
+		} else if (pmixp_dconn_poll_fd() == obj->fd) {
+			PMIXP_DEBUG("DIRECT PROTO: accepted connection: sd=%d",
+				    fd);
+			/* read command from socket and handle it */
+			pmixp_server_direct_conn(fd);
+
+		}
 	}
 	return 0;
 }
@@ -152,6 +181,9 @@ static int _timer_conn_read(eio_obj_t *obj, List objs)
 
 	/* check collective statuses */
 	pmixp_state_coll_cleanup();
+
+	/* cleanup server structures */
+	pmixp_server_cleanup();
 
 	return 0;
 }
@@ -226,7 +258,8 @@ static void *_agent_thread(void *unused)
 
 	_io_handle = eio_handle_create(0);
 
-	obj = eio_obj_create(pmixp_info_srv_fd(), &srv_ops, (void *)(-1));
+	obj = eio_obj_create(pmixp_info_srv_usock_fd(), &srv_ops,
+			     (void *)(-1));
 	eio_new_initial_obj(_io_handle, obj);
 
 	obj = eio_obj_create(timer_data.work_in, &to_ops, (void *)(-1));
@@ -234,14 +267,23 @@ static void *_agent_thread(void *unused)
 
 	pmixp_info_io_set(_io_handle);
 
-	_agent_is_running = 1;
+	if (PMIXP_DCONN_PROGRESS_SW == pmixp_dconn_progress_type()) {
+		obj = eio_obj_create(pmixp_dconn_poll_fd(), &srv_ops,
+				     (void *)(-1));
+		eio_new_initial_obj(_io_handle, obj);
+	} else {
+		pmixp_dconn_regio(_io_handle);
+	}
+
+	_run_flag_set(&_agent_is_running, true);
 
 	eio_handle_mainloop(_io_handle);
 
 	PMIXP_DEBUG("agent thread exit");
 	eio_handle_destroy(_io_handle);
 
-	_agent_is_running = 0;
+	_run_flag_set(&_agent_is_running, false);
+
 	return NULL;
 }
 
@@ -258,7 +300,7 @@ static void *_pmix_timer_thread(void *unused)
 	pfds[0].fd = timer_data.stop_in;
 	pfds[0].events = POLLIN;
 
-	_timer_is_running = 1;
+	_run_flag_set(&_timer_is_running, true);
 
 	/* our job is to sleep 1 sec and then trigger
 	 * the timer event in the main loop */
@@ -278,61 +320,53 @@ static void *_pmix_timer_thread(void *unused)
 		write(timer_data.work_out, &c, 1);
 	}
 
-	_timer_is_running = 0;
+	_run_flag_set(&_timer_is_running, false);
 
 	return NULL;
 }
 
 int pmixp_agent_start(void)
 {
-	int retries = 0;
-	pthread_attr_t attr;
-
 	_setup_timeout_fds();
 
-	slurm_attr_init(&attr);
-
 	/* start agent thread */
-	pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_DETACHED);
-	while ((errno = pthread_create(&_agent_tid, &attr, _agent_thread, NULL))) {
-		if (++retries > MAX_RETRIES) {
-			PMIXP_ERROR_STD("pthread_create error");
-			slurm_attr_destroy(&attr);
-			return SLURM_ERROR;
-		}
-		sleep(1);
-	}
+	slurm_thread_create_detached(&_agent_tid, _agent_thread, NULL);
 	_agent_spawned = 1;
 
 	/* wait for the agent thread to initialize */
-	while (!_agent_is_running) {
+	while (!_run_flag_get(&_agent_is_running)) {
 		sched_yield();
+	}
+
+	/* Check if a ping-pong run was requested by user
+	 * NOTE: enabled only if `--enable-debug` configuration
+	 * option was passed
+	 */
+	if (pmixp_server_want_pp()) {
+		pmixp_server_run_pp();
+	}
+
+	/* Check if a collective test was requested by user
+	 * NOTE: enabled only if `--enable-debug` configuration
+	 * option was passed
+	 */
+	if (pmixp_server_want_cperf()) {
+		pmixp_server_run_cperf();
 	}
 
 	PMIXP_DEBUG("agent thread started: tid = %lu",
-			(unsigned long) _agent_tid);
+		    (unsigned long) _agent_tid);
 
-	pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_DETACHED);
-	while ((errno = pthread_create(&_timer_tid, &attr, _pmix_timer_thread,
-			NULL))) {
-		if (++retries > MAX_RETRIES) {
-			PMIXP_ERROR_STD("pthread_create error");
-			slurm_attr_destroy(&attr);
-			return SLURM_ERROR;
-		}
-		sleep(1);
-	}
+	slurm_thread_create_detached(&_timer_tid, _pmix_timer_thread, NULL);
 	_timer_spawned = 1;
 
 	/* wait for the agent thread to initialize */
-	while (!_timer_is_running) {
+	while (!_run_flag_get(&_timer_is_running)) {
 		sched_yield();
 	}
 
-	slurm_attr_destroy(&attr);
-
 	PMIXP_DEBUG("timer thread started: tid = %lu",
-			(unsigned long) _timer_tid);
+		    (unsigned long) _timer_tid);
 
 	return SLURM_SUCCESS;
 }
@@ -340,10 +374,10 @@ int pmixp_agent_start(void)
 int pmixp_agent_stop(void)
 {
 	char c = 1;
-	if (_agent_is_running) {
+	if (_run_flag_get(&_agent_is_running)) {
 		eio_signal_shutdown(_io_handle);
 		/* wait for the agent thread to stop */
-		while (_agent_is_running) {
+		while (_run_flag_get(&_agent_is_running)) {
 			sched_yield();
 		}
 	}
@@ -354,7 +388,7 @@ int pmixp_agent_stop(void)
 	if (timer_data.initialized) {
 		/* cancel timer */
 		write(timer_data.stop_out, &c, 1);
-		while (_timer_is_running) {
+		while (_run_flag_get(&_timer_is_running) ) {
 			sched_yield();
 		}
 		/* close timer fds */

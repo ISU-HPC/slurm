@@ -6,7 +6,7 @@
  *  Written by Danny Auble <da@llnl.gov>
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://slurm.schedmd.com/>.
+ *  For details, see <https://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -862,7 +862,7 @@ extern int bridge_block_boot(bg_record_t *bg_record)
 		debug("booting block %s", bg_record->bg_block_id);
 		Block::initiateBoot(bg_record->bg_block_id);
 		/* Set this here just to make sure we know we
-		   are suppose to be booting.  Just incase the
+		   are suppose to be booting.  Just in case the
 		   block goes free before we notice we are
 		   configuring.
 		*/

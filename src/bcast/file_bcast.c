@@ -9,7 +9,7 @@
  *  CODE-OCEC-09-009. All rights reserved.
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://slurm.schedmd.com/>.
+ *  For details, see <https://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -89,7 +89,7 @@ static int   _file_bcast(struct bcast_parameters *params,
 			 file_bcast_msg_t *bcast_msg,
 			 job_sbcast_cred_msg_t *sbcast_cred);
 static int   _file_state(struct bcast_parameters *params);
-static int  _get_job_info(struct bcast_parameters *params);
+static int   _get_job_info(struct bcast_parameters *params);
 
 
 static int _file_state(struct bcast_parameters *params)
@@ -134,16 +134,30 @@ static int _get_job_info(struct bcast_parameters *params)
 
 	xassert(params->job_id != NO_VAL);
 
-	rc = slurm_sbcast_lookup(params->job_id, params->step_id, &sbcast_cred);
+	rc = slurm_sbcast_lookup(params->job_id, params->pack_job_offset,
+				 params->step_id, &sbcast_cred);
 	if (rc != SLURM_SUCCESS) {
 		if (params->step_id == NO_VAL) {
-			error("Slurm job ID %u lookup error: %s",
-			      params->job_id,
-			      slurm_strerror(slurm_get_errno()));
+			if (params->pack_job_offset == NO_VAL) {
+				error("Slurm job ID %u lookup error: %s",
+				      params->job_id,
+				      slurm_strerror(slurm_get_errno()));
+			} else {
+				error("Slurm job ID %u+%u lookup error: %s",
+				      params->job_id, params->pack_job_offset,
+				      slurm_strerror(slurm_get_errno()));
+			}
 		} else {
-			error("Slurm step ID %u.%u lookup error: %s",
-			      params->job_id, params->step_id,
-			      slurm_strerror(slurm_get_errno()));
+			if (params->pack_job_offset == NO_VAL) {
+				error("Slurm step ID %u.%u lookup error: %s",
+				      params->job_id, params->step_id,
+				      slurm_strerror(slurm_get_errno()));
+			} else {
+				error("Slurm step ID %u+%u.%u lookup error: %s",
+				      params->job_id, params->pack_job_offset,
+				      params->step_id,
+				      slurm_strerror(slurm_get_errno()));
+			}
 		}
 		return rc;
 	}
@@ -208,7 +222,7 @@ static int _file_bcast(struct bcast_parameters *params,
  * return number of bytes read, zero on end of file */
 static int _get_block_none(char **buffer, int *orig_len, bool *more)
 {
-	static int remaining = -1;
+	static int64_t remaining = -1;
 	static void *position;
 	int size;
 
@@ -238,7 +252,7 @@ static int _get_block_zlib(struct bcast_parameters *params,
 	int chunk = (256 * 1024);
 	int flush = Z_NO_FLUSH;
 
-	static int remaining = -1;
+	static int64_t remaining = -1;
 	static int max_out;
 	static void *position;
 	int chunk_remaining, out_remaining, chunk_bite, size = 0;
@@ -305,7 +319,7 @@ static int _get_block_lz4(struct bcast_parameters *params,
 {
 #if HAVE_LZ4
 	int size_out;
-	static int remaining = -1;
+	static int64_t remaining = -1;
 	static void *position;
 	int size;
 
@@ -347,7 +361,7 @@ static int _next_block(struct bcast_parameters *params,
 		       int32_t *orig_len,
 		       bool *more)
 {
-	switch(params->compress) {
+	switch (params->compress) {
 	case COMPRESS_OFF:
 		return _get_block_none(buffer, orig_len, more);
 	case COMPRESS_ZLIB:
@@ -370,7 +384,7 @@ static int _bcast_file(struct bcast_parameters *params)
 	file_bcast_msg_t bcast_msg;
 	char *buffer = NULL;
 	int32_t orig_len = 0;
-	uint32_t size_uncompressed = 0, size_compressed = 0;
+	uint64_t size_uncompressed = 0, size_compressed = 0;
 	uint32_t time_compression = 0;
 	bool more = true;
 	DEF_TIMERS;
@@ -380,7 +394,7 @@ static int _bcast_file(struct bcast_parameters *params)
 	else
 		block_len = MIN((512 * 1024), f_stat.st_size);
 
-	bzero(&bcast_msg, sizeof(file_bcast_msg_t));
+	memset(&bcast_msg, 0, sizeof(file_bcast_msg_t));
 	bcast_msg.fname		= params->dst_fname;
 	bcast_msg.block_no	= 1;
 	bcast_msg.force		= params->force;
@@ -408,7 +422,7 @@ static int _bcast_file(struct bcast_parameters *params)
 		time_compression += DELTA_TIMER;
 		size_uncompressed += orig_len;
 		size_compressed += bcast_msg.block_len;
-		debug("block %d, size %u", bcast_msg.block_no,
+		debug("block %u, size %u", bcast_msg.block_no,
 		      bcast_msg.block_len);
 		bcast_msg.compress = params->compress;
 		bcast_msg.uncomp_len = orig_len;
@@ -427,7 +441,7 @@ static int _bcast_file(struct bcast_parameters *params)
 	xfree(bcast_msg.user_name);
 	xfree(buffer);
 
-	if (size_uncompressed && params->compress != 0) {
+	if (size_uncompressed && (params->compress != 0)) {
 		int64_t pct = (int64_t) size_uncompressed - size_compressed;
 		/* Dividing a negative by a positive in C99 results in
 		 * "truncation towards zero" which gives unexpected values for
@@ -435,7 +449,7 @@ static int _bcast_file(struct bcast_parameters *params)
 		 */
 		pct = (pct>=0) ? pct * 100 / size_uncompressed
 			       : - (-pct * 100 / size_uncompressed);
-		verbose("File compressed from %u to %u (%d percent) in %u usec",
+		verbose("File compressed from %"PRIu64" to %"PRIu64" (%d percent) in %u usec",
 			size_uncompressed, size_compressed, (int) pct,
 			time_compression);
 	}
@@ -447,13 +461,13 @@ static int _bcast_file(struct bcast_parameters *params)
 static int _decompress_data_zlib(file_bcast_msg_t *req)
 {
 #if HAVE_LIBZ
-	static z_stream strm;
+	z_stream strm;
 	int chunk = (256 * 1024); /* must match common/file_bcast.c */
 	int ret;
 	int flush = Z_NO_FLUSH, have;
 	unsigned char zlib_out[chunk];
-	int buf_in_offset = 0;
-	int buf_out_offset = 0;
+	int64_t buf_in_offset = 0;
+	int64_t buf_out_offset = 0;
 	char *out_buf;
 
 	/* Perform decompression */
@@ -512,7 +526,8 @@ static int _decompress_data_lz4(file_bcast_msg_t *req)
 		return 0;
 
 	out_buf = xmalloc(req->uncomp_len);
-	out_len = LZ4_decompress_safe(req->block, out_buf, req->block_len, req->uncomp_len);
+	out_len = LZ4_decompress_safe(req->block, out_buf, req->block_len,
+				      req->uncomp_len);
 	xfree(req->block);
 	req->block = out_buf;
 	if (req->uncomp_len != out_len) {
@@ -543,7 +558,7 @@ extern int bcast_file(struct bcast_parameters *params)
 
 extern int bcast_decompress_data(file_bcast_msg_t *req)
 {
-	switch(req->compress) {
+	switch (req->compress) {
 	case COMPRESS_OFF:
 		return 0;
 	case COMPRESS_ZLIB:

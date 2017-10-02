@@ -99,6 +99,7 @@ bin_PROGRAMS = srun$(EXEEXT)
 subdir = src/srun
 ACLOCAL_M4 = $(top_srcdir)/aclocal.m4
 am__aclocal_m4_deps = $(top_srcdir)/auxdir/ax_check_zlib.m4 \
+	$(top_srcdir)/auxdir/ax_gcc_builtin.m4 \
 	$(top_srcdir)/auxdir/ax_lib_hdf5.m4 \
 	$(top_srcdir)/auxdir/ax_pthread.m4 \
 	$(top_srcdir)/auxdir/libtool.m4 \
@@ -139,6 +140,9 @@ am__aclocal_m4_deps = $(top_srcdir)/auxdir/ax_check_zlib.m4 \
 	$(top_srcdir)/auxdir/x_ac_setproctitle.m4 \
 	$(top_srcdir)/auxdir/x_ac_sgi_job.m4 \
 	$(top_srcdir)/auxdir/x_ac_slurm_ssl.m4 \
+	$(top_srcdir)/auxdir/x_ac_systemd.m4 \
+	$(top_srcdir)/auxdir/x_ac_ucx.m4 \
+	$(top_srcdir)/auxdir/x_ac_uid_gid_size.m4 \
 	$(top_srcdir)/configure.ac
 am__configure_deps = $(am__aclocal_m4_deps) $(CONFIGURE_DEPENDENCIES) \
 	$(ACLOCAL_M4)
@@ -153,7 +157,6 @@ am_srun_OBJECTS = srun.$(OBJEXT) srun_pty.$(OBJEXT) \
 	srun.wrapper.$(OBJEXT)
 srun_OBJECTS = $(am_srun_OBJECTS)
 am__DEPENDENCIES_1 =
-srun_DEPENDENCIES = $(convenience_libs) $(am__DEPENDENCIES_1)
 AM_V_lt = $(am__v_lt_@AM_V@)
 am__v_lt_ = $(am__v_lt_@AM_DEFAULT_V@)
 am__v_lt_0 = --silent
@@ -361,6 +364,10 @@ LIBCURL_CPPFLAGS = @LIBCURL_CPPFLAGS@
 LIBOBJS = @LIBOBJS@
 LIBS = @LIBS@
 LIBTOOL = @LIBTOOL@
+LIB_SLURM = @LIB_SLURM@
+LIB_SLURMDB = @LIB_SLURMDB@
+LIB_SLURMDB_BUILD = @LIB_SLURMDB_BUILD@
+LIB_SLURM_BUILD = @LIB_SLURM_BUILD@
 LIPO = @LIPO@
 LN_S = @LN_S@
 LTLIBOBJS = @LTLIBOBJS@
@@ -444,12 +451,15 @@ SLURM_MINOR = @SLURM_MINOR@
 SLURM_PREFIX = @SLURM_PREFIX@
 SLURM_VERSION_NUMBER = @SLURM_VERSION_NUMBER@
 SLURM_VERSION_STRING = @SLURM_VERSION_STRING@
-SO_LDFLAGS = @SO_LDFLAGS@
 SSL_CPPFLAGS = @SSL_CPPFLAGS@
 SSL_LDFLAGS = @SSL_LDFLAGS@
 SSL_LIBS = @SSL_LIBS@
 STRIP = @STRIP@
 SUCMD = @SUCMD@
+SYSTEMD_TASKSMAX_OPTION = @SYSTEMD_TASKSMAX_OPTION@
+UCX_CPPFLAGS = @UCX_CPPFLAGS@
+UCX_LDFLAGS = @UCX_LDFLAGS@
+UCX_LIBS = @UCX_LIBS@
 UTIL_LIBS = @UTIL_LIBS@
 VERSION = @VERSION@
 ZLIB_CPPFLAGS = @ZLIB_CPPFLAGS@
@@ -522,16 +532,16 @@ SUBDIRS = libsrun
 AUTOMAKE_OPTIONS = foreign
 CLEANFILES = core.*
 AM_CPPFLAGS = -I$(top_srcdir) -I$(top_srcdir)/src/srun/libsrun
-convenience_libs = $(top_builddir)/src/srun/libsrun/libsrun.la \
-	$(top_builddir)/src/bcast/libfile_bcast.la \
-	$(top_builddir)/src/api/libslurm.o
+depend_libs = $(top_builddir)/src/srun/libsrun/libsrun.la \
+	$(top_builddir)/src/bcast/libfile_bcast.la
 
 srun_SOURCES = \
 	srun.c \
 	srun_pty.c srun_pty.h \
 	srun.wrapper.c
 
-srun_LDADD = $(convenience_libs) $(DL_LIBS)
+srun_LDADD = $(depend_libs) $(DL_LIBS) $(LIB_SLURM)
+srun_DEPENDENCIES = $(depend_libs) $(LIB_SLURM_BUILD)
 srun_LDFLAGS = -export-dynamic $(CMD_LDFLAGS) $(am__append_1)
 all: all-recursive
 
@@ -941,7 +951,7 @@ uninstall-am: uninstall-binPROGRAMS
 
 
 force:
-$(convenience_libs) : force
+$(srun_DEPENDENCIES) : force
 	@cd `dirname $@` && $(MAKE) `basename $@`
 
 install-exec-local:

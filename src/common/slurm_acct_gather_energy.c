@@ -6,7 +6,7 @@
  *  Written by Bull-HN-PHX/d.rusak,
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://slurm.schedmd.com/>.
+ *  For details, see <https://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -292,7 +292,6 @@ extern int acct_gather_energy_g_set_data(enum acct_energy_type data_type,
 extern int acct_gather_energy_startpoll(uint32_t frequency)
 {
 	int retval = SLURM_SUCCESS;
-	pthread_attr_t attr;
 
 	if (slurm_acct_gather_energy_init() < 0)
 		return SLURM_ERROR;
@@ -313,14 +312,9 @@ extern int acct_gather_energy_startpoll(uint32_t frequency)
 	}
 
 	/* create polling thread */
-	slurm_attr_init(&attr);
+	slurm_thread_create(&watch_node_thread_id, _watch_node, NULL);
 
-	if (pthread_create(&watch_node_thread_id, &attr, &_watch_node, NULL)) {
-		debug("acct_gather_energy failed to create _watch_node "
-		      "thread: %m");
-	} else
-		debug3("acct_gather_energy dynamic logging enabled");
-	slurm_attr_destroy(&attr);
+	debug3("acct_gather_energy dynamic logging enabled");
 
 	return retval;
 }

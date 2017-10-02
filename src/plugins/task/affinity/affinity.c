@@ -4,7 +4,7 @@
  *  Copyright (C) 2005-2006 Hewlett-Packard Development Company, L.P.
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://slurm.schedmd.com/>.
+ *  For details, see <https://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -112,7 +112,7 @@ void slurm_chkaffinity(cpu_set_t *mask, stepd_step_rec_t *job, int statval)
 	fprintf(stderr, "cpu_bind%s=%s - "
 			"%s, task %2u %2u [%u]: mask 0x%s%s%s\n",
 			units, bind_type,
-			conf->hostname,
+			conf->node_name,
 			task_gid,
 			task_lid,
 			mypid,

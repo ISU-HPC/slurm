@@ -9,7 +9,7 @@
  *  CODE-OCEC-09-009. All rights reserved.
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://slurm.schedmd.com/>.
+ *  For details, see <https://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -67,7 +67,7 @@ static gboolean _delete_popup(GtkWidget *widget,
 void _search_entry(sview_search_info_t *sview_search_info)
 {
 	int id = 0;
-	char title[100];
+	char title[100] = {0};
 	ListIterator itr = NULL;
 	popup_info_t *popup_win = NULL;
 	GError *error = NULL;
@@ -690,6 +690,7 @@ extern void create_search_popup(GtkAction *action, gpointer user_data)
 			{G_TYPE_NONE, JOB_PREEMPTED, "Preempted", true, -1},
 			{G_TYPE_NONE, JOB_BOOT_FAIL, "Boot Failure", true, -1},
 			{G_TYPE_NONE, JOB_DEADLINE, "Deadline", true, -1},
+			{G_TYPE_NONE, JOB_OOM, "Out Of Memory", true, -1},
 			{G_TYPE_NONE, -1, NULL, false, -1}
 		};
 
@@ -748,6 +749,7 @@ extern void create_search_popup(GtkAction *action, gpointer user_data)
 			 "Power Down", true, -1},
 			{G_TYPE_NONE, NODE_STATE_POWER_UP,
 			 "Power Up", true, -1},
+			{G_TYPE_NONE, NODE_STATE_REBOOT, "Reboot", true, -1},
 			{G_TYPE_NONE, NODE_STATE_RES | NODE_STATE_IDLE,
 			 "Reserved", true, -1},
 			{G_TYPE_NONE, NODE_STATE_UNKNOWN, "Unknown", true, -1},
@@ -1135,4 +1137,25 @@ extern void usage_popup(GtkAction *action, gpointer user_data)
 	gtk_widget_destroy(popup);
 
 	return;
+}
+
+extern void display_fed_disabled_popup(const char *title)
+{
+	char tmp_char[100];
+	GtkWidget *label = NULL;
+	GtkDialog *dialog = GTK_DIALOG(gtk_dialog_new_with_buttons(
+						title, GTK_WINDOW(main_window),
+						GTK_DIALOG_MODAL |
+						GTK_DIALOG_DESTROY_WITH_PARENT,
+						NULL));
+	label = gtk_dialog_add_button(dialog, GTK_STOCK_OK, GTK_RESPONSE_OK);
+	gtk_window_set_default(GTK_WINDOW(dialog), label);
+	snprintf(tmp_char, sizeof(tmp_char),
+		 "Disabled in a federated view.\n"
+		 "Go to the individual cluster and perform the action.");
+	label = gtk_label_new(tmp_char);
+	gtk_box_pack_start(GTK_BOX(dialog->vbox), label, false, false, 0);
+	gtk_widget_show_all(GTK_WIDGET(dialog));
+	(void) gtk_dialog_run(dialog);
+	gtk_widget_destroy(GTK_WIDGET(dialog));
 }

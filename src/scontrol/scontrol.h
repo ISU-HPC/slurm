@@ -8,7 +8,7 @@
  *  CODE-OCEC-09-009. All rights reserved.
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://slurm.schedmd.com/>.
+ *  For details, see <https://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -80,10 +80,14 @@ extern int all_flag;	/* display even hidden partitions */
 extern int detail_flag;	/* display additional details */
 extern int exit_code;	/* scontrol's exit code, =1 on any error at any time */
 extern int exit_flag;	/* program to terminate if =1 */
+extern int federation_flag; /* show federated jobs */
 extern int input_words;	/* number of words of input permitted */
+extern int local_flag;	/* show only local jobs -- not remote remote sib jobs */
 extern int one_liner;	/* one record per line if =1 */
 extern int quiet_flag;	/* quiet=1, verbose=-1, normal=0 */
+extern int sibling_flag; /* show sibling jobs (if any fed job). */
 extern uint32_t cluster_flags; /* what type of cluster are we talking to */
+extern uint32_t euid; /* send request to the slurmctld in behave of this user */
 
 extern block_info_msg_t *old_block_info_ptr;
 extern front_end_info_msg_t *old_front_end_info_ptr;
@@ -94,15 +98,16 @@ extern reserve_info_msg_t *old_res_info_ptr;
 extern slurm_ctl_conf_info_msg_t *old_slurm_ctl_conf_ptr;
 
 extern int	parse_requeue_flags(char *s, uint32_t *flags);
+extern int	scontrol_batch_script(int argc, char **argv);
 extern int	scontrol_callerid(int argc, char **argv);
 extern int	scontrol_checkpoint(char *op, char *job_step_id_str, int argc,
 				    char **argv);
-extern int	scontrol_create_part(int argc, char *argv[]);
-extern int	scontrol_create_res(int argc, char *argv[]);
+extern int	scontrol_create_part(int argc, char **argv);
+extern int	scontrol_create_res(int argc, char **argv);
 extern int	scontrol_encode_hostlist(char *hostlist, bool sorted);
 extern uint16_t	scontrol_get_job_state(uint32_t job_id);
 extern int	scontrol_hold(char *op, char *job_id_str);
-extern int	scontrol_job_notify(int argc, char *argv[]);
+extern int	scontrol_job_notify(int argc, char **argv);
 extern int	scontrol_job_ready(char *job_id_str);
 extern void	scontrol_list_pids(const char *jobid_str,
 				   const char *node_name);
@@ -117,12 +122,12 @@ extern int 	scontrol_load_partitions (partition_info_msg_t **
 					  part_info_pptr);
 extern int 	scontrol_load_block (block_info_msg_t **block_info_pptr);
 extern void	scontrol_pid_info(pid_t job_pid);
-extern void	scontrol_print_assoc_mgr_info(int argc, char *argv[]);
+extern void	scontrol_print_assoc_mgr_info(int argc, char **argv);
 extern void	scontrol_print_burst_buffer(void);
 extern void	scontrol_print_completing (void);
 extern void	scontrol_print_completing_job(job_info_t *job_ptr,
 					      node_info_msg_t *node_info_msg);
-extern void	scontrol_print_federation();
+extern void	scontrol_print_federation(void);
 extern void	scontrol_print_front_end_list(char *node_list);
 extern void	scontrol_print_front_end(char *node_name,
 					 front_end_info_msg_t  *
@@ -138,19 +143,19 @@ extern void	scontrol_print_block (char *block_name);
 extern void	scontrol_print_res (char *reservation_name);
 extern void	scontrol_print_step (char *job_step_id_str);
 extern void	scontrol_print_topo (char *node_list);
-extern void	scontrol_print_layout (int argc, char *argv[]);
+extern void	scontrol_print_layout (int argc, char **argv);
 extern void	scontrol_print_powercap (char *node_list);
 extern void	scontrol_requeue(char *job_str);
 extern void	scontrol_requeue_hold(uint32_t state_flag, char *job_str);
 extern void	scontrol_suspend(char *op, char *job_id_str);
 extern void	scontrol_top_job(char *job_str);
-extern int	scontrol_update_front_end (int argc, char *argv[]);
-extern int	scontrol_update_job (int argc, char *argv[]);
-extern int	scontrol_update_layout (int argc, char *argv[]);
-extern int	scontrol_update_node (int argc, char *argv[]);
-extern int	scontrol_update_part (int argc, char *argv[]);
-extern int	scontrol_update_res (int argc, char *argv[]);
-extern int	scontrol_update_step (int argc, char *argv[]);
-extern int	scontrol_update_powercap (int argc, char *argv[]);
+extern int	scontrol_update_front_end (int argc, char **argv);
+extern int	scontrol_update_job (int argc, char **argv);
+extern int	scontrol_update_layout (int argc, char **argv);
+extern int	scontrol_update_node (int argc, char **argv);
+extern int	scontrol_update_part (int argc, char **argv);
+extern int	scontrol_update_res (int argc, char **argv);
+extern int	scontrol_update_step (int argc, char **argv);
+extern int	scontrol_update_powercap (int argc, char **argv);
 
 #endif

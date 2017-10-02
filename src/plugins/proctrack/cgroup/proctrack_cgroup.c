@@ -5,7 +5,7 @@
  *  Written by Matthieu Hautreux <matthieu.hautreux@cea.fr>
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://slurm.schedmd.com/>.
+ *  For details, see <https://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -38,6 +38,7 @@
 
 #include <fcntl.h>
 #include <inttypes.h>
+#include <limits.h>
 #include <signal.h>
 #include <stdlib.h>
 #include <sys/stat.h>
@@ -81,10 +82,6 @@
 const char plugin_name[]      = "Process tracking via linux cgroup freezer subsystem";
 const char plugin_type[]      = "proctrack/cgroup";
 const uint32_t plugin_version = SLURM_VERSION_NUMBER;
-
-#ifndef PATH_MAX
-#define PATH_MAX 256
-#endif
 
 static slurm_cgroup_conf_t slurm_cgroup_conf;
 
@@ -143,6 +140,7 @@ int _slurm_cgroup_create(stepd_step_rec_t *job, uint64_t id, uid_t uid, gid_t gi
 
 	if (xcgroup_create(&freezer_ns, &slurm_freezer_cg, pre,
 			   getuid(), getgid()) != XCGROUP_SUCCESS) {
+		xfree(pre);
 		return SLURM_ERROR;
 	}
 
@@ -154,7 +152,10 @@ int _slurm_cgroup_create(stepd_step_rec_t *job, uint64_t id, uid_t uid, gid_t gi
 	 * shared directories that could result in the failure of the
 	 * hierarchy setup
 	 */
-	xcgroup_lock(&freezer_cg);
+	if (xcgroup_lock(&freezer_cg) != XCGROUP_SUCCESS) {
+		error("%s: xcgroup_lock error", __func__);
+		goto bail;
+	}
 
 	/* create slurm cgroup in the freezer ns (it could already exist) */
 	if (xcgroup_instantiate(&slurm_freezer_cg) != XCGROUP_SUCCESS)
@@ -166,7 +167,6 @@ int _slurm_cgroup_create(stepd_step_rec_t *job, uint64_t id, uid_t uid, gid_t gi
 			     "%s/uid_%u", pre, uid) >= PATH_MAX) {
 			error("unable to build uid %u cgroup relative path : %m",
 			      uid);
-			xfree(pre);
 			goto bail;
 		}
 	}
@@ -250,6 +250,7 @@ int _slurm_cgroup_create(stepd_step_rec_t *job, uint64_t id, uid_t uid, gid_t gi
 	return SLURM_SUCCESS;
 
 bail:
+	xfree(pre);
 	xcgroup_destroy(&slurm_freezer_cg);
 	xcgroup_unlock(&freezer_cg);
 	xcgroup_destroy(&freezer_cg);
@@ -272,7 +273,10 @@ static int _move_current_to_root_cgroup(xcgroup_ns_t *ns)
 
 int _slurm_cgroup_destroy(void)
 {
-	xcgroup_lock(&freezer_cg);
+	if (xcgroup_lock(&freezer_cg) != XCGROUP_SUCCESS) {
+		error("%s: xcgroup_lock error", __func__);
+		return SLURM_ERROR;
+	}
 
 	/*
 	 *  First move slurmstepd process to the root cgroup, otherwise

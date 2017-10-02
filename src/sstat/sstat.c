@@ -7,7 +7,7 @@
  *  CODE-OCEC-09-009. All rights reserved.
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://slurm.schedmd.com/>.
+ *  For details, see <https://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -58,7 +58,7 @@ print_field_t fields[] = {
 	{10, "AveRSS", print_fields_str, PRINT_AVERSS},
 	{10, "AveVMSize", print_fields_str, PRINT_AVEVSIZE},
 	{14, "ConsumedEnergy", print_fields_str, PRINT_CONSUMED_ENERGY},
-	{17, "ConsumedEnergyRaw", print_fields_double,
+	{17, "ConsumedEnergyRaw", print_fields_uint64,
 	 PRINT_CONSUMED_ENERGY_RAW},
 	{-12, "JobID", print_fields_str, PRINT_JOBID},
 	{12, "MaxDiskRead", print_fields_str, PRINT_MAXDISKREAD},
@@ -118,6 +118,7 @@ int _do_stat(uint32_t jobid, uint32_t stepid, char *nodelist,
 			error("problem getting step_layout for %u.%u: %s",
 			      jobid, stepid, slurm_strerror(rc));
 		}
+		slurm_job_step_pids_response_msg_free(step_stat_response);
 		return rc;
 	}
 
@@ -246,7 +247,7 @@ int main(int argc, char **argv)
 				job_ptr->job_array[0].start_protocol_ver;
 			stepid = SLURM_BATCH_SCRIPT;
 			hl = hostlist_create(job_ptr->job_array[0].nodes);
-			nodelist = hostlist_pop(hl);
+			nodelist = hostlist_shift(hl);
 			free_nodelist = true;
 			hostlist_destroy(hl);
 			slurm_free_job_info_msg(job_ptr);

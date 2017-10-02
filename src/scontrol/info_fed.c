@@ -1,11 +1,11 @@
 /*****************************************************************************\
  *  info_fed.c - functions dealing with Federations in the controller.
  *****************************************************************************
- *  Copyright (C) 2016 SchedMD LLC.
+ *  Copyright (C) 2016-2017 SchedMD LLC.
  *  Written by Brian Christiansen <brian@schedmd.com>
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://slurm.schedmd.com/>.
+ *  For details, see <https://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -36,13 +36,13 @@
 
 #include "scontrol.h"
 
-extern void scontrol_print_federation()
+extern void scontrol_print_federation(void)
 {
 	void *fed = NULL;
 
 	if (!slurm_load_federation(&fed)) {
 		slurm_print_federation(fed);
-		slurmdb_destroy_federation_rec(fed);
+		slurm_destroy_federation_rec(fed);
 	}
 }
 

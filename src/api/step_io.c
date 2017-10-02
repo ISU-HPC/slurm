@@ -7,7 +7,7 @@
  *  CODE-OCEC-09-009. All rights reserved.
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://slurm.schedmd.com/>.
+ *  For details, see <https://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -58,7 +58,6 @@
 #include "src/api/step_io.h"
 #include "src/api/step_launch.h"
 
-#define MAX_RETRIES 3
 #define STDIO_MAX_FREE_BUF 1024
 
 struct io_buf {
@@ -74,9 +73,6 @@ typedef struct kill_thread {
 } kill_thread_t;
 
 static struct io_buf *_alloc_io_buf(void);
-#if 0
-static void     _free_io_buf(struct io_buf *buf);
-#endif
 static void	_init_stdio_eio_objs(slurm_step_io_fds_t fds,
 				     client_io_t *cio);
 static void	_handle_io_init_msg(int fd, client_io_t *cio);
@@ -301,14 +297,20 @@ _server_read(eio_obj_t *obj, List objs)
 
 		n = io_hdr_read_fd(obj->fd, &s->header);
 		if (n <= 0) { /* got eof or error on socket read */
-			if (n < 0) { /* Error */
-				if (getenv("SLURM_PTY_PORT") == NULL) {
-					error("%s: fd %d error reading header: %m",
-					      __func__, obj->fd);
-				}
-				if (s->cio->sls) {
-					step_launch_notify_io_failure(
-						s->cio->sls, s->node_id);
+			if (n < 0) {	/* Error */
+				if (obj->shutdown) {
+					verbose("%s: Dropped pending I/O for terminated task",
+						__func__);
+				} else {
+					if (getenv("SLURM_PTY_PORT") == NULL) {
+						error("%s: fd %d error reading header: %m",
+						      __func__, obj->fd);
+					}
+					if (s->cio->sls) {
+						step_launch_notify_io_failure(
+							s->cio->sls,
+							s->node_id);
+					}
 				}
 			}
 			close(obj->fd);
@@ -568,7 +570,7 @@ static int _file_write(eio_obj_t *obj, List objs)
 	void *ptr;
 	int n;
 
-	debug2("Entering _file_write");
+	debug2("Entering %s", __func__);
 	/*
 	 * If we aren't already in the middle of sending a message, get the
 	 * next message from the queue.
@@ -576,7 +578,7 @@ static int _file_write(eio_obj_t *obj, List objs)
 	if (info->out_msg == NULL) {
 		info->out_msg = list_dequeue(info->msg_queue);
 		if (info->out_msg == NULL) {
-			debug3("_file_write: nothing in the queue");
+			debug3("%s: nothing in the queue", __func__);
 			return SLURM_SUCCESS;
 		}
 		info->out_remaining = info->out_msg->length;
@@ -585,8 +587,8 @@ static int _file_write(eio_obj_t *obj, List objs)
 	/*
 	 * Write message to file.
 	 */
-	if (info->taskid != (uint32_t)-1
-	    && info->out_msg->header.gtaskid != info->taskid) {
+	if ((info->taskid != (uint32_t) -1) &&
+	    (info->out_msg->header.gtaskid != info->taskid)) {
 		/* we are ignoring messages not from info->taskid */
 	} else if (!info->eof) {
 		ptr = info->out_msg->data + (info->out_msg->length
@@ -594,8 +596,10 @@ static int _file_write(eio_obj_t *obj, List objs)
 		if ((n = write_labelled_message(obj->fd, ptr,
 					        info->out_remaining,
 					        info->out_msg->header.gtaskid,
+					        info->cio->pack_offset,
+					        info->cio->task_offset,
 					        info->cio->label,
-					        info->cio->label_width)) < 0) {
+					        info->cio->taskid_width)) < 0) {
 			list_enqueue(info->cio->free_outgoing, info->out_msg);
 			info->eof = true;
 			return SLURM_ERROR;
@@ -613,7 +617,7 @@ static int _file_write(eio_obj_t *obj, List objs)
 	if (info->out_msg->ref_count == 0)
 		list_enqueue(info->cio->free_outgoing, info->out_msg);
 	info->out_msg = NULL;
-	debug2("Leaving  _file_write");
+	debug2("Leaving  %s", __func__);
 
 	return SLURM_SUCCESS;
 }
@@ -705,19 +709,19 @@ static int _file_read(eio_obj_t *obj, List objs)
 
 again:
 	if ((len = read(obj->fd, ptr, MAX_MSG_LEN)) < 0) {
-			if (errno == EINTR)
-				goto again;
-			if ((errno == EAGAIN) || (errno == EWOULDBLOCK)) {
-				debug("_file_read returned %s",
-				      errno==EAGAIN?"EAGAIN":"EWOULDBLOCK");
-				slurm_mutex_lock(&info->cio->ioservers_lock);
-				list_enqueue(info->cio->free_incoming, msg);
-				slurm_mutex_unlock(&info->cio->ioservers_lock);
-				return SLURM_SUCCESS;
-			}
-			/* Any other errors, we pretend we got eof */
-			debug("Other error on _file_read: %m");
-			len = 0;
+		if (errno == EINTR)
+			goto again;
+		if ((errno == EAGAIN) || (errno == EWOULDBLOCK)) {
+			debug("_file_read returned %s",
+			      errno==EAGAIN?"EAGAIN":"EWOULDBLOCK");
+			slurm_mutex_lock(&info->cio->ioservers_lock);
+			list_enqueue(info->cio->free_incoming, msg);
+			slurm_mutex_unlock(&info->cio->ioservers_lock);
+			return SLURM_SUCCESS;
+		}
+		/* Any other errors, we pretend we got eof */
+		debug("Other error on _file_read: %m");
+		len = 0;
 	}
 	if (len == 0) { /* got eof */
 		debug3("got eof on _file_read");
@@ -976,18 +980,6 @@ _alloc_io_buf(void)
 	return buf;
 }
 
-#if 0
-static void
-_free_io_buf(struct io_buf *buf)
-{
-	if (buf) {
-		if (buf->data)
-			xfree(buf->data);
-		xfree(buf);
-	}
-}
-#endif
-
 static void
 _init_stdio_eio_objs(slurm_step_io_fds_t fds, client_io_t *cio)
 {
@@ -1075,12 +1067,10 @@ _estimate_nports(int nclients, int cli_per_port)
 	return d.rem > 0 ? d.quot + 1 : d.quot;
 }
 
-client_io_t *
-client_io_handler_create(slurm_step_io_fds_t fds,
-			 int num_tasks,
-			 int num_nodes,
-			 slurm_cred_t *cred,
-			 bool label)
+client_io_t *client_io_handler_create(slurm_step_io_fds_t fds, int num_tasks,
+				      int num_nodes, slurm_cred_t *cred,
+				      bool label, uint32_t pack_offset,
+				      uint32_t task_offset)
 {
 	client_io_t *cio;
 	int i;
@@ -1093,17 +1083,19 @@ client_io_handler_create(slurm_step_io_fds_t fds,
 	if (cio == NULL)
 		return NULL;
 
-	cio->num_tasks = num_tasks;
-	cio->num_nodes = num_nodes;
+	cio->num_tasks   = num_tasks;
+	cio->num_nodes   = num_nodes;
+	cio->pack_offset = pack_offset;
+	cio->task_offset = task_offset;
 
 	cio->label = label;
 	if (cio->label)
-		cio->label_width = _wid(cio->num_tasks);
+		cio->taskid_width = _wid(cio->num_tasks);
 	else
-		cio->label_width = 0;
+		cio->taskid_width = 0;
 
 	if (slurm_cred_get_signature(cred, &sig, &siglen) < 0) {
-		error("client_io_handler_create, invalid credential");
+		error("%s: invalid credential", __func__);
 		return NULL;
 	}
 	cio->io_key = (char *)xmalloc(siglen);
@@ -1136,7 +1128,7 @@ client_io_handler_create(slurm_step_io_fds_t fds,
 		if (ports)
 			cc = net_stream_listen_ports(&cio->listensock[i],
 						     &cio->listenport[i],
-						     ports);
+						     ports, false);
 		else
 			cc = net_stream_listen(&cio->listensock[i],
 					       &cio->listenport[i]);
@@ -1168,23 +1160,10 @@ client_io_handler_create(slurm_step_io_fds_t fds,
 int
 client_io_handler_start(client_io_t *cio)
 {
-	int retries = 0;
-	pthread_attr_t attr;
-
 	xsignal(SIGTTIN, SIG_IGN);
 
-	slurm_attr_init(&attr);
-	while ((errno = pthread_create(&cio->ioid, &attr,
-				      &_io_thr_internal, (void *) cio))) {
-		if (++retries > MAX_RETRIES) {
-			error ("pthread_create error %m");
-			cio->ioid = 0;
-			slurm_attr_destroy(&attr);
-			return SLURM_ERROR;
-		}
-		sleep(1);	/* sleep and try again */
-	}
-	slurm_attr_destroy(&attr);
+	slurm_thread_create(&cio->ioid, _io_thr_internal, cio);
+
 	debug("Started IO server thread (%lu)", (unsigned long) cio->ioid);
 
 	return SLURM_SUCCESS;
@@ -1204,24 +1183,11 @@ static void *_kill_thr(void *args)
 
 static void _delay_kill_thread(pthread_t thread_id, int secs)
 {
-	pthread_t kill_id;
-	pthread_attr_t attr;
 	kill_thread_t *kt = xmalloc(sizeof(kill_thread_t));
-	int retries = 0;
 
 	kt->thread_id = thread_id;
 	kt->secs = secs;
-	slurm_attr_init(&attr);
-	pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_DETACHED);
-	while (pthread_create(&kill_id, &attr, &_kill_thr, (void *) kt)) {
-		error("_delay_kill_thread: pthread_create: %m");
-		if (++retries > MAX_RETRIES) {
-			error("_delay_kill_thread: Can't create pthread");
-			break;
-		}
-		usleep(10);	/* sleep and again */
-	}
-	slurm_attr_destroy(&attr);
+	slurm_thread_create_detached(NULL, _kill_thr, kt);
 }
 
 int

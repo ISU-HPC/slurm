@@ -8,7 +8,7 @@
  *  CODE-OCEC-09-009. All rights reserved.
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://slurm.schedmd.com/>.
+ *  For details, see <https://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -207,14 +207,14 @@ extern int other_job_resized(struct job_record *job_ptr,
 
 /*
  * Pass job-step signal to other plugin.
- * IN job_ptr - job to be signalled
+ * IN job_ptr - job to be signaled
  * IN signal  - signal(7) number
  */
 extern int other_job_signal(struct job_record *job_ptr, int signal);
 
 /*
  * Pass job memory allocation confirmation request to other plugin.
- * IN job_ptr - job to be signalled
+ * IN job_ptr - job to be signaled
  */
 extern int other_job_mem_confirm(struct job_record *job_ptr);
 

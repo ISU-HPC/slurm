@@ -2,11 +2,11 @@
  **  pmix_debug.h - PMIx debug primitives
  *****************************************************************************
  *  Copyright (C) 2014-2015 Artem Polyakov. All rights reserved.
- *  Copyright (C) 2015      Mellanox Technologies. All rights reserved.
+ *  Copyright (C) 2015-2017 Mellanox Technologies. All rights reserved.
  *  Written by Artem Polyakov <artpol84@gmail.com, artemp@mellanox.com>.
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://slurm.schedmd.com/>.
+ *  For details, see <https://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -45,7 +45,7 @@ int pmixp_dmdx_init(void);
 int pmixp_dmdx_finalize(void);
 int pmixp_dmdx_get(const char *nspace, int rank,
 		   pmix_modex_cbfunc_t cbfunc, void *cbdata);
-void pmixp_dmdx_process(Buf buf, char *host, uint32_t seq);
+void pmixp_dmdx_process(Buf buf, int nodeid, uint32_t seq);
 void pmixp_dmdx_timeout_cleanup(void);
 
 #endif /* PMIXP_DMDX_H */
