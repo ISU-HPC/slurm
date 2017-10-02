@@ -6,7 +6,7 @@
  *  Written by Bull-HN-PHX/Martin Perry,
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://slurm.schedmd.com/>.
+ *  For details, see <https://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -130,7 +130,7 @@ extern ext_sensors_data_t *ext_sensors_alloc(void)
 	ext_sensors_data_t *ext_sensors =
 		xmalloc(sizeof(struct ext_sensors_data));
 
-	ext_sensors->consumed_energy = NO_VAL;
+	ext_sensors->consumed_energy = NO_VAL64;
 	ext_sensors->temperature = NO_VAL;
 
 	return ext_sensors;

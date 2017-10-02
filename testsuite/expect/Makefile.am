@@ -11,7 +11,6 @@ EXTRA_DIST = \
 	mpi-testscripts/script.slurm.sh	\
 	globals				\
 	globals_accounting		\
-	pkill				\
 	README				\
 	regression			\
 	regression.py			\
@@ -124,7 +123,6 @@ EXTRA_DIST = \
 	test1.96			\
 	test1.96.prog.c			\
 	test1.97			\
-	test1.98			\
 	test1.99			\
 	test1.100			\
 	test1.101			\
@@ -140,6 +138,8 @@ EXTRA_DIST = \
 	test1.111			\
 	test1.112			\
 	test1.113			\
+	test1.114			\
+	test1.115			\
 	test2.1				\
 	test2.2				\
 	test2.3				\
@@ -232,6 +232,8 @@ EXTRA_DIST = \
 	test6.13.prog.c			\
 	test6.14			\
 	test6.15			\
+	test6.16			\
+	test6.17			\
 	test7.1				\
 	test7.2				\
 	test7.2.prog.c			\
@@ -244,11 +246,6 @@ EXTRA_DIST = \
 	test7.5.prog.c			\
 	test7.6				\
 	test7.6.prog.c			\
-	test7.7				\
-	test7.7.crypto.c		\
-	test7.7.prog.c			\
-	test7.8				\
-	test7.8.prog.c			\
 	test7.9				\
 	test7.9.prog.c			\
 	test7.10			\
@@ -287,9 +284,6 @@ EXTRA_DIST = \
 	test8.4.prog.c			\
 	test8.5				\
 	test8.6				\
-	test8.7				\
-	test8.7.crypto.c		\
-	test8.7.prog.c			\
 	test8.8				\
 	test8.9				\
 	test8.10			\
@@ -374,7 +368,6 @@ EXTRA_DIST = \
 	test15.14			\
 	test15.15			\
 	test15.16			\
-	test15.17			\
 	test15.18			\
 	test15.19			\
 	test15.20			\
@@ -518,6 +511,7 @@ EXTRA_DIST = \
 	test21.35			\
 	test21.36			\
 	test21.37			\
+	test21.38			\
 	inc21.30.1                      \
 	inc21.30.2                      \
 	inc21.30.3                      \
@@ -537,7 +531,7 @@ EXTRA_DIST = \
 	inc21.30.17			\
 	inc21.34.1			\
 	inc21.34.2			\
-	inc21.34_test			\
+	inc21.34_tests			\
 	test22.1			\
 	inc22.1.1                       \
 	inc22.1.2                       \
@@ -581,6 +575,7 @@ EXTRA_DIST = \
 	test29.8			\
 	test30.1			\
 	test31.1			\
+	test31.2			\
 	test32.1			\
 	test32.2			\
 	test32.3			\
@@ -614,7 +609,38 @@ EXTRA_DIST = \
 	test36.4			\
 	test37.1			\
 	test37.2			\
-	test37.3
+	test37.3			\
+	test37.4			\
+	test37.5			\
+	test37.6			\
+	test37.7			\
+	test37.8			\
+	test37.9			\
+	test37.10			\
+	test37.11			\
+	test37.12			\
+	test37.13			\
+	test37.14			\
+	test37.15			\
+	test37.16			\
+	test38.1                        \
+	test38.2                        \
+	test38.3                        \
+	test38.4                        \
+	test38.5                        \
+	test38.6                        \
+	test38.6.prog.c			\
+	test38.7			\
+	test38.7.prog.c			\
+	test38.8			\
+	test38.9			\
+	test38.10			\
+	test38.11			\
+	test38.12			\
+	test38.13			\
+	test38.14			\
+	test38.15			\
+	test38.16
 
 distclean-local:
 	rm -rf *error *output

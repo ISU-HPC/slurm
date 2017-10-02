@@ -1,3 +1,3 @@
 # Makefile for checkpoint plugins
 
-SUBDIRS = blcr dmtcp none ompi poe
+SUBDIRS = blcr dmtcp none ompi 

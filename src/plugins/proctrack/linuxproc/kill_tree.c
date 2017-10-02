@@ -8,7 +8,7 @@
  *  CODE-OCEC-09-009. All rights reserved.
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://slurm.schedmd.com/>.
+ *  For details, see <https://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -324,12 +324,13 @@ extern pid_t find_ancestor(pid_t process, char *process_name)
 {
 	char path[PATH_MAX], *rbuf;
 	ssize_t buf_used;
-	int fd;
+	int fd, len;
 	long pid, ppid;
 
-	rbuf = xmalloc_nz(4096);
+	len = strlen(process_name);
+	rbuf = xmalloc_nz(4097);
 	pid = ppid = (long)process;
-	do {
+	while (1) {
 		if (ppid <= 1) {
 			pid = 0;
 			break;
@@ -340,8 +341,11 @@ extern pid_t find_ancestor(pid_t process, char *process_name)
 			pid = 0;
 			break;
 		}
-		memset(rbuf, 0, 4096);
 		buf_used = read(fd, rbuf, 4096);
+		if (buf_used >= 0)
+			rbuf[buf_used] = '\0';
+		else
+			rbuf[0] = '\0';	
 		if ((buf_used <= 0) || (buf_used >= 4096)) {
 			close(fd);
 			pid = 0;
@@ -358,12 +362,18 @@ extern pid_t find_ancestor(pid_t process, char *process_name)
 			continue;
 		}
 		buf_used = read(fd, rbuf, 4096);
+		if (buf_used >= 0)
+			rbuf[buf_used] = '\0';
+		else
+			rbuf[0] = '\0';	
 		if ((buf_used <= 0) || (buf_used >= 4096)) {
 			close(fd);
 			continue;
 		}
 		close(fd);
-	} while (!strstr(rbuf, process_name));
+		if (strncmp(rbuf, process_name, len) == 0)
+			break;
+	}
 	xfree(rbuf);
 
 	return pid;
@@ -375,8 +385,7 @@ extern int proctrack_linuxproc_get_pids(pid_t top, pid_t **pids, int *npids)
 	xppid_t **hashtbl;
 	xpid_t *list, *ptr;
 	pid_t *p;
-	int i;
-	int len = 32;
+	int i, len = 32, rc;
 
 	if ((hashtbl = _build_hashtbl()) == NULL)
 		return SLURM_ERROR;
@@ -394,7 +403,7 @@ extern int proctrack_linuxproc_get_pids(pid_t top, pid_t **pids, int *npids)
 	i = 0;
 	while (ptr != NULL) {
 		if (ptr->is_usercmd) { /* don't include the slurmstepd */
-			if (i >= len-1) {
+			if (i >= len - 1) {
 				len *= 2;
 				xrealloc(p, (sizeof(pid_t) * len));
 			}
@@ -408,14 +417,13 @@ extern int proctrack_linuxproc_get_pids(pid_t top, pid_t **pids, int *npids)
 		xfree(p);
 		*pids = NULL;
 		*npids = 0;
-		_destroy_hashtbl(hashtbl);
-		_destroy_list(list);
-		return SLURM_ERROR;
+		rc = SLURM_ERROR;
 	} else {
 		*pids = p;
 		*npids = i;
-		_destroy_hashtbl(hashtbl);
-		_destroy_list(list);
-		return SLURM_SUCCESS;
+		rc = SLURM_SUCCESS;
 	}
+	_destroy_hashtbl(hashtbl);
+	_destroy_list(list);
+	return rc;
 }

@@ -9,7 +9,7 @@
  *  CODE-OCEC-09-009. All rights reserved.
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://slurm.schedmd.com/>.
+ *  For details, see <https://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -55,11 +55,15 @@
 #include "src/squeue/squeue.h"
 
 /* getopt_long options, integers but not characters */
-#define OPT_LONG_HELP      0x100
-#define OPT_LONG_USAGE     0x101
-#define OPT_LONG_HIDE      0x102
-#define OPT_LONG_START     0x103
-#define OPT_LONG_NOCONVERT 0x104
+#define OPT_LONG_HELP         0x100
+#define OPT_LONG_USAGE        0x101
+#define OPT_LONG_HIDE         0x102
+#define OPT_LONG_START        0x103
+#define OPT_LONG_NOCONVERT    0x104
+#define OPT_LONG_ARRAY_UNIQUE 0x105
+#define OPT_LONG_LOCAL        0x106
+#define OPT_LONG_SIBLING      0x107
+#define OPT_LONG_FEDR         0x108
 
 /* FUNCTIONS */
 static List  _build_job_list( char* str );
@@ -84,7 +88,7 @@ static bool _find_a_host(char *, node_info_msg_t *);
  * parse_command_line
  */
 extern void
-parse_command_line( int argc, char* argv[] )
+parse_command_line( int argc, char* *argv )
 {
 	char *env_val = NULL;
 	bool override_format_env = false;
@@ -94,12 +98,15 @@ parse_command_line( int argc, char* argv[] )
 		{"accounts",   required_argument, 0, 'A'},
 		{"all",        no_argument,       0, 'a'},
 		{"array",      no_argument,       0, 'r'},
+		{"array-unique",no_argument,      0, OPT_LONG_ARRAY_UNIQUE},
 		{"Format",     required_argument, 0, 'O'},
 		{"format",     required_argument, 0, 'o'},
+		{"federation", no_argument,       0, OPT_LONG_FEDR},
 		{"help",       no_argument,       0, OPT_LONG_HELP},
 		{"hide",       no_argument,       0, OPT_LONG_HIDE},
 		{"iterate",    required_argument, 0, 'i'},
 		{"jobs",       optional_argument, 0, 'j'},
+		{"local",      no_argument,       0, OPT_LONG_LOCAL},
 		{"long",       no_argument,       0, 'l'},
 		{"licenses",   required_argument, 0, 'L'},
 		{"cluster",    required_argument, 0, 'M'},
@@ -114,6 +121,8 @@ parse_command_line( int argc, char* argv[] )
 		{"priority",   no_argument,       0, 'P'},
 		{"qos",        required_argument, 0, 'q'},
 		{"reservation",required_argument, 0, 'R'},
+		{"sib",        no_argument,       0, OPT_LONG_SIBLING},
+		{"sibling",    no_argument,       0, OPT_LONG_SIBLING},
 		{"sort",       required_argument, 0, 'S'},
 		{"start",      no_argument,       0, OPT_LONG_START},
 		{"steps",      optional_argument, 0, 's'},
@@ -128,21 +137,34 @@ parse_command_line( int argc, char* argv[] )
 
 	params.convert_flags = CONVERT_NUM_UNIT_EXACT;
 
+	if (slurmctld_conf.fed_params &&
+	    strstr(slurmctld_conf.fed_params, "fed_display"))
+		params.federation_flag = true;
+
 	if (getenv("SQUEUE_ALL"))
 		params.all_flag = true;
 	if (getenv("SQUEUE_ARRAY"))
 		params.array_flag = true;
 	if ( ( env_val = getenv("SQUEUE_SORT") ) )
 		params.sort = xstrdup(env_val);
+	if (getenv("SQUEUE_ARRAY_UNIQUE"))
+		params.array_unique_flag = true;
 	if ( ( env_val = getenv("SLURM_CLUSTERS") ) ) {
 		if (!(params.clusters = slurmdb_get_info_cluster(env_val))) {
 			print_db_notok(env_val, 1);
 			exit(1);
 		}
 		working_cluster_rec = list_peek(params.clusters);
+		params.local_flag = true;
 	}
+	if (getenv("SQUEUE_FEDERATION"))
+		params.federation_flag = true;
+	if (getenv("SQUEUE_LOCAL"))
+		params.local_flag = true;
 	if (getenv("SQUEUE_PRIORITY"))
 		params.priority_flag = true;
+	if (getenv("SQUEUE_SIB") || getenv("SQUEUE_SIBLING"))
+		params.sibling_flag = true;
 	while ((opt_char = getopt_long(argc, argv,
 				       "A:ahi:j::lL:n:M:O:o:p:Pq:R:rs::S:t:u:U:vVw:",
 				       long_options, &option_index)) != -1) {
@@ -197,6 +219,7 @@ parse_command_line( int argc, char* argv[] )
 				exit(1);
 			}
 			working_cluster_rec = list_peek(params.clusters);
+			params.local_flag = true;
 			break;
 		case (int) 'n':
 			xfree(params.names);
@@ -292,11 +315,23 @@ parse_command_line( int argc, char* argv[] )
 				exit(1);
 			}
 			break;
+		case OPT_LONG_ARRAY_UNIQUE:
+			params.array_unique_flag = true;
+			break;
 		case OPT_LONG_HELP:
 			_help();
 			exit(0);
+		case OPT_LONG_FEDR:
+			params.federation_flag = true;
+			break;
 		case OPT_LONG_HIDE:
 			params.all_flag = false;
+			break;
+		case OPT_LONG_LOCAL:
+			params.local_flag = true;
+			break;
+		case OPT_LONG_SIBLING:
+			params.sibling_flag = true;
 			break;
 		case OPT_LONG_START:
 			params.start_flag = true;
@@ -487,6 +522,8 @@ _parse_state( char* str, uint32_t* states )
 	xstrcat(state_names, job_state_string(JOB_CONFIGURING));
 	xstrcat(state_names, ",");
 	xstrcat(state_names, job_state_string(JOB_RESIZING));
+	xstrcat(state_names, ",");
+	xstrcat(state_names, job_state_string(JOB_REVOKED));
 	xstrcat(state_names, ",");
 	xstrcat(state_names, job_state_string(JOB_SPECIAL_EXIT));
 	error("Valid job states include: %s\n", state_names);
@@ -920,7 +957,12 @@ extern int parse_long_format( char* format_long )
 
 		if (params.step_flag) {
 
-			if (!xstrcasecmp(token, "numtask"))
+			if (!xstrcasecmp(token, "cluster"))
+				step_format_add_cluster_name(params.format_list,
+							     field_size,
+							     right_justify,
+							     suffix);
+			else if (!xstrcasecmp(token, "numtask"))
 				step_format_add_num_tasks( params.format_list,
 							   field_size,
 							   right_justify,
@@ -1068,6 +1110,11 @@ extern int parse_long_format( char* format_long )
 							field_size,
 							right_justify,
 							suffix);
+			else if (!xstrcasecmp(token, "cluster"))
+				job_format_add_cluster_name(params.format_list,
+							    field_size,
+							    right_justify,
+							    suffix);
 			else if (!xstrcasecmp(token, "delayboot"))
 				job_format_add_delay_boot(params.format_list,
 							  field_size,
@@ -1115,6 +1162,11 @@ extern int parse_long_format( char* format_long )
 							 field_size,
 							 right_justify,
 							 suffix );
+			else if (!xstrcasecmp(token, "clusterfeature"))
+				job_format_add_cluster_features(
+							params.format_list,
+							field_size,
+							right_justify, suffix);
 			else if (!xstrcasecmp(token, "arrayjobid"))
 				job_format_add_array_job_id(
 					params.format_list,
@@ -1258,6 +1310,12 @@ extern int parse_long_format( char* format_long )
 							   field_size,
 							   right_justify,
 							   suffix );
+			else if (!xstrcasecmp(token, "lastschedeval"))
+				job_format_add_job_last_sched_eval(
+					params.format_list,
+					field_size,
+					right_justify,
+					suffix );
 			else if (!xstrcasecmp(token, "statecompact"))
 				job_format_add_job_state_compact(
 					params.format_list,
@@ -1371,6 +1429,39 @@ extern int parse_long_format( char* format_long )
 							 field_size,
 							 right_justify,
 							 suffix );
+			else if (!xstrcasecmp(token, "origin"))
+				job_format_add_fed_origin(params.format_list,
+							  field_size,
+							  right_justify,
+							  suffix );
+			else if (!xstrcasecmp(token, "originraw"))
+				job_format_add_fed_origin_raw(
+							params.format_list,
+							field_size,
+							right_justify,
+							suffix );
+			else if (!xstrcasecmp(token, "siblingsactive"))
+				job_format_add_fed_siblings_active(
+							params.format_list,
+							field_size,
+							right_justify, suffix );
+			else if (!xstrcasecmp(token, "siblingsactiveraw"))
+				job_format_add_fed_siblings_active_raw(
+							params.format_list,
+							field_size,
+							right_justify,
+							suffix );
+			else if (!xstrcasecmp(token, "siblingsviable"))
+				job_format_add_fed_siblings_viable(
+							params.format_list,
+							field_size,
+							right_justify, suffix );
+			else if (!xstrcasecmp(token, "siblingsviableraw"))
+				job_format_add_fed_siblings_viable_raw(
+							params.format_list,
+							field_size,
+							right_justify,
+							suffix );
 			else if (!xstrcasecmp(token, "maxcpus"))
 				job_format_add_max_cpus(params.format_list,
 							 field_size,
@@ -1492,6 +1583,21 @@ extern int parse_long_format( char* format_long )
 							field_size,
 							right_justify,
 							suffix );
+			else if (!xstrcasecmp(token, "packjobid"))
+				job_format_add_pack_job_id(params.format_list,
+							field_size,
+							right_justify,
+							suffix );
+			else if (!xstrcasecmp(token, "packjoboffset"))
+				job_format_add_pack_job_offset(params.format_list,
+							field_size,
+							right_justify,
+							suffix );
+			else if (!xstrcasecmp(token, "packjobidset"))
+				job_format_add_pack_job_id_set(params.format_list,
+							field_size,
+							right_justify,
+							suffix );
 			else {
 				job_format_add_invalid( params.format_list,
 							field_size,
@@ -1610,16 +1716,19 @@ _print_options(void)
 	printf( "-----------------------------\n" );
 	printf( "all         = %s\n", params.all_flag ? "true" : "false");
 	printf( "array       = %s\n", params.array_flag ? "true" : "false");
+	printf( "federation  = %s\n", params.federation_flag ? "true":"false");
 	printf( "format      = %s\n", params.format );
 	printf( "iterate     = %d\n", params.iterate );
 	printf( "job_flag    = %d\n", params.job_flag );
 	printf( "jobs        = %s\n", params.jobs );
 	printf( "licenses    = %s\n", params.licenses );
+	printf( "local       = %s\n", params.local_flag ? "true" : "false");
 	printf( "names       = %s\n", params.names );
 	printf( "nodes       = %s\n", hostlist ) ;
 	printf( "partitions  = %s\n", params.partitions ) ;
 	printf( "priority    = %s\n", params.priority_flag ? "true" : "false");
 	printf( "reservation = %s\n", params.reservation ) ;
+	printf( "sibling      = %s\n", params.sibling_flag ? "true" : "false");
 	printf( "sort        = %s\n", params.sort ) ;
 	printf( "start_flag  = %d\n", params.start_flag );
 	printf( "states      = %s\n", params.states ) ;
@@ -1749,6 +1858,7 @@ _build_job_list( char* str )
 		list_append( my_list, job_step_id );
 		job = strtok_r (NULL, ",", &tmp_char);
 	}
+	xfree(my_job_list);
 	return my_list;
 }
 
@@ -1762,7 +1872,7 @@ static List
 _build_str_list(char* str)
 {
 	List my_list;
-	char *tok = NULL, *tmp_char = NULL, *my_str = NULL;
+	char *elem, *tok = NULL, *tmp_char = NULL, *my_str = NULL;
 
 	if (str == NULL)
 		return NULL;
@@ -1770,11 +1880,11 @@ _build_str_list(char* str)
 	my_str = xstrdup(str);
 	tok = strtok_r(my_str, ",", &tmp_char);
 	while (tok) {
-		list_append(my_list, tok);
+		elem = xstrdup(tok);
+		list_append(my_list, elem);
 		tok = strtok_r(NULL, ",", &tmp_char);
 	}
-	/* NOTE: Do NOT xfree my_list or the elements just added to the
-	 * list will also be freed. */
+	xfree(my_str);
 	return my_list;
 }
 
@@ -1790,29 +1900,29 @@ _build_state_list( char* str )
 	char *state = NULL, *tmp_char = NULL, *my_state_list = NULL;
 	uint32_t *state_id = NULL;
 
-	if ( str == NULL)
+	if (str == NULL)
 		return NULL;
-	if ( xstrcasecmp( str, "all" ) == 0 )
+	if (xstrcasecmp( str, "all") == 0)
 		return _build_all_states_list ();
 
-	my_list = list_create( NULL );
-	my_state_list = xstrdup( str );
+	my_list = list_create(NULL);
+	my_state_list = xstrdup(str);
 	state = strtok_r( my_state_list, ",", &tmp_char );
-	while (state)
-	{
-		state_id = xmalloc( sizeof( uint32_t ) );
-		if ( _parse_state( state, state_id ) != SLURM_SUCCESS )
-			exit( 1 );
-		list_append( my_list, state_id );
-		state = strtok_r( NULL, ",", &tmp_char );
+	while (state) {
+		state_id = xmalloc(sizeof(uint32_t));
+		if (_parse_state(state, state_id) != SLURM_SUCCESS)
+			exit(1);
+		list_append(my_list, state_id);
+		state = strtok_r(NULL, ",", &tmp_char);
 	}
+	xfree(my_state_list);
 	return my_list;
 
 }
 
 static void _append_state_list(List my_list, uint32_t state_id)
 {
-	uint16_t *state_rec;
+	uint32_t *state_rec;
 
 	state_rec = xmalloc(sizeof(uint32_t));
 	*state_rec = state_id;
@@ -1835,6 +1945,7 @@ _build_all_states_list( void )
 
 	_append_state_list(my_list, JOB_COMPLETING);
 	_append_state_list(my_list, JOB_CONFIGURING);
+	_append_state_list(my_list, JOB_REVOKED);
 	_append_state_list(my_list, JOB_SPECIAL_EXIT);
 
 	return my_list;
@@ -1855,37 +1966,40 @@ _build_step_list( char* str )
 	int job_id, array_id, step_id;
 	squeue_job_step_t *job_step_id = NULL;
 
-	if ( str == NULL)
+	if (str == NULL)
 		return NULL;
-	my_list = list_create( NULL );
-	my_step_list = xstrdup( str );
-	step = strtok_r( my_step_list, ",", &tmp_char );
+
+	my_list = list_create(NULL);
+	my_step_list = xstrdup(str);
+	step = strtok_r(my_step_list, ",", &tmp_char);
 	while (step) {
-		job_name = strtok_r( step, ".", &tmps_char );
-		step_name = strtok_r( NULL, ".", &tmps_char );
-		job_id = strtol( job_name, &end_ptr, 10 );
+		job_name = strtok_r(step, ".", &tmps_char);
+		if (job_name == NULL)
+			break;
+		step_name = strtok_r(NULL, ".", &tmps_char);
+		job_id = strtol(job_name, &end_ptr, 10);
 		if (end_ptr[0] == '_')
-			array_id = strtol( end_ptr + 1, &end_ptr, 10 );
+			array_id = strtol(end_ptr + 1, &end_ptr, 10);
 		else
 			array_id = NO_VAL;
 		if (step_name == NULL) {
-			error ( "Invalid job_step id: %s.??",
-				 job_name );
-			exit( 1 );
+			error("Invalid job_step id: %s.??", job_name);
+			exit(1);
 		}
 		step_id = strtol( step_name, &end_ptr, 10 );
 		if ((job_id <= 0) || (step_id < 0)) {
-			error( "Invalid job_step id: %s.%s",
-				job_name, step_name );
-			exit( 1 );
+			error("Invalid job_step id: %s.%s",
+			      job_name, step_name);
+			exit(1);
 		}
-		job_step_id = xmalloc( sizeof( squeue_job_step_t ) );
+		job_step_id = xmalloc(sizeof(squeue_job_step_t));
 		job_step_id->job_id   = job_id;
 		job_step_id->array_id = array_id;
 		job_step_id->step_id  = step_id;
-		list_append( my_list, job_step_id );
-		step = strtok_r( NULL, ",", &tmp_char);
+		list_append(my_list, job_step_id);
+		step = strtok_r(NULL, ",", &tmp_char);
 	}
+	xfree(my_step_list);
 	return my_list;
 }
 
@@ -1901,23 +2015,25 @@ _build_user_list( char* str )
 	char *user = NULL;
 	char *tmp_char = NULL, *my_user_list = NULL;
 
-	if ( str == NULL )
+	if (str == NULL)
 		return NULL;
-	my_list = list_create( NULL );
-	my_user_list = xstrdup( str );
-	user = strtok_r( my_user_list, ",", &tmp_char );
+
+	my_list = list_create(NULL);
+	my_user_list = xstrdup(str);
+	user = strtok_r(my_user_list, ",", &tmp_char);
 	while (user) {
 		uid_t some_uid;
-		if ( uid_from_string( user, &some_uid ) == 0 ) {
+		if (uid_from_string(user, &some_uid) == 0) {
 			uint32_t *user_id = NULL;
-			user_id = xmalloc( sizeof( uint32_t ));
+			user_id = xmalloc(sizeof(uint32_t));
 			*user_id = (uint32_t) some_uid;
-			list_append( my_list, user_id );
+			list_append(my_list, user_id);
 		} else {
-			error( "Invalid user: %s\n", user);
+			error("Invalid user: %s\n", user);
 		}
-		user = strtok_r (NULL, ",", &tmp_char);
+		user = strtok_r(NULL, ",", &tmp_char);
 	}
+	xfree(my_user_list);
 	return my_list;
 }
 
@@ -1928,7 +2044,8 @@ Usage: squeue [-A account] [--clusters names] [-i seconds] [--job jobid]\n\
               [-n name] [-o format] [-p partitions] [--qos qos]\n\
               [--reservation reservation] [--sort fields] [--start]\n\
               [--step step_id] [-t states] [-u user_name] [--usage]\n\
-              [-L licenses] [-w nodes] [-ahjlrsv]\n");
+              [-L licenses] [-w nodes] [--federation] [--local] [--sibling]\n\
+	      [-ahjlrsv]\n");
 }
 
 static void _help(void)
@@ -1938,26 +2055,35 @@ Usage: squeue [OPTIONS]\n\
   -A, --account=account(s)        comma separated list of accounts\n\
 				  to view, default is all accounts\n\
   -a, --all                       display jobs in hidden partitions\n\
+      --array-unique              display one unique pending job array\n\
+                                  element per line\n\
+      --federation                Report federated information if a member\n\
+                                  of one\n\
   -h, --noheader                  no headers on output\n\
       --hide                      do not display jobs in hidden partitions\n\
   -i, --iterate=seconds           specify an interation period\n\
   -j, --job=job(s)                comma separated list of jobs IDs\n\
-				  to view, default is all\n\
+                                  to view, default is all\n\
+      --local                     Report information only about jobs on the\n\
+                                  local cluster. Overrides --federation.\n\
   -l, --long                      long report\n\
   -L, --licenses=(license names)  comma separated list of license names to view\n\
   -M, --clusters=cluster_name     cluster to issue commands to.  Default is\n\
                                   current cluster.  cluster with no name will\n\
-                                  reset to default.\n\
+                                  reset to default. Implies --local.\n\
   -n, --name=job_name(s)          comma separated list of job names to view\n\
-  --noconvert                     don't convert units from their original type\n\
-				  (e.g. 2048M won't be converted to 2G).\n\
+      --noconvert                 don't convert units from their original type\n\
+                                  (e.g. 2048M won't be converted to 2G).\n\
   -o, --format=format             format specification\n\
+  -O, --Format=format             format specification\n\
   -p, --partition=partition(s)    comma separated list of partitions\n\
 				  to view, default is all partitions\n\
   -q, --qos=qos(s)                comma separated list of qos's\n\
 				  to view, default is all qos's\n\
   -R, --reservation=name          reservation to view, default is all\n\
   -r, --array                     display one job array element per line\n\
+      --sibling                   Report information about all sibling jobs\n\
+                                  on a federated cluster. Implies --federation.\n\
   -s, --step=step(s)              comma separated list of job steps\n\
 				  to view, default is all\n\
   -S, --sort=fields               comma separated list of fields to sort on\n\
@@ -2001,9 +2127,11 @@ _check_node_names(hostset_t names)
 	while ((host = hostlist_next(itr))) {
 		if (!_find_a_host(host, node_info)) {
 			error("Invalid node name %s", host);
+			free(host);
 			hostlist_iterator_destroy(itr);
 			return false;
 		}
+		free(host);
 	}
 	hostlist_iterator_destroy(itr);
 

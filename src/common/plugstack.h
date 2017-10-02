@@ -6,7 +6,7 @@
  *  CODE-OCEC-09-009. All rights reserved.
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://slurm.schedmd.com/>.
+ *  For details, see <https://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -108,6 +108,15 @@ struct option *spank_option_table_create (const struct option *orig_options);
  *   spank_p[tion_table_create.
  */
 void spank_option_table_destroy (struct option *opt_table);
+
+/*
+ *  Process all spank options in the environment calling the options callback if
+ *  found. The option should handle being called twice -- environment variable
+ *  and by command line.
+ *
+ *  Returns <0 if any option's callback fails. Zero otherwise.
+ */
+extern int spank_process_env_options();
 
 /*
  *  Process a single spank option which was tagged by `optval' in the

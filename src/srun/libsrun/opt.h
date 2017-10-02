@@ -8,7 +8,7 @@
  *  CODE-OCEC-09-009. All rights reserved.
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://slurm.schedmd.com/>.
+ *  For details, see <https://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -50,15 +50,14 @@
 #include <time.h>
 #include <unistd.h>
 
-#include "src/common/macros.h" /* true and false */
+#include "src/common/bitstring.h"
 #include "src/common/env.h"
-
-#include "fname.h"
+#include "src/common/list.h"
+#include "src/common/macros.h" /* true and false */
 
 #define DEFAULT_IMMEDIATE	1
 #define MAX_THREADS		60
-
-#define INT_UNASSIGNED ((int)-1)
+#define MAX_PACK_COUNT		128
 
 /* global variables relating to user options */
 extern int _verbose;
@@ -66,7 +65,7 @@ extern int _verbose;
 extern enum modes mode;
 
 typedef struct srun_options {
-
+	char *clusters;		/* cluster to run this on. */
 	char *progname;		/* argv[0] of this program or
 				 * configuration file if multi_prog */
 	bool multi_prog;	/* multiple programs to execute */
@@ -89,10 +88,15 @@ typedef struct srun_options {
 	int32_t sockets_per_node; /* --sockets-per-node=n      */
 	int32_t cores_per_socket; /* --cores-per-socket=n      */
 	int32_t threads_per_core; /* --threads-per-core=n      */
+	bool threads_per_core_set;/* --threads-per-core set explicitly set */
 	int32_t ntasks_per_node;   /* --ntasks-per-node=n	*/
 	int32_t ntasks_per_socket; /* --ntasks-per-socket=n	*/
 	int ntasks_per_core;	/* --ntasks-per-core=n		*/
+	bool ntasks_per_core_set; /* --ntasks-per-core set explicitly set */
+	char *hint_env;		/* SLURM_HINT env var setting	*/
+	bool hint_set;		/* --hint set explicitly set	*/
 	cpu_bind_type_t cpu_bind_type; /* --cpu_bind=           */
+	bool cpu_bind_type_set;	/* --cpu_bind set explicitly set */
 	char *cpu_bind;		/* binding map for map/mask_cpu */
 	mem_bind_type_t mem_bind_type; /* --mem_bind=		*/
 	char *mem_bind;		/* binding map for map/mask_mem	*/
@@ -126,7 +130,6 @@ typedef struct srun_options {
 	bool job_name_set_env;	/* true if job_name set by env var */
 	unsigned int jobid;     /* --jobid=jobid                */
 	bool jobid_set;		/* true if jobid explicitly set */
-	char *mpi_type;		/* --mpi=type			*/
 	char *dependency;	/* --dependency, -P type:jobid	*/
 	int nice;		/* --nice			*/
 	uint32_t priority;	/* --priority */
@@ -138,7 +141,6 @@ typedef struct srun_options {
 	char *efname;		/* --error, -e filename         */
 
 	int  slurmd_debug;	/* --slurmd-debug, -D           */
-	bool join;		/* --join, 	    -j		*/
 
 	/* no longer need these, they are set globally : 	*/
 	/*int verbose;*/	/* -v, --verbose		*/
@@ -180,6 +182,7 @@ typedef struct srun_options {
 	int64_t mem_per_cpu;	/* --mem-per-cpu=n		*/
 	long pn_min_tmp_disk;	/* --tmp=n			*/
 	char *constraints;	/* --constraints=, -C constraint*/
+	char *c_constraints;	/* --cluster-constraints=       */
 	char *gres;		/* --gres=			*/
 	bool contiguous;	/* --contiguous			*/
 	char *nodelist;		/* --nodelist=node1,node2,...	*/
@@ -239,18 +242,26 @@ typedef struct srun_options {
 	char *mcs_label;	/* mcs label if mcs plugin in use */
 	time_t deadline; 	/* --deadline                   */
 	uint32_t job_flags;	/* --gres-flags */
-	uint32_t delay_boot;	/* --delay-boot			*/	
+	uint32_t delay_boot;	/* --delay-boot			*/
+	char *pack_group;	/* --pack-group			*/
+	bitstr_t *pack_grp_bits;/* --pack-group	in bitmap form	*/
+	int pack_step_cnt;	/* Total count of pack groups to launch */
+	uint16_t x11;           /* --x11			*/
+	char *x11_magic_cookie; /* cookie retrieved from xauth */
+	/* no x11_target_host here, alloc_host will be equivalent */
+	uint16_t x11_target_port; /* target display TCP port on localhost */
 } opt_t;
 
-extern opt_t opt;
-
-extern int error_exit;		/* exit code for slurm errors */
-extern int immediate_exit;	/* exit code for --imediate option & busy */
-extern bool srun_max_timer;
-extern bool srun_shutdown;
-extern time_t srun_begin_time;	/* begin time of srun process */
-extern int sig_array[];
+extern int	error_exit;	/* exit code for slurm errors */
 extern resource_allocation_response_msg_t *global_resp;
+extern int	immediate_exit;	/* exit code for --imediate option & busy */
+extern char *	mpi_type;
+extern opt_t	opt;
+extern List	opt_list;
+extern int	sig_array[];
+extern time_t	srun_begin_time; /* begin time of srun process */
+extern bool	srun_max_timer;
+extern bool	srun_shutdown;
 
 /* return whether any constraints were specified by the user
  * (if new constraints are added above, might want to add them to this
@@ -258,20 +269,25 @@ extern resource_allocation_response_msg_t *global_resp;
  */
 #define constraints_given() ((opt.pn_min_cpus     != NO_VAL) || \
 			     (opt.pn_min_memory   != NO_VAL64) || \
-			     (opt.job_max_memory   != NO_VAL64) || \
+			     (opt.job_max_memory  != NO_VAL64) || \
 			     (opt.pn_min_tmp_disk != NO_VAL) || \
 			     (opt.pn_min_sockets  != NO_VAL) || \
 			     (opt.pn_min_cores    != NO_VAL) || \
 			     (opt.pn_min_threads  != NO_VAL) || \
 			     (opt.contiguous))
 
-/* process options:
+/*
+ * process options:
  * 1. set defaults
  * 2. update options with env vars
  * 3. update options with commandline args
  * 4. perform some verification that options are reasonable
+ *
+ * argc IN - Count of elements in argv
+ * argv IN - Array of elements to parse
+ * argc_off OUT - Offset of first non-parsable element
  */
-int initialize_and_process_args(int argc, char *argv[]);
+extern int initialize_and_process_args(int argc, char **argv, int *argc_off);
 
 /* external functions available for SPANK plugins to modify the environment
  * exported to the SLURM Prolog and Epilog programs */
@@ -283,5 +299,17 @@ extern int   spank_unset_job_env(const char *name);
 /* Initialize the spank_job_env based upon environment variables set
  *	via salloc or sbatch commands */
 extern void init_spank_env(void);
+
+/*
+ * Find option structure for a given pack job offset
+ * pack_offset IN - Offset into pack job, -1 if regular job, -2 to reset
+ * RET - Pointer to next matching option structure or NULL if none found
+ */
+extern opt_t *get_next_opt(int pack_offset);
+
+/*
+ * Return maximum pack_group value for any step launch option request
+ */
+extern int get_max_pack_group(void);
 
 #endif	/* _HAVE_OPT_H */

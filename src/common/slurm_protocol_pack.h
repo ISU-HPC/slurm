@@ -8,7 +8,7 @@
  *  CODE-OCEC-09-009. All rights reserved.
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://slurm.schedmd.com/>.
+ *  For details, see <https://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -156,20 +156,14 @@ extern int slurm_unpack_block_info_msg(
 	block_info_msg_t **block_info_msg_pptr, Buf buffer,
 	uint16_t protocol_version);
 
-/* Translate task_dist value from v15.08+ format to v14.11- format */
-extern uint16_t task_dist_new2old(uint32_t new_task_dist);
-/* Translate task_dist value from v14.11- format to v15.08+ format */
-extern uint32_t task_dist_old2new(uint16_t old_task_dist);
-
 /* Translate memory limits from old format to new */
 /* Remove when version 16.05 support is no longer required. */
 extern uint32_t xlate_mem_new2old(uint64_t new_mem);
 extern uint64_t xlate_mem_old2new(uint32_t old_mem);
+extern uint16_t xlate_group_info_new2old(uint16_t group_time,
+					 uint16_t group_force);
+extern void xlate_group_info_old2new(uint16_t group_info,
+				     uint16_t *group_time_ptr,
+				     uint16_t *group_force_ptr);
 
-/* Translate 32-bit nice value to equivalent 16-bit value.
- * Remove when version 15.08 support is no longer required. */
-extern uint16_t xlate_nice_new2old(uint32_t new_nice);
-/* Translate 16-bit nice value to equivalent 32-bit value.
- * Remove when version 15.08 support is no longer required. */
-extern uint32_t xlate_nice_old2new(uint16_t old_nice);
 #endif

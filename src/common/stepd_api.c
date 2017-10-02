@@ -9,7 +9,7 @@
  *  CODE-OCEC-09-009. All rights reserved.
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://slurm.schedmd.com/>.
+ *  For details, see <https://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -66,6 +66,7 @@
 #include "src/common/slurm_jobacct_gather.h"
 #include "src/common/slurm_protocol_api.h"
 #include "src/common/stepd_api.h"
+#include "src/common/strlcpy.h"
 #include "src/common/xmalloc.h"
 #include "src/common/xstring.h"
 
@@ -73,6 +74,7 @@ strong_alias(stepd_available, slurm_stepd_available);
 strong_alias(stepd_connect, slurm_stepd_connect);
 strong_alias(stepd_get_uid, slurm_stepd_get_uid);
 strong_alias(stepd_add_extern_pid, slurm_stepd_add_extern_pid);
+strong_alias(stepd_get_x11_display, slurm_stepd_get_x11_display);
 
 static bool
 _slurm_authorized_user()
@@ -164,7 +166,7 @@ _step_connect(const char *directory, const char *nodename,
 
 	xstrfmtcat(name, "%s/%s_%u.%u", directory, nodename, jobid, stepid);
 
-	strcpy(addr.sun_path, name);
+	strlcpy(addr.sun_path, name, sizeof(addr.sun_path));
 	len = strlen(addr.sun_path) + 1 + sizeof(addr.sun_family);
 
 	if (connect(fd, (struct sockaddr *) &addr, len) < 0) {
@@ -224,14 +226,16 @@ stepd_connect(const char *directory, const char *nodename,
 	int rc;
 	void *auth_cred;
 	char *auth_info;
+	char *local_nodename = NULL;
 	Buf buffer;
 	int len;
 
 	*protocol_version = 0;
 
 	if (nodename == NULL) {
-		if (!(nodename = _guess_nodename()))
+		if (!(local_nodename = _guess_nodename()))
 			return -1;
+		nodename = local_nodename;
 	}
 	if (directory == NULL) {
 		slurm_ctl_conf_t *cf;
@@ -245,7 +249,7 @@ stepd_connect(const char *directory, const char *nodename,
 	buffer = init_buf(0);
 	/* Create an auth credential */
 	auth_info = slurm_get_auth_info();
-	auth_cred = g_slurm_auth_create(NULL, 2, auth_info);
+	auth_cred = g_slurm_auth_create(auth_info);
 	xfree(auth_info);
 	if (auth_cred == NULL) {
 		error("Creating authentication credential: %s",
@@ -279,9 +283,9 @@ stepd_connect(const char *directory, const char *nodename,
 		error("slurmstepd refused authentication: %m");
 		slurm_seterrno(SLURM_PROTOCOL_AUTHENTICATION_ERROR);
 		goto rwfail;
-	} else if (rc)
+	} else if (rc) {
 		*protocol_version = rc;
-	else {
+	} else {
 		/* 0n older versions of Slurm < 14.11 SLURM_SUCCESS
 		 * was returned here instead of the protocol version.
 		 * This can be removed when we are 2 versions past
@@ -293,12 +297,14 @@ stepd_connect(const char *directory, const char *nodename,
 	}
 
 	free_buf(buffer);
+	xfree(local_nodename);
 	return fd;
 
 rwfail:
 	close(fd);
 fail1:
 	free_buf(buffer);
+	xfree(local_nodename);
 	return -1;
 }
 
@@ -440,14 +446,21 @@ rwfail:
  * Send a signal to the proctrack container of a job step.
  */
 int
-stepd_signal_container(int fd, uint16_t protocol_version, int signal)
+stepd_signal_container(int fd, uint16_t protocol_version, int signal, int flags)
 {
 	int req = REQUEST_SIGNAL_CONTAINER;
 	int rc;
 	int errnum = 0;
 
 	safe_write(fd, &req, sizeof(int));
-	safe_write(fd, &signal, sizeof(int));
+	if (protocol_version >= SLURM_17_11_PROTOCOL_VERSION) {
+		safe_write(fd, &signal, sizeof(int));
+		safe_write(fd, &flags, sizeof(int));
+	} else {
+		int tmp_signal = (uint32_t)signal | (uint32_t)(flags << 24);
+		safe_write(fd, &tmp_signal, sizeof(int));
+
+	}
 
 	/* Receive the return code and errno */
 	safe_read(fd, &rc, sizeof(int));
@@ -693,8 +706,12 @@ stepd_cleanup_sockets(const char *directory, const char *nodename)
 			if (fd == -1) {
 				debug("Unable to connect to socket %s", path);
 			} else {
-				stepd_signal_container(
-					fd, protocol_version, SIGKILL);
+				if (stepd_signal_container(
+					    fd, protocol_version, SIGKILL, 0)
+				    == -1) {
+					debug("Error sending SIGKILL to job step %u.%u",
+					      jobid, stepid);
+				}
 				close(fd);
 			}
 
@@ -753,6 +770,25 @@ extern int stepd_add_extern_pid(int fd, uint16_t protocol_version, pid_t pid)
 
 	debug("Leaving stepd_add_extern_pid");
 	return rc;
+rwfail:
+	return SLURM_ERROR;
+}
+
+extern int stepd_get_x11_display(int fd, uint16_t protocol_version)
+{
+	int req = REQUEST_X11_DISPLAY;
+	int display = 0;
+
+	safe_write(fd, &req, sizeof(int));
+
+	/*
+	 * Receive the display number,
+	 * or zero if x11 forwarding is not setup
+	 */
+	safe_read(fd, &display, sizeof(int));
+
+	debug("Leaving stepd_get_x11_display");
+	return display;
 rwfail:
 	return SLURM_ERROR;
 }
@@ -940,7 +976,9 @@ stepd_completion(int fd, uint16_t protocol_version, step_complete_msg_t *sent)
 
 	errno = errnum;
 	return rc;
+
 rwfail:
+	FREE_NULL_BUFFER(buffer);
 	return -1;
 }
 
@@ -999,7 +1037,7 @@ stepd_task_info(int fd, uint16_t protocol_version,
 		uint32_t *task_info_count)
 {
 	int req = REQUEST_STEP_TASK_INFO;
-	slurmstepd_task_info_t *task;
+	slurmstepd_task_info_t *task = NULL;
 	uint32_t ntasks;
 	int i;
 
@@ -1017,6 +1055,7 @@ stepd_task_info(int fd, uint16_t protocol_version,
 	}
 
 	if (ntasks == 0) {
+		xfree(task);
 		*task_info_count = 0;
 		*task_info = NULL;
 	} else {
@@ -1026,8 +1065,10 @@ stepd_task_info(int fd, uint16_t protocol_version,
 
 	return SLURM_SUCCESS;
 rwfail:
+	xfree(task);
 	*task_info_count = 0;
 	*task_info = NULL;
+	xfree(task);
 	return SLURM_ERROR;
 }
 

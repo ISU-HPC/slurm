@@ -9,7 +9,7 @@
  *  CODE-OCEC-09-009. All rights reserved.
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://slurm.schedmd.com/>.
+ *  For details, see <https://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -54,7 +54,7 @@ static List print_fields_list = NULL; /* types are of print_field_t */
 static bool group_accts = false;
 static uint32_t top_limit = 10;
 
-static int _set_cond(int *start, int argc, char *argv[],
+static int _set_cond(int *start, int argc, char **argv,
 		     slurmdb_user_cond_t *user_cond, List format_list)
 {
 	int i;
@@ -261,15 +261,36 @@ static int _setup_print_fields_list(List format_list)
 	return SLURM_SUCCESS;
 }
 
+static int _set_user_acct(void *x, void *arg)
+{
+	slurmdb_report_user_rec_t *orig_report_user;
+	ListIterator iter = NULL;
+	char *acct;
+
+	orig_report_user = (slurmdb_report_user_rec_t *) x;
+	if (orig_report_user->acct)
+		return 0;
+
+	iter = list_iterator_create(orig_report_user->acct_list);
+	while ((acct = list_next(iter))) {
+		if (orig_report_user->acct)
+			xstrfmtcat(orig_report_user->acct, ", %s", acct);
+		else
+			xstrcat(orig_report_user->acct, acct);
+	}
+	list_iterator_destroy(iter);
+
+	return 0;
+}
+
 static void _user_top_tres_report(slurmdb_tres_rec_t *tres,
 			slurmdb_report_cluster_rec_t *slurmdb_report_cluster,
 			slurmdb_report_user_rec_t *slurmdb_report_user)
 {
 	slurmdb_tres_rec_t *cluster_tres_rec, *tres_rec, *total_energy;
 	ListIterator iter = NULL;
-	ListIterator itr2 = NULL;
 	print_field_t *field;
-	char *object = NULL, *tres_tmp = NULL, *tmp_char = NULL;
+	char *tres_tmp = NULL, *tmp_char = NULL;
 	struct passwd *pwd = NULL;
 	int curr_inx = 1, field_count;
 	uint32_t tres_energy;
@@ -285,18 +306,10 @@ static void _user_top_tres_report(slurmdb_tres_rec_t *tres,
 	while ((field = list_next(iter))) {
 		switch (field->type) {
 		case PRINT_USER_ACCT:
-			itr2 = list_iterator_create(
-				slurmdb_report_user->acct_list);
-			while ((object = list_next(itr2))) {
-				if (tmp_char)
-					xstrfmtcat(tmp_char, ", %s", object);
-				else
-					xstrcat(tmp_char, object);
-			}
-			list_iterator_destroy(itr2);
-			field->print_routine(field, tmp_char,
+			if (!slurmdb_report_user->acct)
+				_set_user_acct(slurmdb_report_user, NULL);
+			field->print_routine(field, slurmdb_report_user->acct,
 					     (curr_inx == field_count));
-			xfree(tmp_char);
 			break;
 		case PRINT_USER_CLUSTER:
 			field->print_routine(field,
@@ -342,7 +355,7 @@ static void _user_top_tres_report(slurmdb_tres_rec_t *tres,
 				user_energy_cnt = total_energy->alloc_secs;
 			field->print_routine(field, user_energy_cnt,
 					     cluster_energy_cnt,
-					     (curr_inx ==field_count));
+					     (curr_inx == field_count));
 			break;
 		case PRINT_USER_TRES_NAME:
 			xstrfmtcat(tres_tmp, "%s%s%s",
@@ -391,7 +404,49 @@ static void _set_usage_column_width(List print_fields_list,
 				       slurmdb_report_cluster_list);
 }
 
-extern int user_top(int argc, char *argv[])
+/* Merge line user/account record List into a single list of unique records */
+static void _merge_user_report(List slurmdb_report_cluster_list)
+{
+	slurmdb_report_cluster_rec_t *slurmdb_report_cluster = NULL;
+	slurmdb_report_cluster_rec_t *first_report_cluster = NULL;
+	ListIterator iter = NULL;
+
+	if (list_count(slurmdb_report_cluster_list) < 2)
+		return;
+
+	/* Put user records from all clusters into one list,
+	 * removing duplicates. */
+	iter = list_iterator_create(slurmdb_report_cluster_list);
+	while ((slurmdb_report_cluster = list_next(iter))) {
+		(void) list_for_each(slurmdb_report_cluster->user_list,
+				     _set_user_acct, NULL);
+		if (!first_report_cluster) {
+			first_report_cluster = slurmdb_report_cluster;
+			xfree(first_report_cluster->name);
+			if (fed_name) {
+				xstrfmtcat(first_report_cluster->name, "FED:%s",
+					   fed_name);
+			} else {
+				first_report_cluster->name =
+					xstrdup("FEDERATION");
+			}
+			continue;
+		}
+		if (!first_report_cluster->user_list) {
+			first_report_cluster->user_list =
+				slurmdb_report_cluster->user_list;
+		} else {
+			combine_user_tres(first_report_cluster->user_list,
+					  slurmdb_report_cluster->user_list);
+			combine_tres_list(first_report_cluster->tres_list,
+					  slurmdb_report_cluster->tres_list);
+		}
+		list_delete_item(iter);
+	}
+	list_iterator_destroy(iter);
+}
+
+extern int user_top(int argc, char **argv)
 {
 	int rc = SLURM_SUCCESS;
 	slurmdb_user_cond_t *user_cond = xmalloc(sizeof(slurmdb_user_cond_t));
@@ -424,6 +479,8 @@ extern int user_top(int argc, char *argv[])
 		exit_code = 1;
 		goto end_it;
 	}
+	if (fed_name)
+		_merge_user_report(slurmdb_report_cluster_list);
 
 	if (print_fields_have_header) {
 		char start_char[20];
@@ -440,7 +497,7 @@ extern int user_top(int argc, char *argv[])
 		       (int)(user_cond->assoc_cond->usage_end
 			- user_cond->assoc_cond->usage_start));
 
-		switch(time_format) {
+		switch (time_format) {
 		case SLURMDB_REPORT_TIME_PERCENT:
 			printf("Use reported in %s\n", time_format_string);
 			break;

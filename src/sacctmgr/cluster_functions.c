@@ -9,7 +9,7 @@
  *  CODE-OCEC-09-009. All rights reserved.
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://slurm.schedmd.com/>.
+ *  For details, see <https://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -50,7 +50,7 @@ enum {
 	CLUS_ASSOC_SET
 };
 
-static int _set_cond(int *start, int argc, char *argv[],
+static int _set_cond(int *start, int argc, char **argv,
 		     slurmdb_cluster_cond_t *cluster_cond,
 		     List format_list)
 {
@@ -160,7 +160,7 @@ static int _set_cond(int *start, int argc, char *argv[],
 	return 0;
 }
 
-static int _set_rec(int *start, int argc, char *argv[],
+static int _set_rec(int *start, int argc, char **argv,
 		    List name_list,
 		    slurmdb_assoc_rec_t *assoc,
 		    slurmdb_cluster_rec_t *cluster)
@@ -171,6 +171,8 @@ static int _set_rec(int *start, int argc, char *argv[],
 	int end = 0;
 	int command_len = 0;
 	int option = 0;
+
+	xassert(cluster);
 
 	for (i=(*start); i<argc; i++) {
 		end = parse_option_end(argv[i]);
@@ -200,18 +202,35 @@ static int _set_rec(int *start, int argc, char *argv[],
 						      argv[i]+end);
 		} else if (!strncasecmp(argv[i], "Classification",
 					 MAX(command_len, 3))) {
-			if (cluster) {
-				cluster->classification =
-					str_2_classification(argv[i]+end);
-				if (cluster->classification)
-					rec_set = 1;
+			cluster->classification =
+				str_2_classification(argv[i]+end);
+			if (cluster->classification)
+				rec_set = 1;
+		} else if (!strncasecmp(argv[i], "Features",
+					MAX(command_len, 2))) {
+			if (*(argv[i]+end) == '\0' &&
+			    (option == '+' || option == '-')) {
+				printf(" You didn't specify any features to %s\n",
+				       (option == '-') ? "remove" : "add");
+				exit_code = 1;
+				break;
 			}
+
+			if (!cluster->fed.feature_list)
+				cluster->fed.feature_list =
+					list_create(slurm_destroy_char);
+			if ((slurm_addto_mode_char_list(cluster->fed.feature_list,
+						   argv[i]+end, option) < 0)) {
+				FREE_NULL_LIST(cluster->fed.feature_list);
+				exit_code = 1;
+				break;
+			}
+			rec_set = 1;
+
 		} else if (!strncasecmp(argv[i], "Federation",
 					 MAX(command_len, 3))) {
-			if (cluster) {
-				cluster->fed.name = xstrdup(argv[i]+end);
-				rec_set = 1;
-			}
+			cluster->fed.name = xstrdup(argv[i]+end);
+			rec_set = 1;
 		} else if (!strncasecmp(argv[i], "FedState",
 					 MAX(command_len, 2))) {
 			if (cluster) {
@@ -224,12 +243,6 @@ static int _set_rec(int *start, int argc, char *argv[],
 					break;
 				}
 
-				rec_set = 1;
-			}
-		} else if (!strncasecmp(argv[i], "Weight",
-					 MAX(command_len, 2))) {
-			if (cluster) {
-				cluster->fed.weight = slurm_atoul(argv[i]+end);
 				rec_set = 1;
 			}
 		} else if (!strncasecmp(argv[i], "GrpCPURunMins",
@@ -275,7 +288,7 @@ static int _set_rec(int *start, int argc, char *argv[],
 }
 
 
-extern int sacctmgr_add_cluster(int argc, char *argv[])
+extern int sacctmgr_add_cluster(int argc, char **argv)
 {
 	int rc = SLURM_SUCCESS;
 	int i = 0;
@@ -446,7 +459,7 @@ end_it:
 	return rc;
 }
 
-extern int sacctmgr_list_cluster(int argc, char *argv[])
+extern int sacctmgr_list_cluster(int argc, char **argv)
 {
 	int rc = SLURM_SUCCESS;
 	slurmdb_cluster_cond_t *cluster_cond =
@@ -490,8 +503,9 @@ extern int sacctmgr_list_cluster(int argc, char *argv[])
 					      "MaxTRES,MaxS,MaxW,QOS,"
 					      "DefaultQOS");
 		if (with_fed)
-			slurm_addto_char_list(format_list,
-					      "Federation,ID,Weight,FedState");
+			slurm_addto_char_list(
+				format_list,
+				"Federation,ID,Features,FedState");
 	}
 
 	cluster_cond->with_deleted = with_deleted;
@@ -550,6 +564,11 @@ extern int sacctmgr_list_cluster(int argc, char *argv[])
 						     cluster->classification),
 						     (curr_inx == field_count));
 				break;
+			case PRINT_FEATURES:
+				field->print_routine(field,
+						     cluster->fed.feature_list,
+						     (curr_inx == field_count));
+				break;
 			case PRINT_FEDERATION:
 				field->print_routine(field, cluster->fed.name,
 						     (curr_inx == field_count));
@@ -568,10 +587,6 @@ extern int sacctmgr_list_cluster(int argc, char *argv[])
 				break;
 			case PRINT_ID:
 				field->print_routine(field, cluster->fed.id,
-						     (curr_inx == field_count));
-				break;
-			case PRINT_WEIGHT:
-				field->print_routine(field, cluster->fed.weight,
 						     (curr_inx == field_count));
 				break;
 			case PRINT_TRES:
@@ -697,7 +712,7 @@ end_it:
 	return rc;
 }
 
-extern int sacctmgr_modify_cluster(int argc, char *argv[])
+extern int sacctmgr_modify_cluster(int argc, char **argv)
 {
 	int rc = SLURM_SUCCESS;
 	int i=0;
@@ -899,7 +914,7 @@ end_it:
 	return rc;
 }
 
-extern int sacctmgr_delete_cluster(int argc, char *argv[])
+extern int sacctmgr_delete_cluster(int argc, char **argv)
 {
 	int rc = SLURM_SUCCESS;
 	slurmdb_cluster_cond_t *cluster_cond =
@@ -992,7 +1007,7 @@ extern int sacctmgr_delete_cluster(int argc, char *argv[])
 	return rc;
 }
 
-extern int sacctmgr_dump_cluster (int argc, char *argv[])
+extern int sacctmgr_dump_cluster (int argc, char **argv)
 {
 	slurmdb_user_cond_t user_cond;
 	slurmdb_user_rec_t *user = NULL;

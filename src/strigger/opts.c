@@ -8,7 +8,7 @@
  *  CODE-OCEC-09-009. All rights reserved.
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://slurm.schedmd.com/>.
+ *  For details, see <https://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -80,7 +80,7 @@ struct strigger_parameters params;
 /*
  * parse_command_line, fill in params data structure with data
  */
-extern void parse_command_line(int argc, char *argv[])
+extern void parse_command_line(int argc, char **argv)
 {
 	int opt_char;
 	int option_index;
@@ -536,6 +536,7 @@ Usage: strigger [--set | --get | --clear] [OPTIONS]\n\
   -M, --cluster=name  cluster to issue commands to.  Default is\n\
                       current cluster.  cluster with no name will\n\
                       reset to default.\n\
+                      NOTE: SlurmDBD must up.\n\
   -n, --node[=host]   trigger related to specific node, all nodes by default\n\
   -N, --noheader      Do not print the message header\n\
   -o, --offset=#      trigger's offset time from event, negative to precede\n\

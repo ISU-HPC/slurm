@@ -6,7 +6,7 @@
  *  Written by Danny Auble <da@llnl.gov>
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://slurm.schedmd.com/>.
+ *  For details, see <https://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -171,6 +171,13 @@ static int _mysql_query_internal(MYSQL *db_conn, char *query)
 		rc = SLURM_ERROR;
 	}
 end_it:
+	/*
+	 * Starting in MariaDB 10.2 many of the api commands started
+	 * setting errno erroneously.
+	 */
+	if (!rc)
+		errno = 0;
+
 	return rc;
 }
 
@@ -220,6 +227,7 @@ static int _mysql_make_table_current(mysql_conn_t *mysql_conn, char *table_name,
 			       table_name);
 	if (!(result = mysql_db_query_ret(mysql_conn, query, 0))) {
 		xfree(query);
+		xfree(old_index);
 		return SLURM_ERROR;
 	}
 	xfree(query);
@@ -270,7 +278,6 @@ static int _mysql_make_table_current(mysql_conn_t *mysql_conn, char *table_name,
 
 
 	itr = list_iterator_create(columns);
-#ifdef NO_ALTER_IGNORE_MYSQL
 	/* In MySQL 5.7.4 we lost the ability to run 'alter ignore'.  This was
 	 * needed when converting old tables to new schemas.  If people convert
 	 * in the future from an older version of Slurm that needed the ignore
@@ -278,9 +285,6 @@ static int _mysql_make_table_current(mysql_conn_t *mysql_conn, char *table_name,
 	 * work correctly or manually edit the database to get things to work.
 	 */
 	query = xstrdup_printf("alter table %s", table_name);
-#else
-	query = xstrdup_printf("alter ignore table %s", table_name);
-#endif
 	correct_query = xstrdup(query);
 	START_TIMER;
 	while (fields[i].name) {
@@ -369,7 +373,7 @@ static int _mysql_make_table_current(mysql_conn_t *mysql_conn, char *table_name,
 	}
 
 	if ((temp = strstr(ending, "unique index ("))) {
-		int open = 0, close =0;
+		int open = 0, close = 0;
 		int end = 0;
 		while (temp[end++]) {
 			if (temp[end] == '(')
@@ -812,6 +816,12 @@ extern int mysql_db_ping(mysql_conn_t *mysql_conn)
 	slurm_mutex_lock(&mysql_conn->lock);
 	_clear_results(mysql_conn->db_conn);
 	rc = mysql_ping(mysql_conn->db_conn);
+	/*
+	 * Starting in MariaDB 10.2 many of the api commands started
+	 * setting errno erroneously.
+	 */
+	if (!rc)
+		errno = 0;
 	slurm_mutex_unlock(&mysql_conn->lock);
 	return rc;
 }
@@ -853,6 +863,12 @@ extern int mysql_db_rollback(mysql_conn_t *mysql_conn)
 		      mysql_error(mysql_conn->db_conn));
 		errno = mysql_errno(mysql_conn->db_conn);
 		rc = SLURM_ERROR;
+	} else {
+		/*
+		 * Starting in MariaDB 10.2 many of the api commands started
+		 * setting errno erroneously.
+		 */
+		errno = 0;
 	}
 	slurm_mutex_unlock(&mysql_conn->lock);
 	return rc;
@@ -872,6 +888,11 @@ extern MYSQL_RES *mysql_db_query_ret(mysql_conn_t *mysql_conn,
 			result = _get_last_result(mysql_conn->db_conn);
 		else
 			result = _get_first_result(mysql_conn->db_conn);
+		/*
+		 * Starting in MariaDB 10.2 many of the api commands started
+		 * setting errno erroneously.
+		 */
+		errno = 0;
 		if (!result && mysql_field_count(mysql_conn->db_conn)) {
 			/* should have returned data */
 			error("We should have gotten a result: '%m' '%s'",

@@ -2,14 +2,14 @@
 
 <h1>Download Slurm</h1>
 <p>Slurm source can be downloaded from
-<a href="http://www.schedmd.com/#repos">
-http://www.schedmd.com/#repos</a>.<br>
+<a href="https://www.schedmd.com/downloads.php">
+https://www.schedmd.com/downloads.php</a>.<br>
 Slurm has also been packaged for
 <a href="https://packages.debian.org/search?keywords=slurm-wlm">Debian</a> and
 <a href="http://packages.ubuntu.com/search?keywords=slurm-wlm">Ubuntu</a>
 (named <i>slurm-wlm</i> or <i>slurm-llnl</i> depending upon the version) and
 <a href="http://www.pkgsrc.org">NetBSD</a> (in pkgsrc) and
-<a href="http://www.freshports.org/sysutils/slurm-hpc/">FreeBSD</a>.</p>
+<a href="http://www.freshports.org/sysutils/slurm-wlm/">FreeBSD</a>.</p>
 
 <!--
 Slurm interface to PHP
@@ -28,7 +28,7 @@ a message.</li>
 <li><b>MUNGE</b> (recommended)<br>
 In order to compile the "auth/munge" authentication plugin for Slurm,
 you will need to build and install MUNGE, available from
-<a href="http://dun.github.io/munge/">http://dun.github.io/munge/</a> and
+<a href="https://dun.github.io/munge/">https://dun.github.io/munge/</a> and
 <a href="http://packages.debian.org/src:munge">Debian</a> and
 <a href="http://fedoraproject.org/">Fedora</a> and
 <a href="http://packages.ubuntu.com/src:munge">Ubuntu</a>.</li>
@@ -78,7 +78,7 @@ is a job inspection tool for examining and debugging parallel programs, primaril
 It's an open source, non-interactive, command line, scriptable tool intended for use by programmers and system administrators alike.</li>
 </ul><br>
 
-<li><b>Digital signatures</b> (Cypto plugin) are used to insure message are not altered.</li>
+<li><b>Digital signatures</b> (Cypto plugin) are used to ensure message are not altered.</li>
 <ul>
 <li><b>MUNGE</b> (recommended)<br>
 MUNGE can be used at an alternative to OpenSSL.
@@ -94,7 +94,7 @@ Download it from <a href="http://www.openssl.org/">http://www.openssl.org/</a>.<
 is an implementation of <a href="http://www.gridforum.org/">Open Grid Forum</a>
 <a href="http://www.drmaa.org/">DRMAA 1.0</a> (Distributed Resource Management Application API)
 <a href="http://www.ogf.org/documents/GFD.133.pdf">specification</a> for submission
-and control of jobs to <href="http://slurm.schedmd.com">Slurm</a>.
+and control of jobs to <href="https://slurm.schedmd.com">Slurm</a>.
 Using DRMAA, grid applications builders, portal developers and ISVs can use
 the same high-level API to link their software with different cluster/resource
 management systems.<br><br>
@@ -124,9 +124,11 @@ https://github.com/alanorth/hpc_infrastructure_scripts/blob/master/slurm/interac
 <li><b>Interconnect</b> plugins (Switch plugin)</li>
 <ul>
 <li><b>Infiniband</b><br>
-The <b>topology.conf</b> file for an Infiniband switch can be automatically
-generated using the <b>ib2slurm</b> tool found here:
-<a href="https://github.com/fintler/ib2slurm">https://github.com/fintler/ib2slurm</a>.
+The <b>topology.conf</b> file for an Infiniband switch can be
+automatically generated using the <b>slurmibtopology</b> tool found here:<br>
+<a href="https://ftp.fysik.dtu.dk/Slurm/slurmibtopology.sh">
+https://ftp.fysik.dtu.dk/Slurm/slurmibtopology.sh</a>.
+
 </ul><br>
 
 <li><b>I/O Watchdog</b><br>
@@ -136,24 +138,16 @@ activity. This facility attempts to monitor all write activity of an
 application and trigger a set of user-defined actions when write activity
 as ceased for a configurable period of time. A SPANK plugin is provided
 for use with Slurm. See the README and man page in the package for more
-details. Download the latest source from:<br>
-<a href="http://io-watchdog.googlecode.com/files/io-watchdog-0.6.tar.bz2">
-http://io-watchdog.googlecode.com/files/io-watchdog-0.6.tar.bz2</a></li><br>
+details.
+<a href="https://github.com/grondo/io-watchdog">
+https://github.com/grondo/io-watchdog</a></li><br>
 
 <li><b>MPI</b> versions supported</li>
 <ul>
-<li><a href="http://www.mpi-softtech.com/">ChaMPIon, MPI Software Technology</a></li>
-<li><a href="http://www.hp.com/go/mpi">HP-MPI</a></li>
-<li><a href="http://software.intel.com/en-us/articles/intel-mpi-library/">Intel-MPI</a></li>
-<li><a href="http://www.lam-mpi.org/">LAM/MPI</a></li>
-<li><a href="http://www-unix.mcs.anl.gov/mpi/mpich1/">MPICH1</a></li>
-<li><a href="http://www.mcs.anl.gov/research/projects/mpich2/">MPICH2</a></li>
-<li><a href="http://www.myri.com/scs/download-mpichgm.html">MPICH-GM</a></li>
-<li><a href="http://www.myri.com/scs/download-mpichmx.html">MPICH-MX</a></li>
-<li><a href="http://mvapich.cse.ohio-state.edu/">MVAPICH</a></li>
-<li><a href="http://nowlab.cse.ohio-state.edu/projects/mpi-iba">MVAPICH2</a></li>
-<li><a href="http://www.open-mpi.org">Open MPI</a></li>
-<li><a href="http://www.quadrics.com/">Quadrics MPI</a></li>
+<li><a href="https://software.intel.com/en-us/intel-mpi-library">Intel MPI</a></li>
+<li><a href="https://www.mpich.org/">MPICH (a.k.a. MPICH2 / MPICH2)</a></li>
+<li><a href="http://mvapich.cse.ohio-state.edu/">MVAPICH (a.k.a MVAPICH2)</a></li>
+<li><a href="https://www.open-mpi.org">Open MPI</a></li>
 </ul><br>
 
 <li><b>Workload Simulator</b><br>
@@ -169,7 +163,7 @@ where Slurm performs workload management. Access to the node is restricted to
 user root and users who have been allocated resources on that node.
 NOTE: pam_slurm is included within the Slurm distribution.
 For earlier Slurm versions, pam_slurm is available for download
-<a href="http://www.schedmd.com/download/extras/pam_slurm-1.6.tar.bz2">here</a>.
+<a href="https://www.schedmd.com/downloads/extras/pam_slurm-1.6.tar.bz2">here</a>.
 <br>
 Slurm's PAM module has also been packaged for
 <a href="http://packages.debian.org/src:libpam-slurm">Debian</a> and
@@ -219,11 +213,8 @@ during the next job launch. Thus, the SPANK infrastructure provides
 administrators and other developers a low cost, low effort ability to
 dynamically modify the runtime behavior of Slurm job launch.
 As assortment of SPANK plugins are available from<br>
-<a href="http://code.google.com/p/slurm-spank-plugins/">
-http://code.google.com/p/slurm-spank-plugins/</a>.<br>
-The current source for the plugins can be checked out of the subversion
-repository with the following command:<br>
-<i>svn checkout http://slurm-spank-plugins.googlecode.com/svn/trunk/slurm-plugins</i><br><br>
+<a href="https://github.com/grondo/slurm-spank-plugins">
+https://github.com/grondo/slurm-spank-plugins</a>.<br>
 
 A SPANK plugin called "spunnel" to support ssh port forwarding is available
 from Harvard University.
@@ -234,18 +225,19 @@ It can be downloaded from the
 A set of scripts that leverages Slurm's job completion logging facility
 in provide information about what jobs were running at any point in the
 past as well as what resources they used. Download the code from:<br>
-<a href="http://sqlog.googlecode.com">http://sqlog.googlecode.com</a></li><br>
+<a href="https://github.com/grondo/sqlog">
+https://github.com/grondo/sqlog</a></li><br>
 
 <li><b>Task Affinity</b> plugins</li>
 <ul>
 <li><a href="http://www.open-mpi.org/projects/hwloc/">
-Portable Hardware Locality (hwloc)</a></li>
+Portable Hardware Locality (HWLOC)</a></li>
 </ul><br>
 
 <li><b>Node Health Check</b><br>
 Probably the most comprehensive and lightweight health check tool out
 there is
-<a href="http://warewulf.lbl.gov/trac/wiki/Node%20Health%20Check">Node Health Check</a>.
+<a href="https://github.com/mej/nhc">LBNL Node Health Check</a>.
 It has integration with Slurm as well as Torque resource managers.</li><br>
 
 <li><b>Accounting Tools</b><br>
@@ -327,6 +319,11 @@ STUBL is a collection of supplemental tools and utility scripts for Slurm.<br>
     Start Time, Elapsed Time, Amount of RAM Requested, Average RAM Used, and
     Max RAM Used.</dd>
 </dl></li><br>
+
+<li><b>pestat</b><br>
+Prints a consolidated compute node status line, with one line per node including a list of jobs.<br>
+<a href="https://github.com/OleHolmNielsen/Slurm_tools/tree/master/pestat">Home page</a></li><br>
+<!-- It would be nice to provide our own perl-based version of pestat -->
 
 <li><b>Slurmmon</b><br>
 Slurmmon is a system for gathering and plotting data about Slurm scheduling and
@@ -412,6 +409,6 @@ Slurm-based HPC supercomputers. The website of Slurm-web, with screenshots:<br>
 
 </ul>
 
-<p style="text-align:center;">Last modified 9 July 2016</p>
+<p style="text-align:center;">Last modified 14 September 2017</p>
 
 <!--#include virtual="footer.txt"-->

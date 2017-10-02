@@ -94,6 +94,7 @@ target_triplet = @target@
 subdir = src/plugins/acct_gather_profile/hdf5
 ACLOCAL_M4 = $(top_srcdir)/aclocal.m4
 am__aclocal_m4_deps = $(top_srcdir)/auxdir/ax_check_zlib.m4 \
+	$(top_srcdir)/auxdir/ax_gcc_builtin.m4 \
 	$(top_srcdir)/auxdir/ax_lib_hdf5.m4 \
 	$(top_srcdir)/auxdir/ax_pthread.m4 \
 	$(top_srcdir)/auxdir/libtool.m4 \
@@ -134,6 +135,9 @@ am__aclocal_m4_deps = $(top_srcdir)/auxdir/ax_check_zlib.m4 \
 	$(top_srcdir)/auxdir/x_ac_setproctitle.m4 \
 	$(top_srcdir)/auxdir/x_ac_sgi_job.m4 \
 	$(top_srcdir)/auxdir/x_ac_slurm_ssl.m4 \
+	$(top_srcdir)/auxdir/x_ac_systemd.m4 \
+	$(top_srcdir)/auxdir/x_ac_ucx.m4 \
+	$(top_srcdir)/auxdir/x_ac_uid_gid_size.m4 \
 	$(top_srcdir)/configure.ac
 am__configure_deps = $(am__aclocal_m4_deps) $(CONFIGURE_DEPENDENCIES) \
 	$(ACLOCAL_M4)
@@ -409,6 +413,10 @@ LIBCURL_CPPFLAGS = @LIBCURL_CPPFLAGS@
 LIBOBJS = @LIBOBJS@
 LIBS = @LIBS@
 LIBTOOL = @LIBTOOL@
+LIB_SLURM = @LIB_SLURM@
+LIB_SLURMDB = @LIB_SLURMDB@
+LIB_SLURMDB_BUILD = @LIB_SLURMDB_BUILD@
+LIB_SLURM_BUILD = @LIB_SLURM_BUILD@
 LIPO = @LIPO@
 LN_S = @LN_S@
 LTLIBOBJS = @LTLIBOBJS@
@@ -492,12 +500,15 @@ SLURM_MINOR = @SLURM_MINOR@
 SLURM_PREFIX = @SLURM_PREFIX@
 SLURM_VERSION_NUMBER = @SLURM_VERSION_NUMBER@
 SLURM_VERSION_STRING = @SLURM_VERSION_STRING@
-SO_LDFLAGS = @SO_LDFLAGS@
 SSL_CPPFLAGS = @SSL_CPPFLAGS@
 SSL_LDFLAGS = @SSL_LDFLAGS@
 SSL_LIBS = @SSL_LIBS@
 STRIP = @STRIP@
 SUCMD = @SUCMD@
+SYSTEMD_TASKSMAX_OPTION = @SYSTEMD_TASKSMAX_OPTION@
+UCX_CPPFLAGS = @UCX_CPPFLAGS@
+UCX_LDFLAGS = @UCX_LDFLAGS@
+UCX_LIBS = @UCX_LIBS@
 UTIL_LIBS = @UTIL_LIBS@
 VERSION = @VERSION@
 ZLIB_CPPFLAGS = @ZLIB_CPPFLAGS@
@@ -584,7 +595,7 @@ HDF5_API_SOURCES = hdf5_api.c hdf5_api.h
 @BUILD_HDF5_TRUE@libhdf5_api_la_LIBADD = $(HDF5_LIBS)
 @BUILD_HDF5_TRUE@acct_gather_profile_hdf5_la_SOURCES = $(HDF5_SOURCES)
 @BUILD_HDF5_TRUE@acct_gather_profile_hdf5_la_LDFLAGS = \
-@BUILD_HDF5_TRUE@	$(SO_LDFLAGS) $(PLUGIN_FLAGS) $(HDF5_LDFLAGS)
+@BUILD_HDF5_TRUE@	$(PLUGIN_FLAGS) $(HDF5_LDFLAGS)
 
 @BUILD_HDF5_TRUE@acct_gather_profile_hdf5_la_LIBADD = $(HDF5_LIBS) libhdf5_api.la
 @BUILD_HDF5_FALSE@EXTRA_acct_gather_profile_hdf5_la_SOURCES = $(HDF5_SOURCES)

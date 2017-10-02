@@ -6,7 +6,7 @@
  *  Written by Matthieu Hautreux <matthieu.hautreux@cea.fr>
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://slurm.schedmd.com/>.
+ *  For details, see <https://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -242,7 +242,7 @@ extern int task_p_pre_setuid (stepd_step_rec_t *job)
  * task_p_pre_launch_priv() is called prior to exec of application task.
  * in privileged mode, just after slurm_spank_task_init_privileged
  */
-extern int task_p_pre_launch_priv (stepd_step_rec_t *job)
+extern int task_p_pre_launch_priv(stepd_step_rec_t *job, pid_t pid)
 {
 
 	if (use_cpuset) {
@@ -252,7 +252,7 @@ extern int task_p_pre_launch_priv (stepd_step_rec_t *job)
 
 	if (use_memory) {
 		/* attach the task to the memory cgroup */
-		task_cgroup_memory_attach_task(job);
+		task_cgroup_memory_attach_task(job, pid);
 	}
 
 	if (use_devices) {
@@ -288,15 +288,16 @@ extern int task_p_pre_launch (stepd_step_rec_t *job)
 extern int task_p_post_term (stepd_step_rec_t *job, stepd_step_task_info_t *task)
 {
 	static bool ran = false;
+	int rc = SLURM_SUCCESS;
 
 	/* Only run this on the first call since this will run for
 	 * every task on the node.
 	 */
 	if (use_memory && !ran) {
-		task_cgroup_memory_check_oom(job);
+		rc = task_cgroup_memory_check_oom(job);
 		ran = true;
 	}
-	return SLURM_SUCCESS;
+	return rc;
 }
 
 /*
@@ -324,15 +325,12 @@ extern char* task_cgroup_create_slurm_cg (xcgroup_ns_t* ns) {
 	}
 #endif
 
-	/* create slurm cgroup in the ns (it could already exist)
-	 * disable notify_on_release to avoid the removal/creation
-	 * of this cgroup for each last/first running job on the node */
+	/* create slurm cgroup in the ns (it could already exist) */
 	if (xcgroup_create(ns,&slurm_cg,pre,
 			   getuid(), getgid()) != XCGROUP_SUCCESS) {
 		xfree(pre);
 		return pre;
 	}
-	slurm_cg.notify = 0;
 	if (xcgroup_instantiate(&slurm_cg) != XCGROUP_SUCCESS) {
 		error("unable to build slurm cgroup for ns %s: %m",
 		      ns->subsystems);

@@ -7,7 +7,7 @@
  *  CODE-OCEC-09-009. All rights reserved.
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://slurm.schedmd.com/>.
+ *  For details, see <https://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -46,9 +46,5 @@
 #include "src/slurmd/slurmstepd/slurmstepd_job.h"
 
 void exec_task(stepd_step_rec_t *job, int i);
-
-/* Given a program name, translate it to a fully qualified pathname as needed
- * based upon the PATH environment variable and current working directory */
-extern char *build_path(char* fname, char **prog_env, char *cwd);
 
 #endif /* !_TASK_H */

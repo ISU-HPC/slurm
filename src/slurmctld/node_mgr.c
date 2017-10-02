@@ -11,7 +11,7 @@
  *  CODE-OCEC-09-009. All rights reserved.
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://slurm.schedmd.com/>.
+ *  For details, see <https://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -76,7 +76,6 @@
 #include "src/slurmctld/proc_req.h"
 #include "src/slurmctld/read_config.h"
 #include "src/slurmctld/reservation.h"
-#include "src/slurmctld/sched_plugin.h"
 #include "src/slurmctld/slurmctld.h"
 #include "src/slurmctld/slurmctld_plugstack.h"
 #include "src/slurmctld/state_save.h"
@@ -84,14 +83,12 @@
 #include "src/slurmctld/trigger_mgr.h"
 #include "src/plugins/select/bluegene/bg_enums.h"
 
-#define _DEBUG		0
-#define MAX_RETRIES	10
-
 /* No need to change we always pack SLURM_PROTOCOL_VERSION */
 #define NODE_STATE_VERSION        "PROTOCOL_VERSION"
 
 /* Global variables */
 bitstr_t *avail_node_bitmap = NULL;	/* bitmap of available nodes */
+bitstr_t *booting_node_bitmap = NULL;	/* bitmap of booting nodes */
 bitstr_t *cg_node_bitmap    = NULL;	/* bitmap of completing nodes */
 bitstr_t *idle_node_bitmap  = NULL;	/* bitmap of idle nodes */
 bitstr_t *power_node_bitmap = NULL;	/* bitmap of powered down nodes */
@@ -230,7 +227,6 @@ _dump_node_state (struct node_record *dump_node_ptr, Buf buffer)
 	pack16  (dump_node_ptr->core_spec_cnt, buffer);
 	pack16  (dump_node_ptr->threads, buffer);
 	pack64  (dump_node_ptr->real_memory, buffer);
-	pack64  (dump_node_ptr->mem_spec_limit, buffer);
 	pack32  (dump_node_ptr->tmp_disk, buffer);
 	pack32  (dump_node_ptr->reason_uid, buffer);
 	pack_time(dump_node_ptr->reason_time, buffer);
@@ -278,7 +274,6 @@ static int _open_node_state_file(char **state_file)
  * IN state_only - if true, overwrite only node state and reason
  *	Use this to overwrite the "UNKNOWN state typically used in slurm.conf
  * RET 0 or error code
- * NOTE: READ lock_slurmctld config before entry
  */
 extern int load_all_node_state ( bool state_only )
 {
@@ -291,7 +286,7 @@ extern int load_all_node_state ( bool state_only )
 	uint16_t core_spec_cnt = 0;
 	uint32_t node_state;
 	uint16_t cpus = 1, boards = 1, sockets = 1, cores = 1, threads = 1;
-	uint64_t real_memory, mem_spec_limit = 0;
+	uint64_t real_memory;
 	uint32_t tmp_disk, data_size = 0, name_len;
 	uint32_t reason_uid = NO_VAL;
 	time_t boot_req_time = 0, reason_time = 0;
@@ -302,8 +297,11 @@ extern int load_all_node_state ( bool state_only )
 	Buf buffer;
 	char *ver_str = NULL;
 	hostset_t hs = NULL;
+	hostlist_t down_nodes = NULL;
 	bool power_save_mode = false;
 	uint16_t protocol_version = (uint16_t)NO_VAL;
+
+	xassert(verify_lock(CONFIG_LOCK, READ_LOCK));
 
 	if (slurmctld_conf.suspend_program && slurmctld_conf.resume_program)
 		power_save_mode = true;
@@ -312,8 +310,10 @@ extern int load_all_node_state ( bool state_only )
 	lock_state_files ();
 	state_fd = _open_node_state_file(&state_file);
 	if (state_fd < 0) {
-		info ("No node state file (%s) to recover", state_file);
-		error_code = ENOENT;
+		info("No node state file (%s) to recover", state_file);
+		xfree(state_file);
+		unlock_state_files();
+		return ENOENT;
 	}
 	else {
 		data_allocated = BUF_SIZE;
@@ -347,6 +347,8 @@ extern int load_all_node_state ( bool state_only )
 		safe_unpack16(&protocol_version, buffer);
 
 	if (!protocol_version || (protocol_version == (uint16_t)NO_VAL)) {
+		if (!ignore_state_errors)
+			fatal("Can not recover node state, data version incompatible, start with '-i' to ignore this");
 		error("*****************************************************");
 		error("Can not recover node state, data version incompatible");
 		error("*****************************************************");
@@ -380,7 +382,6 @@ extern int load_all_node_state ( bool state_only )
 			safe_unpack16 (&core_spec_cnt, buffer);
 			safe_unpack16 (&threads,     buffer);
 			safe_unpack64 (&real_memory, buffer);
-			safe_unpack64 (&mem_spec_limit, buffer);
 			safe_unpack32 (&tmp_disk,    buffer);
 			safe_unpack32 (&reason_uid,  buffer);
 			safe_unpack_time (&reason_time, buffer);
@@ -392,7 +393,7 @@ extern int load_all_node_state ( bool state_only )
 				    protocol_version) != SLURM_SUCCESS)
 				goto unpack_error;
 			base_state = node_state & NODE_STATE_BASE;
-		} else if (protocol_version >= SLURM_16_05_PROTOCOL_VERSION) {
+		} else if (protocol_version >= SLURM_MIN_PROTOCOL_VERSION) {
 			uint32_t tmp_mem;
 			safe_unpackstr_xmalloc (&comm_name, &name_len, buffer);
 			safe_unpackstr_xmalloc (&node_name, &name_len, buffer);
@@ -413,44 +414,18 @@ extern int load_all_node_state ( bool state_only )
 			safe_unpack16 (&threads,     buffer);
 			safe_unpack32 (&tmp_mem, buffer);
 			real_memory = xlate_mem_old2new(tmp_mem);
+			/* Following unpack was for mem_spec_limit which should
+			 * have never been packed in the first place.  We
+			 * don't need to keep state as the value is always read
+			 * from the slurm.conf.  If we used this value it would
+			 * over write that value so we will throw it away here.
+			 */
 			safe_unpack32 (&tmp_mem, buffer);
-			mem_spec_limit = xlate_mem_old2new(tmp_mem);
 			safe_unpack32 (&tmp_disk,    buffer);
 			safe_unpack32 (&reason_uid,  buffer);
 			safe_unpack_time (&reason_time, buffer);
 			safe_unpack16 (&obj_protocol_version, buffer);
 			safe_unpackstr_xmalloc (&mcs_label, &name_len, buffer);
-			if (gres_plugin_node_state_unpack(
-				    &gres_list, buffer, node_name,
-				    protocol_version) != SLURM_SUCCESS)
-				goto unpack_error;
-			base_state = node_state & NODE_STATE_BASE;
-		} else if (protocol_version >= SLURM_MIN_PROTOCOL_VERSION) {
-			uint32_t tmp_mem;
-			safe_unpackstr_xmalloc (&comm_name, &name_len, buffer);
-			safe_unpackstr_xmalloc (&node_name, &name_len, buffer);
-			safe_unpackstr_xmalloc (&node_hostname,
-							    &name_len, buffer);
-			safe_unpackstr_xmalloc (&reason,    &name_len, buffer);
-			safe_unpackstr_xmalloc (&features,  &name_len, buffer);
-			safe_unpackstr_xmalloc (&gres,      &name_len, buffer);
-			safe_unpackstr_xmalloc (&cpu_spec_list,
-							    &name_len, buffer);
-			safe_unpack32 (&node_state,  buffer);
-			safe_unpack16 (&cpus,        buffer);
-			safe_unpack16 (&boards,     buffer);
-			safe_unpack16 (&sockets,     buffer);
-			safe_unpack16 (&cores,       buffer);
-			safe_unpack16 (&core_spec_cnt, buffer);
-			safe_unpack16 (&threads,     buffer);
-			safe_unpack32 (&tmp_mem, buffer);
-			real_memory = xlate_mem_old2new(tmp_mem);
-			safe_unpack32 (&tmp_mem, buffer);
-			mem_spec_limit = xlate_mem_old2new(tmp_mem);
-			safe_unpack32 (&tmp_disk,    buffer);
-			safe_unpack32 (&reason_uid,  buffer);
-			safe_unpack_time (&reason_time, buffer);
-			safe_unpack16 (&obj_protocol_version, buffer);
 			if (gres_plugin_node_state_unpack(
 				    &gres_list, buffer, node_name,
 				    protocol_version) != SLURM_SUCCESS)
@@ -555,12 +530,12 @@ extern int load_all_node_state ( bool state_only )
 							     /* to free */
 					node_ptr->threads       = threads;
 					node_ptr->real_memory   = real_memory;
-					node_ptr->mem_spec_limit =
-						mem_spec_limit;
 					node_ptr->tmp_disk      = tmp_disk;
 				}
 				if (node_state & NODE_STATE_MAINT)
 					node_ptr->node_state |= NODE_STATE_MAINT;
+				if (node_state & NODE_STATE_REBOOT)
+					node_ptr->node_state |= NODE_STATE_REBOOT;
 				if (node_state & NODE_STATE_POWER_UP) {
 					if (power_save_mode) {
 						node_ptr->node_state |=
@@ -598,8 +573,6 @@ extern int load_all_node_state ( bool state_only )
 				cpu_spec_list = NULL; /* Nothing to free */
 				node_ptr->threads       = threads;
 				node_ptr->real_memory   = real_memory;
-				node_ptr->mem_spec_limit =
-					mem_spec_limit;
 				node_ptr->tmp_disk      = tmp_disk;
 			}
 
@@ -661,7 +634,6 @@ extern int load_all_node_state ( bool state_only )
 			node_ptr->core_spec_cnt = core_spec_cnt;
 			node_ptr->threads       = threads;
 			node_ptr->real_memory   = real_memory;
-			node_ptr->mem_spec_limit = mem_spec_limit;
 			node_ptr->tmp_disk      = tmp_disk;
 			node_ptr->last_response = (time_t) 0;
 			xfree(node_ptr->mcs_label);
@@ -671,12 +643,37 @@ extern int load_all_node_state ( bool state_only )
 
 		if (node_ptr) {
 			node_cnt++;
+
+			if (IS_NODE_DOWN(node_ptr)) {
+				if (down_nodes)
+					hostlist_push(down_nodes, node_name);
+				else
+					down_nodes = hostlist_create(
+							node_name);
+			}
+
+			if (node_ptr->node_state & NODE_STATE_POWER_UP) {
+				/* last_response value not saved,
+				 * make best guess */
+				node_ptr->last_response = now +
+						slurmctld_conf.resume_timeout;
+			} else
+				node_ptr->last_response = (time_t) 0;
+
 			if (obj_protocol_version &&
 			    (obj_protocol_version != (uint16_t)NO_VAL))
 				node_ptr->protocol_version =
 					obj_protocol_version;
 			else
 				node_ptr->protocol_version = protocol_version;
+
+			/* Sanity check to make sure we can take a version we
+			 * actually understand.
+			 */
+			if (node_ptr->protocol_version <
+			    SLURM_MIN_PROTOCOL_VERSION)
+				node_ptr->protocol_version =
+					SLURM_MIN_PROTOCOL_VERSION;
 
 			if (!IS_NODE_POWER_SAVE(node_ptr))
 				node_ptr->last_idle = now;
@@ -700,10 +697,21 @@ fini:	info("Recovered state of %d nodes", node_cnt);
 		info("Cleared POWER_SAVE flag from nodes %s", node_names);
 		hostset_destroy(hs);
 	}
+
+	if (down_nodes) {
+		char *down_host_str = NULL;
+		down_host_str = hostlist_ranged_string_xmalloc(down_nodes);
+		info("Down nodes: %s", down_host_str);
+		xfree(down_host_str);
+		hostlist_destroy(down_nodes);
+	}
+
 	free_buf (buffer);
 	return error_code;
 
 unpack_error:
+	if (!ignore_state_errors)
+		fatal("Incomplete node data checkpoint file, start with '-i' to ignore this");
 	error("Incomplete node data checkpoint file");
 	error_code = EFAULT;
 	xfree(features);
@@ -747,7 +755,6 @@ static bool _is_cloud_hidden(struct node_record *node_ptr)
 static bool _node_is_hidden(struct node_record *node_ptr, uid_t uid)
 {
 	int i;
-	bool shown = false;
 
 	if ((slurmctld_conf.private_data & PRIVATE_DATA_NODES)
 	    && (slurm_mcs_get_privatedata() == 1)
@@ -755,14 +762,15 @@ static bool _node_is_hidden(struct node_record *node_ptr, uid_t uid)
 	    && (mcs_g_check_mcs_label(uid, node_ptr->mcs_label) != 0))
 		return true;
 
-	for (i=0; i<node_ptr->part_cnt; i++) {
-		if (!(node_ptr->part_pptr[i]->flags & PART_FLAG_HIDDEN)) {
-			shown = true;
-			break;
+	if (!node_ptr->part_cnt)
+		return false;
+
+	for (i = 0; i < node_ptr->part_cnt; i++) {
+		/* return false if the node belongs to any visible partition */
+		if (part_is_visible(node_ptr->part_pptr[i], uid)) {
+			return false;
 		}
 	}
-	if (shown || (node_ptr->part_cnt == 0))
-		return false;
 
 	return true;
 }
@@ -778,8 +786,6 @@ static bool _node_is_hidden(struct node_record *node_ptr, uid_t uid)
  * global: node_record_table_ptr - pointer to global node table
  * NOTE: the caller must xfree the buffer at *buffer_ptr
  * NOTE: change slurm_load_node() in api/node_info.c when data format changes
- * NOTE: READ lock_slurmctld config before entry
- * NOTE: WRITE lock_slurmctld part before entry for part_filter_set
  */
 extern void pack_all_node (char **buffer_ptr, int *buffer_size,
 			   uint16_t show_flags, uid_t uid,
@@ -791,6 +797,9 @@ extern void pack_all_node (char **buffer_ptr, int *buffer_size,
 	time_t now = time(NULL);
 	struct node_record *node_ptr = node_record_table_ptr;
 	bool hidden;
+
+	xassert(verify_lock(CONFIG_LOCK, READ_LOCK));
+	xassert(verify_lock(PART_LOCK, READ_LOCK));
 
 	buffer_ptr[0] = NULL;
 	*buffer_size = 0;
@@ -808,7 +817,6 @@ extern void pack_all_node (char **buffer_ptr, int *buffer_size,
 		pack_time(now, buffer);
 
 		/* write node records */
-		part_filter_set(uid);
 		for (inx = 0; inx < node_record_count; inx++, node_ptr++) {
 			xassert (node_ptr->magic == NODE_MAGIC);
 			xassert (node_ptr->config_ptr->magic ==
@@ -842,7 +850,6 @@ extern void pack_all_node (char **buffer_ptr, int *buffer_size,
 			}
 			nodes_packed++;
 		}
-		part_filter_clear();
 	} else {
 		error("select_g_select_jobinfo_pack: protocol_version "
 		      "%hu not supported", protocol_version);
@@ -870,8 +877,6 @@ extern void pack_all_node (char **buffer_ptr, int *buffer_size,
  * global: node_record_table_ptr - pointer to global node table
  * NOTE: the caller must xfree the buffer at *buffer_ptr
  * NOTE: change slurm_load_node() in api/node_info.c when data format changes
- * NOTE: READ lock_slurmctld config before entry
- * NOTE: WRITE lock_slurmctld part before entry for part_filter_set
  */
 extern void pack_one_node (char **buffer_ptr, int *buffer_size,
 			   uint16_t show_flags, uid_t uid, char *node_name,
@@ -882,6 +887,9 @@ extern void pack_one_node (char **buffer_ptr, int *buffer_size,
 	time_t now = time(NULL);
 	struct node_record *node_ptr;
 	bool hidden;
+
+	xassert(verify_lock(CONFIG_LOCK, READ_LOCK));
+	xassert(verify_lock(PART_LOCK, READ_LOCK));
 
 	buffer_ptr[0] = NULL;
 	*buffer_size = 0;
@@ -899,7 +907,6 @@ extern void pack_one_node (char **buffer_ptr, int *buffer_size,
 		pack_time(now, buffer);
 
 		/* write node records */
-		part_filter_set(uid);
 		if (node_name)
 			node_ptr = find_node_record(node_name);
 		else
@@ -924,7 +931,6 @@ extern void pack_one_node (char **buffer_ptr, int *buffer_size,
 				nodes_packed++;
 			}
 		}
-		part_filter_clear();
 	} else {
 		error("select_g_select_jobinfo_pack: protocol_version "
 		      "%hu not supported", protocol_version);
@@ -948,17 +954,19 @@ extern void pack_one_node (char **buffer_ptr, int *buffer_size,
  * IN show_flags -
  * NOTE: if you make any changes here be sure to make the corresponding changes
  * 	to _unpack_node_info_members() in common/slurm_protocol_pack.c
- * NOTE: READ lock_slurmctld config before entry
  */
 static void _pack_node (struct node_record *dump_node_ptr, Buf buffer,
 			uint16_t protocol_version, uint16_t show_flags)
 {
 	char *gres_drain = NULL, *gres_used = NULL;
 
+	xassert(verify_lock(CONFIG_LOCK, READ_LOCK));
+
 	if (protocol_version >= SLURM_17_02_PROTOCOL_VERSION) {
 		packstr (dump_node_ptr->name, buffer);
 		packstr (dump_node_ptr->node_hostname, buffer);
 		packstr (dump_node_ptr->comm_name, buffer);
+		pack16(dump_node_ptr->port, buffer);
 		pack32(dump_node_ptr->node_state, buffer);
 		packstr (dump_node_ptr->version, buffer);
 		/* On a bluegene system always use the regular node
@@ -1034,7 +1042,7 @@ static void _pack_node (struct node_record *dump_node_ptr, Buf buffer,
 				     protocol_version);
 
 		packstr(dump_node_ptr->tres_fmt_str,buffer);
-	} else if (protocol_version >= SLURM_16_05_PROTOCOL_VERSION) {
+	} else if (protocol_version >= SLURM_MIN_PROTOCOL_VERSION) {
 		packstr (dump_node_ptr->name, buffer);
 		packstr (dump_node_ptr->node_hostname, buffer);
 		packstr (dump_node_ptr->comm_name, buffer);
@@ -1117,87 +1125,6 @@ static void _pack_node (struct node_record *dump_node_ptr, Buf buffer,
 				     protocol_version);
 
 		packstr(dump_node_ptr->tres_fmt_str,buffer);
-	} else if (protocol_version >= SLURM_MIN_PROTOCOL_VERSION) {
-		packstr (dump_node_ptr->name, buffer);
-		packstr (dump_node_ptr->node_hostname, buffer);
-		packstr (dump_node_ptr->comm_name, buffer);
-		pack32(dump_node_ptr->node_state, buffer);
-		packstr (dump_node_ptr->version, buffer);
-		/* On a bluegene system always use the regular node
-		* infomation not what is in the config_ptr. */
-#ifndef HAVE_BG
-		if (slurmctld_conf.fast_schedule) {
-			/* Only data from config_record used for scheduling */
-			pack16(dump_node_ptr->config_ptr->cpus, buffer);
-			pack16(dump_node_ptr->config_ptr->boards, buffer);
-			pack16(dump_node_ptr->config_ptr->sockets, buffer);
-			pack16(dump_node_ptr->config_ptr->cores, buffer);
-			pack16(dump_node_ptr->config_ptr->threads, buffer);
-			pack32(xlate_mem_new2old(dump_node_ptr->config_ptr->real_memory),
-			       buffer);
-			pack32(dump_node_ptr->config_ptr->tmp_disk, buffer);
-		} else {
-#endif
-			/* Individual node data used for scheduling */
-			pack16(dump_node_ptr->cpus, buffer);
-			pack16(dump_node_ptr->boards, buffer);
-			pack16(dump_node_ptr->sockets, buffer);
-			pack16(dump_node_ptr->cores, buffer);
-			pack16(dump_node_ptr->threads, buffer);
-			pack32(xlate_mem_new2old(dump_node_ptr->real_memory),
-			       buffer);
-			pack32(dump_node_ptr->tmp_disk, buffer);
-#ifndef HAVE_BG
-		}
-#endif
-		pack32(dump_node_ptr->owner, buffer);
-		pack16(dump_node_ptr->core_spec_cnt, buffer);
-		pack32(xlate_mem_new2old(dump_node_ptr->mem_spec_limit),
-		       buffer);
-		packstr(dump_node_ptr->cpu_spec_list, buffer);
-
-		pack32(dump_node_ptr->cpu_load, buffer);
-		pack32(xlate_mem_new2old(dump_node_ptr->free_mem),
-		       buffer);
-		pack32(dump_node_ptr->config_ptr->weight, buffer);
-		pack32(dump_node_ptr->reason_uid, buffer);
-
-		pack_time(dump_node_ptr->boot_time, buffer);
-		pack_time(dump_node_ptr->reason_time, buffer);
-		pack_time(dump_node_ptr->slurmd_start_time, buffer);
-
-		select_g_select_nodeinfo_pack(dump_node_ptr->select_nodeinfo,
-					      buffer, protocol_version);
-
-		packstr(dump_node_ptr->arch, buffer);
-		packstr(dump_node_ptr->features, buffer);
-		if (dump_node_ptr->gres)
-			packstr(dump_node_ptr->gres, buffer);
-		else
-			packstr(dump_node_ptr->config_ptr->gres, buffer);
-
-		/* Gathering GRES deails is slow, so don't by default */
-		if (show_flags & SHOW_DETAIL) {
-			gres_drain =
-				gres_get_node_drain(dump_node_ptr->gres_list);
-			gres_used  =
-				gres_get_node_used(dump_node_ptr->gres_list);
-		}
-		packstr(gres_drain, buffer);
-		packstr(gres_used, buffer);
-		xfree(gres_drain);
-		xfree(gres_used);
-
-		packstr(dump_node_ptr->os, buffer);
-		packstr(dump_node_ptr->reason, buffer);
-		acct_gather_energy_pack(dump_node_ptr->energy, buffer,
-					protocol_version);
-		ext_sensors_data_pack(dump_node_ptr->ext_sensors, buffer,
-				      protocol_version);
-		power_mgmt_data_pack(dump_node_ptr->power, buffer,
-				     protocol_version);
-
-		packstr(dump_node_ptr->tres_fmt_str,buffer);
 	} else {
 		error("_pack_node: protocol_version "
 		      "%hu not supported", protocol_version);
@@ -1208,7 +1135,6 @@ static void _pack_node (struct node_record *dump_node_ptr, Buf buffer,
 /*
  * set_slurmd_addr - establish the slurm_addr_t for the slurmd on each node
  *	Uses common data structures.
- * NOTE: READ lock_slurmctld config before entry
  */
 void set_slurmd_addr (void)
 {
@@ -1216,6 +1142,8 @@ void set_slurmd_addr (void)
 	int i;
 	struct node_record *node_ptr = node_record_table_ptr;
 	DEF_TIMERS;
+
+	xassert(verify_lock(CONFIG_LOCK, READ_LOCK));
 
 	START_TIMER;
 	for (i = 0; i < node_record_count; i++, node_ptr++) {
@@ -1247,7 +1175,7 @@ void set_slurmd_addr (void)
 		xfree(node_ptr->reason);
 		node_ptr->reason = xstrdup("NO NETWORK ADDRESS FOUND");
 		node_ptr->reason_time = time(NULL);
-		node_ptr->reason_uid = getuid();
+		node_ptr->reason_uid = slurmctld_conf.slurm_user_id;
 	}
 
 	END_TIMER2("set_slurmd_addr");
@@ -1317,7 +1245,7 @@ int update_node ( update_node_msg_t * update_node_msg )
 {
 	int error_code = 0, node_cnt, node_inx;
 	struct node_record *node_ptr = NULL;
-	char  *this_node_name = NULL;
+	char *this_node_name = NULL, *tmp_feature;
 	hostlist_t host_list, hostaddr_list = NULL, hostname_list = NULL;
 	uint32_t base_state = 0, node_flags, state_val;
 	time_t now = time(NULL);
@@ -1372,6 +1300,7 @@ int update_node ( update_node_msg_t * update_node_msg )
 
 	while ( (this_node_name = hostlist_shift (host_list)) ) {
 		int err_code = 0;
+		bool acct_updated = false;
 
 		node_ptr = find_node_record (this_node_name);
 		node_inx = node_ptr - node_record_table_ptr;
@@ -1405,7 +1334,8 @@ int update_node ( update_node_msg_t * update_node_msg )
 			xfree(node_ptr->features);
 			if (update_node_msg->features[0]) {
 				node_ptr->features =
-					xstrdup(update_node_msg->features);
+					node_features_g_node_xlate2(
+						update_node_msg->features);
 			}
 			/* _update_node_avail_features() logs and updates
 			 * avail_feature_list */
@@ -1419,16 +1349,15 @@ int update_node ( update_node_msg_t * update_node_msg )
 			     node_ptr->features);
 			error_code = ESLURM_INVALID_FEATURE;
 		} else if (update_node_msg->features_act) {
-			xfree(node_ptr->features_act);
-			node_ptr->features_act =
-				node_features_g_node_xlate(
+			tmp_feature = node_features_g_node_xlate(
 					update_node_msg->features_act,
-					node_ptr->features, 2);
-			xfree(update_node_msg->features_act);
-			update_node_msg->features_act =
-				xstrdup(node_ptr->features_act);
-			/* _update_node_active_features() logs and updates
-			 * active_feature_list */
+					node_ptr->features_act,
+					node_ptr->features);
+			xfree(node_ptr->features_act);
+			node_ptr->features_act = tmp_feature;
+			error_code = _update_node_active_features(
+						node_ptr->name,
+						node_ptr->features_act);
 		}
 
 		if (update_node_msg->gres) {
@@ -1480,17 +1409,19 @@ int update_node ( update_node_msg_t * update_node_msg )
 						acct_db_conn,
 						node_ptr,
 						now);
+					acct_updated = true;
 				}
 				node_ptr->node_state &= (~NODE_STATE_DRAIN);
 				node_ptr->node_state &= (~NODE_STATE_FAIL);
-				node_ptr->node_state &= (~NODE_STATE_MAINT);
+				node_ptr->node_state &= (~NODE_STATE_REBOOT);
 				if (IS_NODE_DOWN(node_ptr)) {
 					state_val = NODE_STATE_IDLE;
 #ifndef HAVE_FRONT_END
 					node_ptr->node_state |=
 							NODE_STATE_NO_RESPOND;
 #endif
-					node_ptr->last_response = now;
+					node_ptr->last_response = MAX(now,
+						node_ptr->last_response);
 					ping_nodes_now = true;
 				} else if (IS_NODE_FUTURE(node_ptr)) {
 					if (node_ptr->port == 0) {
@@ -1506,7 +1437,9 @@ int update_node ( update_node_msg_t * update_node_msg )
 						node_ptr->node_state |=
 							NODE_STATE_NO_RESPOND;
 #endif
-						node_ptr->last_response = now;
+						node_ptr->last_response =
+							MAX(now,
+							node_ptr->last_response);
 						ping_nodes_now = true;
 					} else {
 						error("slurm_set_addr failure "
@@ -1523,6 +1456,7 @@ int update_node ( update_node_msg_t * update_node_msg )
 						acct_db_conn,
 						node_ptr,
 						now);
+					acct_updated = true;
 				}
 				node_ptr->node_state &= (~NODE_STATE_DRAIN);
 				state_val = base_state;
@@ -1547,6 +1481,7 @@ int update_node ( update_node_msg_t * update_node_msg )
 						acct_db_conn,
 						node_ptr,
 						now);
+					acct_updated = true;
 				} else if (IS_NODE_IDLE(node_ptr)   &&
 					   (IS_NODE_DRAIN(node_ptr) ||
 					    IS_NODE_FAIL(node_ptr))) {
@@ -1554,6 +1489,7 @@ int update_node ( update_node_msg_t * update_node_msg )
 						acct_db_conn,
 						node_ptr,
 						now);
+					acct_updated = true;
 				}	/* else already fully available */
 				node_ptr->node_state &= (~NODE_STATE_DRAIN);
 				node_ptr->node_state &= (~NODE_STATE_FAIL);
@@ -1648,7 +1584,8 @@ int update_node ( update_node_msg_t * update_node_msg )
 				   (IS_NODE_POWER_UP(node_ptr))) {
 				/* Clear any reboot operation in progress */
 				node_ptr->node_state &= (~NODE_STATE_POWER_UP);
-				node_ptr->last_response = now;
+				node_ptr->last_response = MAX(now,
+						node_ptr->last_response);
 				state_val = base_state;
 			} else if (state_val == NODE_STATE_NO_RESPOND) {
 				node_ptr->node_state |= NODE_STATE_NO_RESPOND;
@@ -1673,7 +1610,7 @@ int update_node ( update_node_msg_t * update_node_msg )
 			}
 		}
 
-		if (!IS_NODE_DOWN(node_ptr) &&
+		if (!acct_updated && !IS_NODE_DOWN(node_ptr) &&
 		    !IS_NODE_DRAIN(node_ptr) && !IS_NODE_FAIL(node_ptr)) {
 			/* reason information is handled in
 			   clusteracct_storage_g_node_up()
@@ -1689,11 +1626,6 @@ int update_node ( update_node_msg_t * update_node_msg )
 	FREE_NULL_HOSTLIST(hostname_list);
 	last_node_update = now;
 
-	if ((error_code == 0) && (update_node_msg->features_act)) {
-		error_code = _update_node_active_features(
-					update_node_msg->node_names,
-					update_node_msg->features_act);
-	}
 	if ((error_code == 0) && (update_node_msg->features)) {
 		error_code = _update_node_avail_features(
 					update_node_msg->node_names,
@@ -1845,8 +1777,7 @@ static int _update_node_weight(char *node_names, uint32_t weight)
 			_update_config_ptr(tmp_bitmap, new_config_ptr);
 
 			/* Update remaining records */
-			bit_not(tmp_bitmap);
-			bit_and(config_ptr->node_bitmap, tmp_bitmap);
+			bit_and_not(config_ptr->node_bitmap, tmp_bitmap);
 			xfree(config_ptr->nodes);
 			config_ptr->nodes = bitmap2node_name(
 				config_ptr->node_bitmap);
@@ -1942,8 +1873,7 @@ static int _update_node_avail_features(char *node_names, char *avail_features)
 			_update_config_ptr(tmp_bitmap, new_config_ptr);
 
 			/* Update remaining records */
-			bit_not(tmp_bitmap);
-			bit_and(config_ptr->node_bitmap, tmp_bitmap);
+			bit_and_not(config_ptr->node_bitmap, tmp_bitmap);
 			xfree(config_ptr->nodes);
 			config_ptr->nodes = bitmap2node_name(config_ptr->
 							     node_bitmap);
@@ -1951,7 +1881,10 @@ static int _update_node_avail_features(char *node_names, char *avail_features)
 		FREE_NULL_BITMAP(tmp_bitmap);
 	}
 	list_iterator_destroy(config_iterator);
-	update_feature_list(avail_feature_list, avail_features, node_bitmap);
+	if (avail_feature_list) {	/* List not set at startup */
+		update_feature_list(avail_feature_list, avail_features,
+				    node_bitmap);
+	}
 	FREE_NULL_BITMAP(node_bitmap);
 
 	info("%s: nodes %s available features set to: %s",
@@ -2016,8 +1949,7 @@ static int _update_node_gres(char *node_names, char *gres)
 			_update_config_ptr(tmp_bitmap, new_config_ptr);
 
 			/* Update remaining records */
-			bit_not(tmp_bitmap);
-			bit_and(config_ptr->node_bitmap, tmp_bitmap);
+			bit_and_not(config_ptr->node_bitmap, tmp_bitmap);
 			xfree(config_ptr->nodes);
 			config_ptr->nodes = bitmap2node_name(config_ptr->
 							     node_bitmap);
@@ -2163,7 +2095,7 @@ static bool _valid_node_state_change(uint32_t old, uint32_t new)
 			    (base_state == NODE_STATE_FUTURE) ||
 			    (node_flags & NODE_STATE_DRAIN)   ||
 			    (node_flags & NODE_STATE_FAIL)    ||
-			    (node_flags & NODE_STATE_MAINT))
+			    (node_flags & NODE_STATE_REBOOT))
 				return true;
 			break;
 
@@ -2284,7 +2216,6 @@ static void _split_node_config(struct node_record *node_ptr,
  * IN protocol_version - Version of Slurm on this node
  * OUT newly_up - set if node newly brought into service
  * RET 0 if no error, ENOENT if no such node, EINVAL if values too low
- * NOTE: READ lock_slurmctld config before entry
  */
 extern int validate_node_specs(slurm_node_registration_status_msg_t *reg_msg,
 			       uint16_t protocol_version, bool *newly_up)
@@ -2292,13 +2223,15 @@ extern int validate_node_specs(slurm_node_registration_status_msg_t *reg_msg,
 	int error_code, i, node_inx;
 	struct config_record *config_ptr;
 	struct node_record *node_ptr;
-	char *reason_down = NULL, *tmp_str;
+	char *reason_down = NULL;
 	uint32_t node_flags;
 	time_t now = time(NULL);
 	bool gang_flag = false;
 	bool orig_node_avail;
 	static uint32_t cr_flag = NO_VAL;
 	int *cpu_spec_array;
+
+	xassert(verify_lock(CONFIG_LOCK, READ_LOCK));
 
 	node_ptr = find_node_record (reg_msg->node_name);
 	if (node_ptr == NULL)
@@ -2319,6 +2252,7 @@ extern int validate_node_specs(slurm_node_registration_status_msg_t *reg_msg,
 		debug("Still waiting for boot of node %s", node_ptr->name);
 		return SLURM_SUCCESS;
 	}
+	bit_clear(booting_node_bitmap, node_inx);
 
 	if (cr_flag == NO_VAL) {
 		cr_flag = 0;  /* call is no-op for select/linear and bluegene */
@@ -2330,21 +2264,23 @@ extern int validate_node_specs(slurm_node_registration_status_msg_t *reg_msg,
 	if (slurm_get_preempt_mode() != PREEMPT_MODE_OFF)
 		gang_flag = true;
 
-	if (reg_msg->features_active) {
-		tmp_str = node_features_g_node_xlate(reg_msg->features_active,
-						     node_ptr->features_act, 1);
-		xfree(node_ptr->features_act);
-		node_ptr->features_act = tmp_str;
-		(void) _update_node_active_features(node_ptr->name,
-						    node_ptr->features_act);
-	}
 	if (reg_msg->features_avail) {
-		tmp_str = node_features_g_node_xlate(reg_msg->features_avail,
-						     node_ptr->features, 1);
 		xfree(node_ptr->features);
-		node_ptr->features = tmp_str;
+		node_ptr->features = node_features_g_node_xlate2(
+					reg_msg->features_avail);
 		(void) _update_node_avail_features(node_ptr->name,
 						   node_ptr->features);
+	}
+	if (reg_msg->features_active) {
+		char *tmp_feature;
+		tmp_feature = node_features_g_node_xlate(			// DO HERE
+						reg_msg->features_active,
+						node_ptr->features_act,
+						node_ptr->features);
+		xfree(node_ptr->features_act);
+		node_ptr->features_act = tmp_feature;
+		(void) _update_node_active_features(node_ptr->name,
+						    node_ptr->features_act);
 	}
 
 	if (gres_plugin_node_config_unpack(reg_msg->gres_info,
@@ -2365,6 +2301,17 @@ extern int validate_node_specs(slurm_node_registration_status_msg_t *reg_msg,
 		int sockets1, sockets2;	/* total sockets on node */
 		int cores1, cores2;	/* total cores on node */
 		int threads1, threads2;	/* total threads on node */
+		char *node_features_plugin = slurm_get_node_features_plugins();
+		bool validate_socket_cnt = true;
+
+		if (node_features_plugin &&
+		    strstr(node_features_plugin, "knl")) {
+			/* KNL reboots can change the NUMA count (treated like
+			 * a socket count) without changing the total core
+			 * count, which Slurm will support. */
+			validate_socket_cnt = false;
+		}
+		xfree(node_features_plugin);
 
 		sockets1 = reg_msg->sockets;
 		cores1   = sockets1 * reg_msg->cores;
@@ -2391,13 +2338,18 @@ extern int validate_node_specs(slurm_node_registration_status_msg_t *reg_msg,
 			xstrcat(reason_down, "Low socket*core count");
 		} else if ((slurmctld_conf.fast_schedule == 0) &&
 			   ((cr_flag == 1) || gang_flag) &&
-			   ((sockets1 > sockets2) || (cores1 > cores2) ||
-			    (threads1 > threads2))) {
+			   ((validate_socket_cnt && (sockets1 > sockets2)) ||
+			    (cores1 > cores2) || (threads1 > threads2))) {
 			error("Node %s has high socket,core,thread count "
 			      "(%d,%d,%d > %d,%d,%d), extra resources ignored",
-			      reg_msg->node_name, sockets1, cores1, threads1,
-			      sockets2, cores2, threads2);
-			/* Preserve configured values */
+			      reg_msg->node_name, reg_msg->sockets,
+			      reg_msg->cores, reg_msg->threads,
+			      config_ptr->sockets, config_ptr->cores,
+			      config_ptr->threads);
+			/* Preserve configured values as we can't change the
+			 * total core count on the node without the core_bitmaps
+			 * in select/cons_res or gang scheduler being rebuilt */
+			reg_msg->boards  = config_ptr->boards;
 			reg_msg->sockets = config_ptr->sockets;
 			reg_msg->cores   = config_ptr->cores;
 			reg_msg->threads = config_ptr->threads;
@@ -2427,6 +2379,11 @@ extern int validate_node_specs(slurm_node_registration_status_msg_t *reg_msg,
 		     (config_ptr->sockets * config_ptr->cores))) {
 			_split_node_config(node_ptr, reg_msg);
 		}
+	}
+	if (reg_msg->boards > reg_msg->sockets) {
+		error("Node %s has more boards than sockets (%u > %u), setting board count to 1",
+		      reg_msg->node_name, reg_msg->boards, reg_msg->sockets);
+		reg_msg->boards = 1;
 	}
 
 	/* reset partition and node config (in that order) */
@@ -2524,6 +2481,7 @@ extern int validate_node_specs(slurm_node_registration_status_msg_t *reg_msg,
 		info("Node %s now responding", node_ptr->name);
 		node_ptr->node_state &= (~NODE_STATE_NO_RESPOND);
 		node_ptr->node_state &= (~NODE_STATE_POWER_UP);
+		node_ptr->node_state &= (~NODE_STATE_REBOOT);
 		if (!is_node_in_maint_reservation(node_inx))
 			node_ptr->node_state &= (~NODE_STATE_MAINT);
 		last_node_update = now;
@@ -2560,7 +2518,7 @@ extern int validate_node_specs(slurm_node_registration_status_msg_t *reg_msg,
 			else
 				reason = "Job env setup error";
 			drain_nodes(reg_msg->node_name, reason,
-				    slurm_get_slurm_user_id());
+				    slurmctld_conf.slurm_user_id);
 			last_node_update = time (NULL);
 		}
 	} else {
@@ -2573,10 +2531,12 @@ extern int validate_node_specs(slurm_node_registration_status_msg_t *reg_msg,
 			debug("validate_node_specs: node %s registered with "
 			      "%u jobs",
 			      reg_msg->node_name,reg_msg->job_count);
-			if (IS_NODE_FUTURE(node_ptr) &&
-			    IS_NODE_MAINT(node_ptr) &&
-			    !is_node_in_maint_reservation(node_inx))
-				node_flags &= (~NODE_STATE_MAINT);
+			if (IS_NODE_FUTURE(node_ptr)) {
+				if (IS_NODE_MAINT(node_ptr) &&
+				    !is_node_in_maint_reservation(node_inx))
+					node_flags &= (~NODE_STATE_MAINT);
+				node_flags &= (~NODE_STATE_REBOOT);
+			}
 			if (reg_msg->job_count) {
 				node_ptr->node_state = NODE_STATE_ALLOCATED |
 					node_flags;
@@ -2599,11 +2559,18 @@ extern int validate_node_specs(slurm_node_registration_status_msg_t *reg_msg,
 			}
 		} else if (IS_NODE_DOWN(node_ptr) &&
 			   ((slurmctld_conf.ret2service == 2) ||
-			    !xstrcmp(node_ptr->reason, "Scheduled reboot") ||
+			    IS_NODE_REBOOT(node_ptr) ||
 			    ((slurmctld_conf.ret2service == 1) &&
 			     !xstrcmp(node_ptr->reason, "Not responding") &&
 			     (node_ptr->boot_time <
 			      node_ptr->last_response)))) {
+			node_flags &= (~NODE_STATE_REBOOT);
+			if (!xstrcmp(node_ptr->reason, "Reboot ASAP")) {
+				xfree(node_ptr->reason);
+				node_ptr->reason_time = 0;
+				node_ptr->reason_uid = 0;
+				node_flags &= (~NODE_STATE_DRAIN);
+			}
 			if (reg_msg->job_count) {
 				node_ptr->node_state = NODE_STATE_ALLOCATED |
 					node_flags;
@@ -2619,14 +2586,13 @@ extern int validate_node_specs(slurm_node_registration_status_msg_t *reg_msg,
 			if (!IS_NODE_DRAIN(node_ptr)
 			    && !IS_NODE_FAIL(node_ptr)) {
 				/* reason information is handled in
-				   clusteracct_storage_g_node_up()
-				*/
+				 * clusteracct_storage_g_node_up() */
 				clusteracct_storage_g_node_up(
 					acct_db_conn, node_ptr, now);
 			}
-		} else if (node_ptr->last_response
-			   && (node_ptr->boot_time > node_ptr->last_response)
-			   && (slurmctld_conf.ret2service != 2)) {
+		} else if (node_ptr->last_response &&
+			   (node_ptr->boot_time > node_ptr->last_response) &&
+			   (slurmctld_conf.ret2service != 2)) {
 			if (!node_ptr->reason ||
 			    (node_ptr->reason &&
 			     !xstrcmp(node_ptr->reason, "Not responding"))) {
@@ -2634,7 +2600,7 @@ extern int validate_node_specs(slurm_node_registration_status_msg_t *reg_msg,
 					xfree(node_ptr->reason);
 				node_ptr->reason_time = now;
 				node_ptr->reason_uid =
-					slurm_get_slurm_user_id();
+					slurmctld_conf.slurm_user_id;
 				node_ptr->reason = xstrdup(
 					"Node unexpectedly rebooted");
 			}
@@ -2692,6 +2658,7 @@ extern int validate_node_specs(slurm_node_registration_status_msg_t *reg_msg,
 		       sizeof(acct_gather_energy_t));
 
 	node_ptr->last_response = MAX(now, node_ptr->last_response);
+	node_ptr->boot_req_time = (time_t) 0;
 
 	*newly_up = (!orig_node_avail && bit_test(avail_node_bitmap, node_inx));
 
@@ -2767,7 +2734,6 @@ static char *_build_step_id(char *buf, int buf_len,
  * IN protocol_version - Version of Slurm on this node
  * OUT newly_up - set if node newly brought into service
  * RET 0 if no error, SLURM error code otherwise
- * NOTE: READ lock_slurmctld config before entry
  */
 extern int validate_nodes_via_front_end(
 		slurm_node_registration_status_msg_t *reg_msg,
@@ -2785,6 +2751,8 @@ extern int validate_nodes_via_front_end(
 	uint32_t node_flags;
 	front_end_record_t *front_end_ptr;
 	char step_str[64];
+
+	xassert(verify_lock(CONFIG_LOCK, READ_LOCK));
 
 	if (reg_msg->up_time > now) {
 		error("Node up_time on %s is invalid: %u>%u",
@@ -2918,7 +2886,8 @@ extern int validate_nodes_via_front_end(
 			continue;
 #endif
 		info("Killing orphan batch job %u", job_ptr->job_id);
-		job_complete(job_ptr->job_id, 0, false, false, 0);
+		job_complete(job_ptr->job_id, slurmctld_conf.slurm_user_id,
+			     false, false, 0);
 	}
 	list_iterator_destroy(job_iterator);
 
@@ -2926,6 +2895,8 @@ extern int validate_nodes_via_front_end(
 					      node_record_table_ptr->name);
 	for (i = 0, node_ptr = node_record_table_ptr; i < node_record_count;
 	     i++, node_ptr++) {
+		bool acct_updated = false;
+
 		config_ptr = node_ptr->config_ptr;
 		node_ptr->last_response = MAX(now, node_ptr->last_response);
 
@@ -2986,16 +2957,15 @@ extern int validate_nodes_via_front_end(
 				if (!IS_NODE_DRAIN(node_ptr) &&
 				    !IS_NODE_FAIL(node_ptr)) {
 					/* reason information is handled in
-					   clusteracct_storage_g_node_up()
-					*/
+					 * clusteracct_storage_g_node_up() */
 					clusteracct_storage_g_node_up(
 						acct_db_conn,
 						node_ptr, now);
+					acct_updated = true;
 				}
 			} else if (IS_NODE_DOWN(node_ptr) &&
 				   ((slurmctld_conf.ret2service == 2) ||
-				    !xstrcmp(node_ptr->reason,
-					     "Scheduled reboot") ||
+				    (node_ptr->boot_req_time != 0)    ||
 				    ((slurmctld_conf.ret2service == 1) &&
 				     !xstrcmp(node_ptr->reason,
 					      "Not responding")))) {
@@ -3015,11 +2985,11 @@ extern int validate_nodes_via_front_end(
 				if (!IS_NODE_DRAIN(node_ptr) &&
 				    !IS_NODE_FAIL(node_ptr)) {
 					/* reason information is handled in
-					   clusteracct_storage_g_node_up()
-					*/
+					 * clusteracct_storage_g_node_up() */
 					clusteracct_storage_g_node_up(
 						acct_db_conn,
 						node_ptr, now);
+					acct_updated = true;
 				}
 			} else if (IS_NODE_ALLOCATED(node_ptr) &&
 				   (node_ptr->run_job_cnt == 0)) {
@@ -3059,7 +3029,7 @@ extern int validate_nodes_via_front_end(
 			memcpy(node_ptr->energy, reg_msg->energy,
 			       sizeof(acct_gather_energy_t));
 
-		if (slurmctld_init_db &&
+		if (!acct_updated && slurmctld_init_db &&
 		    !IS_NODE_DOWN(node_ptr) &&
 		    !IS_NODE_DRAIN(node_ptr) && !IS_NODE_FAIL(node_ptr)) {
 			/* reason information is handled in
@@ -3125,7 +3095,6 @@ static void _node_did_resp(front_end_record_t *fe_ptr)
 	}
 	if (IS_NODE_DOWN(fe_ptr) &&
 	    ((slurmctld_conf.ret2service == 2) ||
-	     !xstrcmp(fe_ptr->reason, "Scheduled reboot") ||
 	     ((slurmctld_conf.ret2service == 1) &&
 	      !xstrcmp(fe_ptr->reason, "Not responding")))) {
 		last_front_end_update = now;
@@ -3151,18 +3120,19 @@ static void _node_did_resp(struct node_record *node_ptr)
 	node_inx = node_ptr - node_record_table_ptr;
 	if (IS_NODE_POWER_UP(node_ptr) ||
 	    (IS_NODE_DOWN(node_ptr) &&
-	     !xstrcmp(node_ptr->reason, "Scheduled reboot"))) {
+	    (node_ptr->boot_req_time != 0))) {
 		if (node_ptr->boot_time < node_ptr->boot_req_time) {
 			debug("Still waiting for boot of node %s",
 			      node_ptr->name);
 			return;
 		}
 	}
-	node_ptr->last_response = now;
+	node_ptr->last_response = MAX(now, node_ptr->last_response);
 	if (IS_NODE_NO_RESPOND(node_ptr) || IS_NODE_POWER_UP(node_ptr)) {
 		info("Node %s now responding", node_ptr->name);
 		node_ptr->node_state &= (~NODE_STATE_NO_RESPOND);
 		node_ptr->node_state &= (~NODE_STATE_POWER_UP);
+		node_ptr->node_state &= (~NODE_STATE_REBOOT);
 		if (!is_node_in_maint_reservation(node_inx))
 			node_ptr->node_state &= (~NODE_STATE_MAINT);
 		last_node_update = now;
@@ -3183,7 +3153,7 @@ static void _node_did_resp(struct node_record *node_ptr)
 	}
 	if (IS_NODE_DOWN(node_ptr) &&
 	    ((slurmctld_conf.ret2service == 2) ||
-	     !xstrcmp(node_ptr->reason, "Scheduled reboot") ||
+	     (node_ptr->boot_req_time != 0)    ||
 	     ((slurmctld_conf.ret2service == 1) &&
 	      !xstrcmp(node_ptr->reason, "Not responding")))) {
 		node_ptr->last_idle = now;
@@ -3220,7 +3190,6 @@ static void _node_did_resp(struct node_record *node_ptr)
 /*
  * node_did_resp - record that the specified node is responding
  * IN name - name of the node
- * NOTE: READ lock_slurmctld config before entry
  */
 void node_did_resp (char *name)
 {
@@ -3231,6 +3200,9 @@ void node_did_resp (char *name)
 	struct node_record *node_ptr;
 	node_ptr = find_node_record (name);
 #endif
+
+	xassert(verify_lock(CONFIG_LOCK, READ_LOCK));
+
 	if (node_ptr == NULL) {
 		error ("node_did_resp unable to find node %s", name);
 		return;
@@ -3312,9 +3284,11 @@ extern void node_no_resp_msg(void)
 	char *host_str = NULL;
 	hostlist_t no_resp_hostlist = NULL;
 
-	for (i=0; i<node_record_count; i++) {
+	for (i = 0; i < node_record_count; i++) {
 		node_ptr = &node_record_table_ptr[i];
-		if (!node_ptr->not_responding)
+		if (!node_ptr->not_responding ||
+		    IS_NODE_POWER_SAVE(node_ptr) ||
+		    IS_NODE_POWER_UP(node_ptr))
 			continue;
 		if (no_resp_hostlist) {
 			(void) hostlist_push_host(no_resp_hostlist,
@@ -3367,7 +3341,7 @@ void set_node_down_ptr (struct node_record *node_ptr, char *reason)
 		xfree(node_ptr->reason);
 		node_ptr->reason = xstrdup(reason);
 		node_ptr->reason_time = now;
-		node_ptr->reason_uid = slurm_get_slurm_user_id();
+		node_ptr->reason_uid = slurmctld_conf.slurm_user_id;
 	}
 	_make_node_down(node_ptr, now);
 	(void) kill_running_job_by_node_name(node_ptr->name);
@@ -3523,7 +3497,10 @@ extern void make_node_alloc(struct node_record *node_ptr,
 		(node_ptr->no_share_job_cnt)++;
 	}
 
-	if (job_ptr->details && (job_ptr->details->whole_node == 2)) {
+	if ((job_ptr->details &&
+	     (job_ptr->details->whole_node == WHOLE_NODE_USER)) ||
+	    (job_ptr->part_ptr &&
+	     (job_ptr->part_ptr->flags & PART_FLAG_EXCLUSIVE_USER))) {
 		node_ptr->owner_job_cnt++;
 		node_ptr->owner = job_ptr->user_id;
 	}
@@ -3595,7 +3572,7 @@ extern void make_node_comp(struct node_record *node_ptr,
 			clusteracct_storage_g_node_down(
 				acct_db_conn,
 				node_ptr, now, NULL,
-				slurm_get_slurm_user_id());
+				slurmctld_conf.slurm_user_id);
 		}
 	}
 
@@ -3714,7 +3691,7 @@ void make_node_idle(struct node_record *node_ptr,
 				      node_ptr->name);
 			}
 			if (node_ptr->comp_job_cnt > 0)
-				return;		/* More jobs completing */
+				goto fini;	/* More jobs completing */
 		}
 	}
 
@@ -3727,19 +3704,12 @@ void make_node_idle(struct node_record *node_ptr,
 		}
 	}
 
-	if (job_ptr && job_ptr->details && (job_ptr->details->whole_node == 2)){
-		if (--node_ptr->owner_job_cnt == 0) {
-			node_ptr->owner = NO_VAL;
-			xfree(node_ptr->mcs_label);
-		}
-	}
-
 	node_flags = node_ptr->node_state & NODE_STATE_FLAGS;
 	if (IS_NODE_DOWN(node_ptr)) {
 		debug3("%s: %s node %s being left DOWN",
 		       __func__, jobid2str(job_ptr, jbuf,
 					   sizeof(jbuf)), node_ptr->name);
-		return;
+		goto fini;
 	}
 	bit_set(up_node_bitmap, inx);
 
@@ -3760,7 +3730,7 @@ void make_node_idle(struct node_record *node_ptr,
 		trigger_node_drained(node_ptr);
 		clusteracct_storage_g_node_down(acct_db_conn,
 						node_ptr, now, NULL,
-						slurm_get_slurm_user_id());
+						slurmctld_conf.slurm_user_id);
 	} else if (node_ptr->run_job_cnt) {
 		node_ptr->node_state = NODE_STATE_ALLOCATED | node_flags;
 		if (!IS_NODE_NO_RESPOND(node_ptr) &&
@@ -3775,6 +3745,21 @@ void make_node_idle(struct node_record *node_ptr,
 		    !IS_NODE_COMPLETING(node_ptr))
 			bit_set(idle_node_bitmap, inx);
 		node_ptr->last_idle = now;
+	}
+
+fini:
+	if (job_ptr &&
+	    ((job_ptr->details &&
+	      (job_ptr->details->whole_node == WHOLE_NODE_USER)) ||
+	     (job_ptr->part_ptr &&
+	      (job_ptr->part_ptr->flags & PART_FLAG_EXCLUSIVE_USER)))) {
+		if (node_ptr->owner_job_cnt == 0) {
+			error("%s: node_ptr->owner_job_cnt underflow",
+			      __func__);
+		} else if (--node_ptr->owner_job_cnt == 0) {
+			node_ptr->owner = NO_VAL;
+			xfree(node_ptr->mcs_label);
+		}
 	}
 	last_node_update = now;
 }
@@ -3798,7 +3783,7 @@ extern int send_nodes_to_accounting(time_t event_time)
 			reason = node_ptr->reason;
 		else
 			reason = "First Registration";
-		if (node_ptr->name == '\0' ||
+		if (!node_ptr->name ||
 		   (!IS_NODE_DRAIN(node_ptr) && !IS_NODE_FAIL(node_ptr) &&
 		    !IS_NODE_DOWN(node_ptr))) {
 			/* At this point, the node appears to be up,
@@ -3839,7 +3824,7 @@ extern int send_nodes_to_accounting(time_t event_time)
 						acct_db_conn,
 						&send_node, event_time,
 						reason,
-						slurm_get_slurm_user_id());
+						slurmctld_conf.slurm_user_id);
 				}
 			}
 		} else
@@ -3847,7 +3832,7 @@ extern int send_nodes_to_accounting(time_t event_time)
 				acct_db_conn,
 				node_ptr, event_time,
 				reason,
-				slurm_get_slurm_user_id());
+				slurmctld_conf.slurm_user_id);
 		if (rc == SLURM_ERROR)
 			break;
 	}
@@ -3861,6 +3846,7 @@ extern void node_fini (void)
 	FREE_NULL_LIST(active_feature_list);
 	FREE_NULL_LIST(avail_feature_list);
 	FREE_NULL_BITMAP(avail_node_bitmap);
+	FREE_NULL_BITMAP(booting_node_bitmap);
 	FREE_NULL_BITMAP(cg_node_bitmap);
 	FREE_NULL_BITMAP(idle_node_bitmap);
 	FREE_NULL_BITMAP(power_node_bitmap);

@@ -11,7 +11,7 @@
  *  CODE-OCEC-09-009. All rights reserved.
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://slurm.schedmd.com/>.
+ *  For details, see <https://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -60,19 +60,18 @@
 #include <inttypes.h>
 
 #define BITSTR_SHIFT_WORD8	3
-#define BITSTR_SHIFT_WORD32	5
 #define BITSTR_SHIFT_WORD64	6
+#define BITSTR_MAXVAL           0xffffffffffffffff
+#define BITSTR_FMT		PRId64
 
+/* Below are also defined in src/slurm/slurm.h.in.  If it changes please update
+ * that as well.
+ */
 #ifndef   __bitstr_datatypes_defined
 #  define __bitstr_datatypes_defined
 
-#ifdef USE_64BIT_BITSTR
 typedef int64_t bitstr_t;
 #define BITSTR_SHIFT 		BITSTR_SHIFT_WORD64
-#else
-typedef int32_t bitstr_t;
-#define BITSTR_SHIFT 		BITSTR_SHIFT_WORD32
-#endif
 
 typedef bitstr_t bitoff_t;
 
@@ -114,6 +113,7 @@ void	bit_free(bitstr_t *b);
 bitstr_t *bit_realloc(bitstr_t *b, bitoff_t nbits);
 bitoff_t bit_size(bitstr_t *b);
 void	bit_and(bitstr_t *b1, bitstr_t *b2);
+void	bit_and_not(bitstr_t *b1, bitstr_t *b2);
 void	bit_not(bitstr_t *b);
 void	bit_or(bitstr_t *b1, bitstr_t *b2);
 int32_t	bit_set_count(bitstr_t *b);
@@ -124,10 +124,13 @@ int32_t	bit_nset_max_count(bitstr_t *b);
 bitstr_t *bit_rotate_copy(bitstr_t *b1, int32_t n, bitoff_t nbits);
 void	bit_rotate(bitstr_t *b1, int32_t n);
 char	*bit_fmt(char *str, int32_t len, bitstr_t *b);
+char    *bit_fmt_full(bitstr_t *b);
+char    *bit_fmt_range(bitstr_t *b, int offset, int len);
 int	bit_unfmt(bitstr_t *b, char *str);
 int32_t	*bitfmt2int (char *bit_str_ptr);
 char *  inx2bitfmt (int32_t *inx);
 int     inx2bitstr(bitstr_t *b, int32_t *inx);
+int32_t *bitstr2inx(bitstr_t *b);
 char	*bit_fmt_hexmask(bitstr_t *b);
 int 	bit_unfmt_hexmask(bitstr_t *b, const char *str);
 char	*bit_fmt_binmask(bitstr_t *b);

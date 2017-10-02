@@ -7,7 +7,7 @@
  *  CODE-OCEC-09-009. All rights reserved.
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://slurm.schedmd.com/>.
+ *  For details, see <https://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -69,23 +69,23 @@ extern void run_dbd_backup(void)
 
 	/* repeatedly ping Primary */
 	while (!shutdown_time) {
-		bool writeable = slurm_persist_conn_writeable(&slurmdbd_conn);
+		int writeable = slurm_persist_conn_writeable(&slurmdbd_conn);
 		//info("%d %d", have_control, writeable);
 
-		if (have_control && writeable) {
+		if (have_control && writeable == 1) {
 			info("Primary has come back");
 			primary_resumed = true;
 			shutdown_threads();
 			have_control = false;
 			break;
-		} else if (!have_control && !writeable) {
+		} else if (!have_control && writeable <= 0) {
 			have_control = true;
 			info("Taking Control");
 			break;
 		}
 
 		sleep(1);
-		if (!writeable)
+		if (writeable <= 0)
 			slurm_persist_conn_reopen(&slurmdbd_conn, false);
 	}
 

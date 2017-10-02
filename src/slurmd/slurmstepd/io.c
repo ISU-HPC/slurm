@@ -7,7 +7,7 @@
  *  CODE-OCEC-09-009. All rights reserved.
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://slurm.schedmd.com/>.
+ *  For details, see <https://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -72,10 +72,9 @@
 #include "src/common/xsignal.h"
 #include "src/common/xstring.h"
 
-
+#include "src/slurmd/common/fname.h"
 #include "src/slurmd/slurmd/slurmd.h"
 #include "src/slurmd/slurmstepd/io.h"
-#include "src/slurmd/slurmstepd/fname.h"
 #include "src/slurmd/slurmstepd/slurmstepd.h"
 
 /**********************************************************************
@@ -116,7 +115,7 @@ struct client_io_info {
 	   write for one task. -1 means accept output from any task. */
 	int  ltaskid_stdout, ltaskid_stderr;
 	bool labelio;
-	int  label_width;
+	int  taskid_width;
 
 	/* true if writing to a file, false if writing to a socket */
 	bool is_local_file;
@@ -225,7 +224,7 @@ _client_readable(eio_obj_t *obj)
 	xassert(client->magic == CLIENT_IO_MAGIC);
 
 	if (client->in_eof) {
-		debug5("  false");
+		debug5("  false, in_eof");
 		/* We no longer want the _client_read() function to handle
 		   errors on write now that the read side of the connection
 		   is closed.  Setting handle_read to NULL will result in
@@ -534,8 +533,10 @@ _local_file_write(eio_obj_t *obj, List objs)
 					io_hdr_packed_size();
 	}
 
-	/* This code to make a buffer, fill it, unpack its contents, and free
-	   it is just used to read the header to get the global task id. */
+	/*
+	 * This code to make a buffer, fill it, unpack its contents, and free
+	 * it is just used to read the header to get the global task id.
+	 */
 	header_tmp_buf = create_buf(client->out_msg->data,
 				    client->out_msg->length);
 	if (!header_tmp_buf) {
@@ -546,8 +547,10 @@ _local_file_write(eio_obj_t *obj, List objs)
 	header_tmp_buf->head = NULL;	/* CLANG false positive bug here */
 	free_buf(header_tmp_buf);
 
-	/* A zero-length message indicates the end of a stream from one
-	   of the tasks.  Just free the message and return. */
+	/*
+	 * A zero-length message indicates the end of a stream from one
+	 * of the tasks.  Just free the message and return.
+	 */
 	if (header.length == 0) {
 		_free_outgoing_msg(client->out_msg, client->job);
 		client->out_msg = NULL;
@@ -557,10 +560,10 @@ _local_file_write(eio_obj_t *obj, List objs)
 	/* Write the message to the file. */
 	buf = client->out_msg->data +
 		(client->out_msg->length - client->out_remaining);
-
 	n = write_labelled_message(obj->fd, buf, client->out_remaining,
-				   header.gtaskid, client->labelio,
-				   client->label_width);
+				   header.gtaskid, client->job->pack_offset,
+				   client->job->pack_task_offset,
+				   client->labelio, client->taskid_width);
 	if (n < 0) {
 		client->out_eof = true;
 		_free_all_outgoing_msgs(client->msg_queue, client->job);
@@ -863,8 +866,6 @@ _spawn_window_manager(stepd_step_task_info_t *task, stepd_step_rec_t *job)
 	slurm_addr_t pty_addr;
 	uint16_t port_u;
 	struct window_info *win_info;
-	pthread_attr_t attr;
-	pthread_t win_id;
 
 #if 0
 	/* NOTE: SLURM_LAUNCH_NODE_IPADDR is not available at this point */
@@ -908,10 +909,7 @@ _spawn_window_manager(stepd_step_task_info_t *task, stepd_step_rec_t *job)
 	win_info->task   = task;
 	win_info->job    = job;
 	win_info->pty_fd = pty_fd;
-	slurm_attr_init(&attr);
-	pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_DETACHED);
-	if (pthread_create(&win_id, &attr, &_window_manager, (void *) win_info))
-		error("pthread_create(pty_conn): %m");
+	slurm_thread_create_detached(NULL, _window_manager, win_info);
 }
 #endif
 
@@ -1042,7 +1040,8 @@ _init_task_stdio_fds(stepd_step_task_info_t *task, stepd_step_rec_t *job)
 		    (xstrcmp(task->ofname, "/dev/null") == 0))) {
 #else
 	if (task->ofname != NULL &&
-	    (!job->labelio || xstrcmp(task->ofname, "/dev/null")==0) ) {
+	    (((job->flags & LAUNCH_LABEL_IO) == 0) ||
+	     xstrcmp(task->ofname, "/dev/null") == 0)) {
 #endif
 		int count = 0;
 		/* open file on task's stdout */
@@ -1062,7 +1061,7 @@ _init_task_stdio_fds(stepd_step_task_info_t *task, stepd_step_rec_t *job)
 		/* create pipe and eio object */
 		int pout[2];
 #if HAVE_PTY_H
-		if (job->flags & LAUNCH_BUFFERED_IO) {
+		if (!(job->flags & LAUNCH_BUFFERED_IO)) {
 #if HAVE_SETRESUID
 			if (setresuid(geteuid(), geteuid(), 0) < 0)
 				error("%s: %d setresuid() %m",
@@ -1183,29 +1182,9 @@ io_init_tasks_stdio(stepd_step_rec_t *job)
 	return rc;
 }
 
-int
-io_thread_start(stepd_step_rec_t *job)
+extern void io_thread_start(stepd_step_rec_t *job)
 {
-	pthread_attr_t attr;
-	int rc = 0, retries = 0;
-
-	slurm_attr_init(&attr);
-
-	while (pthread_create(&job->ioid, &attr, &_io_thr, (void *)job)) {
-		error("io_thread_start: pthread_create error %m");
-		if (++retries > MAX_RETRIES) {
-			error("io_thread_start: Can't create pthread");
-			rc = -1;
-			break;
-		}
-		usleep(10);	/* sleep and again */
-	}
-
-	slurm_attr_destroy(&attr);
-
-	/*fatal_add_cleanup(&_fatal_cleanup, (void *) job);*/
-
-	return rc;
+	slurm_thread_create(&job->ioid, _io_thr, job);
 }
 
 
@@ -1443,6 +1422,7 @@ io_close_all(stepd_step_rec_t *job)
 	} else {
 		if (dup2(devnull, STDERR_FILENO) < 0)
 			error("Unable to dup /dev/null onto stderr");
+		(void) close(devnull);
 	}
 
 	/* Signal IO thread to close appropriate
@@ -1536,10 +1516,10 @@ io_create_local_client(const char *filename, int file_flags,
 	client->labelio = labelio;
 	client->is_local_file = true;
 
-	client->label_width = 1;
-	tmp = job->node_tasks-1;
+	client->taskid_width = 1;
+	tmp = job->node_tasks - 1;
 	while ((tmp /= 10) > 0)
-		client->label_width++;
+		client->taskid_width++;
 
 
 	obj = eio_obj_create(fd, &local_file_ops, (void *)client);
@@ -1608,7 +1588,7 @@ io_initial_client_connect(srun_info_t *srun, stepd_step_rec_t *job,
 	client->ltaskid_stdout = stdout_tasks;
 	client->ltaskid_stderr = stderr_tasks;
 	client->labelio = false;
-	client->label_width = 0;
+	client->taskid_width = 0;
 	client->is_local_file = false;
 
 	obj = eio_obj_create(sock, &client_ops, (void *)client);
@@ -1668,7 +1648,7 @@ io_client_connect(srun_info_t *srun, stepd_step_rec_t *job)
 	client->ltaskid_stdout = -1;     /* accept from all tasks */
 	client->ltaskid_stderr = -1;     /* accept from all tasks */
 	client->labelio = false;
-	client->label_width = 0;
+	client->taskid_width = 0;
 	client->is_local_file = false;
 
 	/* client object adds itself to job->clients in _client_writable */
@@ -1782,18 +1762,18 @@ _send_eof_msg(struct task_read_info *out)
 
 	/* Add eof message to the msg_queue of all clients */
 	clients = list_iterator_create(out->job->clients);
-	while((eio = list_next(clients))) {
+	while ((eio = list_next(clients))) {
 		client = (struct client_io_info *)eio->arg;
 		debug5("======================== Enqueued eof message");
 		xassert(client->magic == CLIENT_IO_MAGIC);
 
-		/* Send eof message to all clients.
-		 */
-
+		/* Send eof message to all clients */
 		if (list_enqueue(client->msg_queue, msg))
 			msg->ref_count++;
 	}
 	list_iterator_destroy(clients);
+	if (msg->ref_count == 0)
+		free_io_buf(msg);
 
 	debug4("Leaving  _send_eof_msg");
 }
@@ -1806,8 +1786,11 @@ _task_build_message(struct task_read_info *out, stepd_step_rec_t *job, cbuf_t cb
 	struct io_buf *msg;
 	char *ptr;
 	Buf packbuf;
+	bool must_truncate = false;
+	int avail;
 	struct slurm_io_header header;
 	int n;
+	bool buffered_stdio = job->flags & LAUNCH_BUFFERED_IO;
 
 	debug4("%s: Entering...", __func__);
 
@@ -1818,13 +1801,43 @@ _task_build_message(struct task_read_info *out, stepd_step_rec_t *job, cbuf_t cb
 	}
 
 	ptr = msg->data + io_hdr_packed_size();
-	n = cbuf_read(cbuf, ptr, MAX_MSG_LEN);
+
+	if (buffered_stdio) {
+		avail = cbuf_peek_line(cbuf, ptr, MAX_MSG_LEN, 1);
+		if (avail >= MAX_MSG_LEN)
+			must_truncate = true;
+		else if (avail == 0 && cbuf_used(cbuf) >= MAX_MSG_LEN)
+			must_truncate = true;
+	}
+
+	debug5("%s: buffered_stdio is %s", __func__,
+	       buffered_stdio ? "true" : "false");
+	debug5("%s: must_truncate  is %s", __func__,
+	       must_truncate ? "true" : "false");
+
+	/*
+	 * If eof has been read from a tasks stdout or stderr, we need to
+	 * ignore normal line buffering and send the buffer immediately.
+	 * Hence the "|| out->eof".
+	 */
+	if (must_truncate || !buffered_stdio || out->eof) {
+		n = cbuf_read(cbuf, ptr, MAX_MSG_LEN);
+	} else {
+		n = cbuf_read_line(cbuf, ptr, MAX_MSG_LEN, -1);
+		if (n == 0) {
+			debug5("  partial line in buffer, ignoring");
+			debug4("Leaving  _task_build_message");
+			list_enqueue(job->free_outgoing, msg);
+			return NULL;
+		}
+	}
+
 	header.type = out->type;
 	header.ltaskid = out->ltaskid;
 	header.gtaskid = out->gtaskid;
 	header.length = n;
 
-	debug4("%s: header.length %d", __func__, n);
+	debug4("%s: header.length = %d", __func__, n);
 	packbuf = create_buf(msg->data, io_hdr_packed_size());
 	if (!packbuf) {
 		fatal("Failure to allocate memory for a message header");
@@ -1838,7 +1851,7 @@ _task_build_message(struct task_read_info *out, stepd_step_rec_t *job, cbuf_t cb
 	packbuf->head = NULL;	/* CLANG false positive bug here */
 	free_buf(packbuf);
 
-	debug4("%s: Leaving...", __func__);
+	debug4("%s: Leaving", __func__);
 	return msg;
 }
 

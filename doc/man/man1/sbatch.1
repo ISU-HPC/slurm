@@ -1,10 +1,15 @@
-.TH sbatch "1" "Slurm Commands" "March 2016" "Slurm Commands"
+.TH sbatch "1" "Slurm Commands" "June 2017" "Slurm Commands"
 
 .SH "NAME"
 sbatch \- Submit a batch script to Slurm.
 
 .SH "SYNOPSIS"
-sbatch [\fIoptions\fP] \fIscript\fP [\fIargs\fP...]
+\fBsbatch\fR [\fIOPTIONS(0)\fR...] \fR[ : \fR[\fIOPTIONS(n)\fR...]\fR] \fIscript(0) \fR[\fIargs(0)\fR...]
+
+Option(s) define multiple jobs in a co-scheduled heterogeneous job.
+For more details about heterogeneous jobs see the document
+.br
+http://slurm.schedmd.com/heterogeneous_jobs.html
 
 .SH "DESCRIPTION"
 sbatch submits a batch script to Slurm.  The batch script may be given to
@@ -29,7 +34,7 @@ allocated nodes.
 The following document describes the influence of various options on the
 allocation of cpus to jobs and tasks.
 .br
-http://slurm.schedmd.com/cpu_management.html
+https://slurm.schedmd.com/cpu_management.html
 
 .SH "OPTIONS"
 .LP
@@ -49,6 +54,7 @@ For example "\-\-array=0\-15%4" will limit the number of simultaneously
 running tasks from this job array to 4.
 The minimum index value is 0.
 the maximum value is one less than the configuration parameter MaxArraySize.
+NOTE: currently, federated job arrays only run on the local cluster.
 
 .TP
 \fB\-A\fR, \fB\-\-account\fR=<\fIaccount\fR>
@@ -114,28 +120,30 @@ applications having less than 10,000 tasks.
 
 .TP
 \fB\-B\fR \fB\-\-extra\-node\-info\fR=<\fIsockets\fR[:\fIcores\fR[:\fIthreads\fR]]>
-Request a specific allocation of resources with details as to the
-number and type of computational resources within a cluster:
-number of sockets (or physical processors) per node,
-cores per socket, and threads per core.
-The total amount of resources being requested is the product of all of
-the terms.
+Restrict node selection to nodes with at least the specified number of
+sockets, cores per socket and/or threads per core.
+NOTE: These options do not specify the resource allocation size.
 Each value specified is considered a minimum.
 An asterisk (*) can be used as a placeholder indicating that all available
-resources of that type are to be utilized.
-As with nodes, the individual levels can also be specified in separate
-options if desired:
+resources of that type are to be utilized. Values can also be specified as
+min-max. The individual levels can also be specified in separate options if
+desired:
 .nf
     \fB\-\-sockets\-per\-node\fR=<\fIsockets\fR>
     \fB\-\-cores\-per\-socket\fR=<\fIcores\fR>
     \fB\-\-threads\-per\-core\fR=<\fIthreads\fR>
 .fi
+If task/affinity plugin is enabled, then specifying an allocation in this
+manner also results in subsequently launched tasks being bound to threads
+if the \fB\-B\fR option specifies a thread count, otherwise an option of
+\fIcores\fR if a core count is specified, otherwise an option of \fIsockets\fR.
 If SelectType is configured to select/cons_res, it must have a parameter of
 CR_Core, CR_Core_Memory, CR_Socket, or CR_Socket_Memory for this option
 to be honored.
 This option is not supported on BlueGene systems (select/bluegene plugin
 is configured).
-If not specified, the scontrol show job will display 'ReqS:C:T=*:*:*'.
+If not specified, the scontrol show job will display 'ReqS:C:T=*:*:*'. This
+option applies to job allocations.
 
 .TP
 \fB\-\-bbf\fR=<\fIfile_name\fR>
@@ -203,6 +211,14 @@ be written (used by the checkpoint/blcrm and checkpoint/xlch plugins only).
 The default value is the current working directory.
 Checkpoint files will be of the form "<job_id>.ckpt" for jobs
 and "<job_id>.<step_id>.ckpt" for job steps.
+
+.TP
+\fB\-\-cluster\-constraint\fR=[!]<\fIlist\fR>
+Specifies features that a federated cluster must have to have a sibling job
+submitted to it. Slurm will attempt to submit a sibling job to a cluster if it
+has at least one of the specified features. If the "!" option is included, Slurm
+will attempt to submit a sibling job to a cluster that has none of the specified
+features.
 
 .TP
 \fB\-\-comment\fR=<\fIstring\fR>
@@ -401,7 +417,7 @@ YYYY\-MM\-DD[THH:MM[:SS]]]
 
 .TP
 \fB\-\-delay\-boot\fR=<\fIminutes\fR>
-Do not reboot nodes in order to satified this job's feature specification if
+Do not reboot nodes in order to satisfied this job's feature specification if
 the job has been eligible to run for less than this time period.
 If the job has waited for less than the specified period, it will use only
 nodes which already have the specified features.
@@ -459,7 +475,7 @@ sharing the same job name and user have terminated.
 .RE
 
 .TP
-\fB\-D\fR, \fB\-\-workdir\fR=<\fIdirectory\fR>
+\fB\-D\fR, \fB\-\-chdir\fR=<\fIdirectory\fR>
 Set the working directory of the batch script to \fIdirectory\fR before
 it is executed. The path can be specified as full path or relative path
 to the directory where the command is executed.
@@ -473,7 +489,7 @@ For job arrays, the default file name is "slurm-%A_%a.out", "%A" is replaced
 by the job ID and "%a" with the array index.
 For other jobs, the default file name is "slurm-%j.out", where the "%j" is
 replaced by the job ID.
-See the \fB\-\-input\fR option for filename specification options.
+See the \fBfilename pattern\fR section below for filename specification options.
 
 .TP
 \fB\-\-exclusive[=user|mcs]\fR
@@ -621,37 +637,7 @@ directly to the file name specified in the "\fIfilename pattern\fR".
 By default, "/dev/null" is open on the batch script's standard input and both
 standard output and standard error are directed to a file of the name
 "slurm\-%j.out", where the "%j" is replaced with the job allocation number, as
-described below.
-
-The filename pattern may contain one or more replacement symbols, which are
-a percent sign "%" followed by a letter (e.g. %j).
-
-Supported replacement symbols are:
-.PD
-.RS
-.TP
-\fB\\\\\fR
-Do not process any of the replacement symbols.
-.TP
-\fB%%\fR
-The character "%".
-.TP
-\fB%A\fR
-Job array's master job allocation number.
-.TP
-\fB%a\fR
-Job array ID (index) number.
-.TP
-\fB%j\fR
-Job allocation number.
-.TP
-\fB%N\fR
-Node name.  Only one file is created, so %N will be replaced by the name of the
-first node in the job, which is the one that runs the script.
-.TP
-\fB%u\fR
-User name.
-.RE
+described below in the \fBfilename pattern\fR section.
 
 .TP
 \fB\-J\fR, \fB\-\-job\-name\fR=<\fIjobname\fR>
@@ -664,6 +650,7 @@ read on sbatch's standard input.
 \fB\-\-jobid\fR=<\fIjobid\fR>
 Allocate resources as the specified job id.
 NOTE: Only valid for users root and SlurmUser.
+NOTE: Not valid for federated clusters.
 
 .TP
 \fB\-k\fR, \fB\-\-no\-kill\fR
@@ -705,6 +692,7 @@ job initiation time. The default value is the current cluster. A value of
 \(aq\fIall\fR' will query to run on all clusters.  Note the
 \fB\-\-export\fR option to control environment variables exported
 between clusters.
+Note that the SlurmDBD must be up for this option to work properly.
 
 .TP
 \fB\-m\fR, \fB\-\-distribution\fR=
@@ -721,7 +709,7 @@ nodes. The optional second distribution method (after the ":")
 controls the distribution of resources across sockets within a node.
 Note that with select/cons_res, the number of cpus allocated on each
 socket and node may be different. Refer to
-http://slurm.schedmd.com/mc_support.html
+https://slurm.schedmd.com/mc_support.html
 for more information on resource allocation, assignment of tasks to
 nodes, and binding of tasks to CPUs.
 .RS
@@ -760,11 +748,11 @@ distributed to each node is the same as for cyclic distribution, but the
 taskids assigned to each node depend on the plane size.  For more
 details (including examples and diagrams), please see
 .br
-http://slurm.schedmd.com/mc_support.html
+https://slurm.schedmd.com/mc_support.html
 .br
 and
 .br
-http://slurm.schedmd.com/dist_plane.html
+https://slurm.schedmd.com/dist_plane.html
 .TP
 .B arbitrary
 The arbitrary method of distribution will allocate processes in\-order
@@ -830,8 +818,10 @@ This parameter is a group among the groups of the user.
 Default value is calculated by the Plugin mcs if it's enabled.
 
 .TP
-\fB\-\-mem\fR=<\fIMB\fR>
-Specify the real memory required per node in megabytes.
+\fB\-\-mem\fR=<\fIsize[units]\fR>
+Specify the real memory required per node.
+Default units are megabytes unless the SchedulerParameters configuration
+parameter includes the "default_gbytes" option for gigabytes.
 Different units can be specified using the suffix [K|M|G|T].
 Default value is \fBDefMemPerNode\fR and the maximum value is
 \fBMaxMemPerNode\fR. If configured, both parameters can be
@@ -854,9 +844,10 @@ the job's Resident Set Size (RSS). A task may exceed the memory limit until
 the next periodic accounting sample.
 
 .TP
-\fB\-\-mem\-per\-cpu\fR=<\fIMB\fR>
-Minimum memory required per allocated CPU in megabytes.
-Different units can be specified using the suffix [K|M|G|T].
+\fB\-\-mem\-per\-cpu\fR=<\fIsize[units]\fR>
+Minimum memory required per allocated CPU.
+Default units are megabytes unless the SchedulerParameters configuration
+parameter includes the "default_gbytes" option for gigabytes.
 Default value is \fBDefMemPerCPU\fR and the maximum value is \fBMaxMemPerCPU\fR
 (see exception below). If configured, both parameters can be
 seen using the \fBscontrol show config\fR command.
@@ -885,7 +876,7 @@ at the level of the cores within a processor while memory binding will
 be performed at the level of nodes, where the definition of "nodes"
 may differ from system to system.
 By default no memory binding is performed; any task using any CPU can use
-any memory. This option is typically used to insure that each task is bound to
+any memory. This option is typically used to ensure that each task is bound to
 the memory closest to it's assigned CPU. \fBThe use of any type other than
 "none" or "local" is not recommended.\fR
 If you want greater control, try running a simple test code with the
@@ -900,9 +891,11 @@ The following informational environment variables are set when
 \fB\-\-mem_bind\fR is in use:
 
 .nf
-        SLURM_MEM_BIND_VERBOSE
-        SLURM_MEM_BIND_TYPE
-        SLURM_MEM_BIND_LIST
+	SLURM_MEM_BIND_LIST
+	SLURM_MEM_BIND_PREFER
+	SLURM_MEM_BIND_SORT
+	SLURM_MEM_BIND_TYPE
+	SLURM_MEM_BIND_VERBOSE
 .fi
 
 See the \fBENVIRONMENT VARIABLES\fR section for a more detailed description
@@ -911,17 +904,8 @@ of the individual SLURM_MEM_BIND* variables.
 Supported options include:
 .RS
 .TP
-.B q[uiet]
-quietly bind before task runs (default)
-.TP
-.B v[erbose]
-verbosely report binding before task runs
-.TP
-.B no[ne]
-don't bind tasks to memory (default)
-.TP
-.B rank
-bind by task rank (not recommended)
+.B help
+show this help message
 .TP
 .B local
 Use memory local to the processor in use
@@ -937,6 +921,9 @@ with '0x' in which case they interpreted as hexadecimal values.
 If the number of tasks (or ranks) exceeds the number of elements in this list,
 elements in the list will be reused as needed starting from the beginning of
 the list.
+To simplify support for large task counts, the lists may follow a map with an
+asterisk and repetition count
+For example "map_mem:0x0f*4,0xf0*4".
 Not supported unless the entire node is allocated to the job.
 .TP
 .B mask_mem:<list>
@@ -951,10 +938,29 @@ with [0-9] so they are seen as numerical values.
 If the number of tasks (or ranks) exceeds the number of elements in this list,
 elements in the list will be reused as needed starting from the beginning of
 the list.
+To simplify support for large task counts, the lists may follow a mask with an
+asterisk and repetition count
+For example "mask_mem:0*4,1*4".
 Not supported unless the entire node is allocated to the job.
 .TP
-.B help
-show this help message
+.B no[ne]
+don't bind tasks to memory (default)
+.TP
+.B p[refer]
+Prefer use of first specified NUMA node, but permit
+ use of other available NUMA nodes.
+.TP
+.B q[uiet]
+quietly bind before task runs (default)
+.TP
+.B rank
+bind by task rank (not recommended)
+.TP
+.B sort
+sort free cache pages (run zonesort on Intel KNL nodes)
+.TP
+.B v[erbose]
+verbosely report binding before task runs
 .RE
 
 .TP
@@ -1044,7 +1050,7 @@ Supported values include:
 .RS
 .TP 12
 \fBBULK_XFER\fR[=<\fIresources\fR>]
-Enable bulk transfer of data using Remote Direct-Memory Access (RDMA).
+Enable bulk transfer of data using Remote Direct\-Memory Access (RDMA).
 The optional \fIresources\fR specification is a numeric value which can have
 a suffix of "k", "K", "m", "M", "g" or "G" for kilobytes, megabytes or
 gigabytes.
@@ -1143,8 +1149,6 @@ Run the job with an adjusted scheduling priority within Slurm. With no
 adjustment value the scheduling priority is decreased by 100. A negative nice
 value increases the priority, otherwise decreases it. The adjustment range is
 +/\- 2147483645. Only privileged users can specify a negative adjustment.
-NOTE: This option is presently ignored if \fISchedulerType=sched/wiki\fR or
-\fISchedulerType=sched/wiki2\fR.
 
 .TP
 \fB\-\-no\-requeue\fR
@@ -1220,7 +1224,7 @@ For job arrays, the default file name is "slurm-%A_%a.out", "%A" is replaced
 by the job ID and "%a" with the array index.
 For other jobs, the default file name is "slurm-%j.out", where the "%j" is
 replaced by the job ID.
-See the \fB\-\-input\fR option for filename specification options.
+See the \fBfilename pattern\fR section below for filename specification options.
 
 .TP
 \fB\-\-open\-mode\fR=append|truncate
@@ -1338,16 +1342,16 @@ The maximum stack size
 .RE
 
 .TP
-\fB\-Q\fR, \fB\-\-quiet\fR
-Suppress informational messages from sbatch. Errors will still be displayed.
-
-.TP
-\fB\-\-qos\fR=<\fIqos\fR>
+\fB\-q\fR, \fB\-\-qos\fR=<\fIqos\fR>
 Request a quality of service for the job.  QOS values can be defined
 for each user/cluster/account association in the Slurm database.
 Users will be limited to their association's defined set of qos's when
 the Slurm configuration parameter, AccountingStorageEnforce, includes
 "qos" in it's definition.
+
+.TP
+\fB\-Q\fR, \fB\-\-quiet\fR
+Suppress informational messages from sbatch. Errors will still be displayed.
 
 .TP
 \fB\-\-reboot\fR
@@ -1408,7 +1412,7 @@ By default, no signal is sent before the job's end time.
 If a \fIsig_num\fR is specified without any \fIsig_time\fR,
 the default time will be 60 seconds.
 Use the "B:" option to signal only the batch shell, none of the other
-processes will be signaled. By default all job steps will be signalled,
+processes will be signaled. By default all job steps will be signaled,
 but not the batch shell itself.
 
 .TP
@@ -1418,9 +1422,10 @@ sockets.  See additional information under \fB\-B\fR option above when
 task/affinity plugin is enabled.
 
 .TP
-\fB\-\-spread\-job\fR>
+\fB\-\-spread\-job\fR
 Spread the job allocation over as many nodes as possible and attempt to
 evenly distribute tasks across the allocated nodes.
+This option disables the topology/tree plugin.
 
 .TP
 \fB\-\-switches\fR=<\fIcount\fR>[@<\fImax\-time\fR>]
@@ -1436,6 +1441,9 @@ Acceptable time formats include "minutes", "minutes:seconds",
 The job's maximum time delay may be limited by the system administrator using
 the \fBSchedulerParameters\fR configuration parameter with the
 \fBmax_switch_wait\fR parameter option.
+On a dragonfly network the only switch count supported is 1 since communication
+performance will be highest when a job is allocate resources on one leaf switch
+or more than 2 leaf switches.
 The default max\-time is the max_switch_wait SchedulerParameters.
 
 .TP
@@ -1494,8 +1502,11 @@ Acceptable time formats include "minutes", "minutes:seconds",
 "days\-hours:minutes:seconds".
 
 .TP
-\fB\-\-tmp\fR=<\fIMB\fR>
-Specify a minimum amount of temporary disk space.
+\fB\-\-tmp\fR=<\fIsize[units]\fR>
+Specify a minimum amount of temporary disk space per node.
+Default units are megabytes unless the SchedulerParameters configuration
+parameter includes the "default_gbytes" option for gigabytes.
+Different units can be specified using the suffix [K|M|G|T].
 
 .TP
 \fB\-u\fR, \fB\-\-usage\fR
@@ -1644,6 +1655,68 @@ By default the specified geometry can rotate in three dimensions.
 Path to ramdisk image for bluegene block.  BGL only.
 Default from \fIblugene.conf\fR if not set.
 
+.SH \fBfilename pattern\fR
+.PP
+\fBsbatch\fR allows for a filename pattern to contain one or more replacement
+symbols, which are a percent sign "%" followed by a letter (e.g. %j).
+.TP
+\fB\\\\\fR
+Do not process any of the replacement symbols.
+.TP
+\fB%%\fR
+The character "%".
+.TP
+\fB%A\fR
+Job array's master job allocation number.
+.TP
+\fB%a\fR
+Job array ID (index) number.
+.TP
+\fB%J\fR
+jobid.stepid of the running job. (e.g. "128.0")
+.TP
+\fB%j\fR
+jobid of the running job.
+.TP
+\fB%N\fR
+short hostname. This will create a separate IO file per node.
+.TP
+\fB%n\fR
+Node identifier relative to current job (e.g. "0" is the first node of
+the running job) This will create a separate IO file per node.
+.TP
+\fB%s\fR
+stepid of the running job.
+.TP
+\fB%t\fR
+task identifier (rank) relative to current job. This will create a
+separate IO file per task.
+.TP
+\fB%u\fR
+User name.
+.TP
+\fB%x\fR
+Job name.
+.PP
+A number placed between the percent character and format specifier may be
+used to zero\-pad the result in the IO filename. This number is ignored if
+the format specifier corresponds to  non\-numeric data (%N for example).
+
+Some examples of how the format string may be used for a 4 task job step
+with a Job ID of 128 and step id of 0 are included below:
+.TP 15
+job%J.out
+job128.0.out
+.TP
+job%4j.out
+job0128.out
+.TP
+job%j\-%2t.out
+job128\-00.out, job128\-01.out, ...
+.PP
+.RS -10
+.PP
+
 .SH "INPUT ENVIRONMENT VARIABLES"
 .PP
 Upon startup, sbatch will read and handle the options set in the following
@@ -1678,6 +1751,9 @@ Same as \fB\-\-cnload\-image\fR
 .TP
 \fBSBATCH_CONN_TYPE\fR
 Same as \fB\-\-conn\-type\fR
+.TP
+\fBSBATCH_CONSTRAINT\fR
+Same as \fB\-C\fR, \fB\-\-constraint\fR
 .TP
 \fBSBATCH_CORE_SPEC\fR
 Same as \fB\-\-core\-spec\fR
@@ -1831,38 +1907,26 @@ Do not free a block on Blue Gene L/P systems only.
 \fBMPIRUN_PARTITION\fR
 The block name on Blue Gene systems only.
 .TP
-\fBSBATCH_CPU_BIND\fR
-Set to value of the \-\-cpu_bind\fR option.
-.TP
-\fBSBATCH_CPU_BIND_VERBOSE\fR
-Set to "verbose" if the \-\-cpu_bind\fR option includes the verbose option.
-Set to "quiet" otherwise.
-.TP
-\fBSBATCH_CPU_BIND_TYPE\fR
-Set to the CPU binding type specified with the \-\-cpu_bind\fR option.
-Possible values two possible comma separated strings.
-The first possible string identifies the entity to be bound to: "threads",
-"cores", "sockets", "ldoms" and "boards".
-The second string identifies manner in which tasks are bound:
-"none", "rank", "map_cpu", "mask_cpu", "rank_ldom", "map_ldom" or "mask_ldom".
-.TP
-\fBSBATCH_CPU_BIND_LIST\fR
-Set to bit mask used for CPU binding.
-
-.TP
 \fBSBATCH_MEM_BIND\fR
 Set to value of the \-\-mem_bind\fR option.
 .TP
-\fBSBATCH_MEM_BIND_VERBOSE\fR
-Set to "verbose" if the \-\-mem_bind\fR option includes the verbose option.
-Set to "quiet" otherwise.
+\fBSBATCH_MEM_BIND_LIST\fR
+Set to bit mask used for memory binding.
+.TP
+\fBSBATCH_MEM_BIND_PREFER\fR
+Set to "prefer" if the \-\-mem_bind\fR option includes the prefer option.
 .TP
 \fBSBATCH_MEM_BIND_TYPE\fR
 Set to the memory binding type specified with the \-\-mem_bind\fR option.
 Possible values are "none", "rank", "map_map", "mask_mem" and "local".
 .TP
-\fBSBATCH_MEM_BIND_LIST\fR
-Set to bit mask used for memory binding.
+\fBSBATCH_MEM_BIND_VERBOSE\fR
+Set to "verbose" if the \-\-mem_bind\fR option includes the verbose option.
+Set to "quiet" otherwise.
+.TP
+\fBSLURM_*_PACK_GROUP_#\fR
+For a heterogenous job allocation, the environment variables are set separately
+for each component.
 .TP
 \fBSLURM_ARRAY_TASK_COUNT\fR
 Total number of tasks in a job array.
@@ -1940,7 +2004,6 @@ Advanced reservation containing the job allocation, if any.
 \fBSLURM_LOCALID\fR
 Node local task ID for the process within a job.
 .TP
-.TP
 \fBSLURM_MEM_PER_CPU\fR
 Same as \fB\-\-mem\-per\-cpu\fR
 .TP
@@ -1970,6 +2033,9 @@ Only set if the \fB\-\-ntasks\-per\-node\fR option is specified.
 \fBSLURM_NTASKS_PER_SOCKET\fR
 Number of tasks requested per socket.
 Only set if the \fB\-\-ntasks\-per\-socket\fR option is specified.
+.TP
+\fBSLURM_PACK_SIZE\fR
+Set to count of components in heterogeneous job.
 .TP
 \fBSLURM_PRIO_PROCESS\fR
 The  scheduling priority (nice value) at the time of job submission.
@@ -2017,9 +2083,6 @@ configured. The value will be set  component  types  listed   in
 SLURM_TOPOLOGY_ADDR.   Each  component will be identified as
 either "switch" or "node".  A period is  used  to separate each
 hardware component type.
-.TP
-\fBSLURM_UMASK\fR
-The \fIumask\fR in effect when the job was submitted.
 .TP
 \fBSLURMD_NODENAME\fR
 Name of the node running the job script.
@@ -2080,16 +2143,23 @@ host3
 .br
 host4
 
+.LP
+To create a heterogeneous job with 3 components, each allocating a unique set of nodes:
+.IP
+sbatch -w node[2-3] : -w node4 : -w node[5-7] work.bash
+.br
+Submitted batch job 34987
+
 .SH "COPYING"
 Copyright (C) 2006\-2007 The Regents of the University of California.
 Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
 .br
 Copyright (C) 2008\-2010 Lawrence Livermore National Security.
 .br
-Copyright (C) 2010\-2015 SchedMD LLC.
+Copyright (C) 2010\-2017 SchedMD LLC.
 .LP
 This file is part of Slurm, a resource management program.
-For details, see <http://slurm.schedmd.com/>.
+For details, see <https://slurm.schedmd.com/>.
 .LP
 Slurm is free software; you can redistribute it and/or modify it under
 the terms of the GNU General Public License as published by the Free

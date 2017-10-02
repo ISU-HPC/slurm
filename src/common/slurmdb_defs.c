@@ -7,7 +7,7 @@
  *  CODE-OCEC-09-009. All rights reserved.
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://slurm.schedmd.com/>.
+ *  For details, see <https://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -74,10 +74,15 @@ static void _free_cluster_rec_members(slurmdb_cluster_rec_t *cluster)
 		FREE_NULL_LIST(cluster->accounting_list);
 		xfree(cluster->control_host);
 		xfree(cluster->dim_size);
+		FREE_NULL_LIST(cluster->fed.feature_list);
 		xfree(cluster->fed.name);
+		slurm_persist_conn_destroy(cluster->fed.recv);
+		slurm_persist_conn_destroy(cluster->fed.send);
+		slurm_mutex_destroy(&cluster->lock);
 		xfree(cluster->name);
 		xfree(cluster->nodes);
 		slurmdb_destroy_assoc_rec(cluster->root_assoc);
+		FREE_NULL_LIST(cluster->send_rpc);
 		xfree(cluster->tres_str);
 	}
 }
@@ -281,7 +286,7 @@ static char *_get_qos_list_str(List qos_list)
 	return qos_char;
 }
 
-static int _setup_cluster_rec(slurmdb_cluster_rec_t *cluster_rec)
+extern int slurmdb_setup_cluster_rec(slurmdb_cluster_rec_t *cluster_rec)
 {
 	int plugin_id_select = 0;
 
@@ -289,13 +294,6 @@ static int _setup_cluster_rec(slurmdb_cluster_rec_t *cluster_rec)
 
 	if (!cluster_rec->control_port) {
 		debug("Slurmctld on '%s' hasn't registered yet.",
-		      cluster_rec->name);
-		return SLURM_ERROR;
-	}
-
-	if (cluster_rec->rpc_version < 8) {
-		debug("Slurmctld on '%s' must be running at least "
-		      "SLURM 2.2 for cross-cluster communication.",
 		      cluster_rec->name);
 		return SLURM_ERROR;
 	}
@@ -374,6 +372,9 @@ static uint32_t _str_2_qos_flags(char *flags)
 
 	if (xstrcasestr(flags, "NoReserve"))
 		return QOS_FLAG_NO_RESERVE;
+
+	if (xstrcasestr(flags, "NoDecay"))
+		return QOS_FLAG_NO_DECAY;
 
 	return 0;
 }
@@ -748,7 +749,6 @@ extern void slurmdb_destroy_cluster_rec(void *object)
 
 	if (slurmdb_cluster) {
 		_free_cluster_rec_members(slurmdb_cluster);
-		slurm_mutex_destroy(&slurmdb_cluster->lock);
 		xfree(slurmdb_cluster);
 	}
 }
@@ -837,6 +837,7 @@ extern void slurmdb_destroy_job_rec(void *object)
 	slurmdb_job_rec_t *job = (slurmdb_job_rec_t *)object;
 	if (job) {
 		xfree(job->account);
+		xfree(job->admin_comment);
 		xfree(job->alloc_gres);
 		xfree(job->array_task_str);
 		xfree(job->blockid);
@@ -1292,9 +1293,7 @@ extern void slurmdb_destroy_hierarchical_rec(void *object)
 extern void slurmdb_destroy_selected_step(void *object)
 {
 	slurmdb_selected_step_t *step = (slurmdb_selected_step_t *)object;
-	if (step) {
-		xfree(step);
-	}
+	xfree(step);
 }
 
 extern void slurmdb_destroy_report_job_grouping(void *object)
@@ -1363,7 +1362,8 @@ extern List slurmdb_get_info_cluster(char *cluster_names)
 	itr = list_iterator_create(temp_list);
 	if (!cluster_names || all_clusters) {
 		while ((cluster_rec = list_next(itr))) {
-			if (_setup_cluster_rec(cluster_rec) != SLURM_SUCCESS) {
+			if (slurmdb_setup_cluster_rec(cluster_rec) !=
+			    SLURM_SUCCESS) {
 				list_delete_item(itr);
 			}
 		}
@@ -1380,7 +1380,8 @@ extern List slurmdb_get_info_cluster(char *cluster_names)
 				goto next;
 			}
 
-			if (_setup_cluster_rec(cluster_rec) != SLURM_SUCCESS) {
+			if (slurmdb_setup_cluster_rec(cluster_rec) !=
+			    SLURM_SUCCESS) {
 				list_delete_item(itr);
 			}
 		next:
@@ -1463,7 +1464,6 @@ extern void slurmdb_init_cluster_rec(slurmdb_cluster_rec_t *cluster,
 	memset(cluster, 0, sizeof(slurmdb_cluster_rec_t));
 	cluster->flags      = NO_VAL;
 	cluster->fed.state  = NO_VAL;
-	cluster->fed.weight = NO_VAL;
 	slurm_mutex_init(&cluster->lock);
 }
 
@@ -1656,20 +1656,18 @@ extern char *slurmdb_federation_flags_str(uint32_t flags)
 	if (flags & FEDERATION_FLAG_NOTSET)
 		return xstrdup("NotSet");
 
-	if (flags & FEDERATION_FLAG_LLC)
-		xstrcat(federation_flags, "LLC,");
-
+#if 0
+	/* Remove when there are actually flags since the flags will be
+	 * comma-separated. */
 	if (federation_flags)
 		federation_flags[strlen(federation_flags)-1] = '\0';
+#endif
 
 	return federation_flags;
 }
 
 static uint32_t _str_2_federation_flags(char *flags)
 {
-	if (xstrcasestr(flags, "LLC"))
-		return FEDERATION_FLAG_LLC;
-
 	return 0;
 }
 
@@ -1785,6 +1783,8 @@ extern char *slurmdb_qos_flags_str(uint32_t flags)
 		xstrcat(qos_flags, "PartitionTimeLimit,");
 	if (flags & QOS_FLAG_REQ_RESV)
 		xstrcat(qos_flags, "RequiresReservation,");
+	if (flags & QOS_FLAG_NO_DECAY)
+		xstrcat(qos_flags, "NoDecay,");
 
 	if (qos_flags)
 		qos_flags[strlen(qos_flags)-1] = '\0';
@@ -1889,9 +1889,6 @@ extern char *slurmdb_res_type_str(slurmdb_resource_type_t type)
 	case SLURMDB_RESOURCE_LICENSE:
 		return "License";
 		break;
-	default:
-		return "Unknown";
-		break;
 	}
 	return "Unknown";
 }
@@ -1910,9 +1907,6 @@ extern char *slurmdb_admin_level_str(slurmdb_admin_level_t level)
 		break;
 	case SLURMDB_ADMIN_SUPER_USER:
 		return "Administrator";
-		break;
-	default:
-		return "Unknown";
 		break;
 	}
 	return "Unknown";
@@ -2219,7 +2213,6 @@ extern char *get_qos_complete_str_bitstr(List qos_list, bitstr_t *valid_qos)
 	List temp_list = NULL;
 	char *temp_char = NULL;
 	char *print_this = NULL;
-	ListIterator itr = NULL;
 	int i = 0;
 
 	if (!qos_list || !list_count(qos_list)
@@ -2234,15 +2227,7 @@ extern char *get_qos_complete_str_bitstr(List qos_list, bitstr_t *valid_qos)
 		if ((temp_char = slurmdb_qos_str(qos_list, i)))
 			list_append(temp_list, temp_char);
 	}
-	list_sort(temp_list, (ListCmpF)slurm_sort_char_list_asc);
-	itr = list_iterator_create(temp_list);
-	while((temp_char = list_next(itr))) {
-		if (print_this)
-			xstrfmtcat(print_this, ",%s", temp_char);
-		else
-			print_this = xstrdup(temp_char);
-	}
-	list_iterator_destroy(itr);
+	print_this = slurm_char_list_to_xstr(temp_list);
 	FREE_NULL_LIST(temp_list);
 
 	if (!print_this)
@@ -2282,15 +2267,8 @@ extern char *get_qos_complete_str(List qos_list, List num_qos_list)
 		}
 	}
 	list_iterator_destroy(itr);
-	list_sort(temp_list, (ListCmpF)slurm_sort_char_list_asc);
-	itr = list_iterator_create(temp_list);
-	while((temp_char = list_next(itr))) {
-		if (print_this)
-			xstrfmtcat(print_this, ",%s", temp_char);
-		else
-			print_this = xstrdup(temp_char);
-	}
-	list_iterator_destroy(itr);
+
+	print_this = slurm_char_list_to_xstr(temp_list);
 	FREE_NULL_LIST(temp_list);
 
 	if (!print_this)
@@ -2978,15 +2956,21 @@ extern char *slurmdb_get_selected_step_id(
 
 	xassert(selected_step);
 
-	if (selected_step->array_task_id != NO_VAL)
+	if (selected_step->array_task_id != NO_VAL) {
 		snprintf(id, FORMAT_STRING_SIZE,
 			 "%u_%u",
 			 selected_step->jobid,
 			 selected_step->array_task_id);
-	else
+	} else if (selected_step->pack_job_offset != NO_VAL) {
+		snprintf(id, FORMAT_STRING_SIZE,
+			 "%u+%u",
+			 selected_step->jobid,
+			 selected_step->pack_job_offset);
+	} else {
 		snprintf(id, FORMAT_STRING_SIZE,
 			 "%u",
 			 selected_step->jobid);
+	}
 
 	if (selected_step->stepid != NO_VAL)
 		snprintf(job_id_str, len, "%s.%u",
@@ -2997,16 +2981,30 @@ extern char *slurmdb_get_selected_step_id(
 	return job_id_str;
 }
 
+/*
+ * get the first cluster that will run a job
+ * IN: req - description of resource allocation request
+ * IN: cluster_names - comma separated string of cluster names
+ * OUT: cluster_rec - record of selected cluster or NULL if none found or
+ * 		      cluster_names is NULL
+ * RET: SLURM_SUCCESS on success SLURM_ERROR else
+ *
+ * Note: Cluster_rec needs to be freed with slurmdb_destroy_cluster_rec() when
+ * called
+ * Note: The will_runs are not threaded. Currently it relies on the
+ * working_cluster_rec to pack the job_desc's jobinfo. See previous commit for
+ * an example of how to thread this.
+ */
 extern int slurmdb_get_first_avail_cluster(job_desc_msg_t *req,
 	char *cluster_names, slurmdb_cluster_rec_t **cluster_rec)
 {
 	local_cluster_rec_t *local_cluster = NULL;
 	int rc = SLURM_SUCCESS;
-	char buf[64];
-	bool host_set = false;
+	char local_hostname[64];
 	ListIterator itr;
 	List cluster_list = NULL;
 	List ret_list = NULL;
+	List tried_feds = list_create(NULL);
 
 	*cluster_rec = NULL;
 	cluster_list = slurmdb_get_info_cluster(cluster_names);
@@ -3021,9 +3019,8 @@ extern int slurmdb_get_first_avail_cluster(job_desc_msg_t *req,
 	}
 
 	if ((req->alloc_node == NULL) &&
-	    (gethostname_short(buf, sizeof(buf)) == 0)) {
-		req->alloc_node = buf;
-		host_set = true;
+	    (gethostname_short(local_hostname, sizeof(local_hostname)) == 0)) {
+		req->alloc_node = local_hostname;
 	}
 
 	if (working_cluster_rec)
@@ -3032,13 +3029,24 @@ extern int slurmdb_get_first_avail_cluster(job_desc_msg_t *req,
 	ret_list = list_create(_destroy_local_cluster_rec);
 	itr = list_iterator_create(cluster_list);
 	while ((working_cluster_rec = list_next(itr))) {
-		if ((local_cluster = _job_will_run(req)))
+		/* only try one cluster from each federation */
+		if (working_cluster_rec->fed.id &&
+		    list_find_first(tried_feds, slurm_find_char_in_list,
+				    working_cluster_rec->fed.name))
+			continue;
+
+		if ((local_cluster = _job_will_run(req))) {
 			list_append(ret_list, local_cluster);
-		else
+			if (working_cluster_rec->fed.id)
+				list_append(tried_feds,
+					    working_cluster_rec->fed.name);
+		} else {
 			error("Problem with submit to cluster %s: %m",
 			      working_cluster_rec->name);
+		}
 	}
 	list_iterator_destroy(itr);
+	FREE_NULL_LIST(tried_feds);
 
 	/* restore working_cluster_rec in case it was already set */
 	if (*cluster_rec) {
@@ -3046,8 +3054,146 @@ extern int slurmdb_get_first_avail_cluster(job_desc_msg_t *req,
 		*cluster_rec = NULL;
 	}
 
-	if (host_set)
+	if (req->alloc_node == local_hostname)
 		req->alloc_node = NULL;
+
+	if (!list_count(ret_list)) {
+		error("Can't run on any of the specified clusters");
+		rc = SLURM_ERROR;
+		goto end_it;
+	}
+
+	/* sort the list so the first spot is on top */
+	local_cluster_name = slurm_get_cluster_name();
+	list_sort(ret_list, (ListCmpF)_sort_local_cluster);
+	xfree(local_cluster_name);
+	local_cluster = list_peek(ret_list);
+
+	/* prevent cluster_rec from being freed when cluster_list is destroyed */
+	itr = list_iterator_create(cluster_list);
+	while ((*cluster_rec = list_next(itr))) {
+		if (*cluster_rec == local_cluster->cluster_rec) {
+			list_remove(itr);
+			break;
+		}
+	}
+	list_iterator_destroy(itr);
+end_it:
+	FREE_NULL_LIST(ret_list);
+	FREE_NULL_LIST(cluster_list);
+
+	return rc;
+}
+
+/* Report the latest start time for any pack job component on this cluster.
+ * Return NULL if any component can not run here */
+static local_cluster_rec_t * _pack_job_will_run(List job_req_list)
+{
+	local_cluster_rec_t *local_cluster = NULL, *tmp_cluster;
+	job_desc_msg_t *req;
+	ListIterator iter;
+
+	iter = list_iterator_create(job_req_list);
+	while ((req = (job_desc_msg_t *) list_next(iter))) {
+		tmp_cluster = _job_will_run(req);
+		if (!tmp_cluster) {	/* Some pack job can't run here */
+			xfree(local_cluster);
+			break;
+		}
+		if (!local_cluster) {
+			local_cluster = tmp_cluster;
+			tmp_cluster = NULL;
+		} else if (local_cluster->start_time < tmp_cluster->start_time)
+			local_cluster->start_time = tmp_cluster->start_time;
+		xfree(tmp_cluster);
+	}
+	list_iterator_destroy(iter);
+
+	return local_cluster;
+}
+
+/*
+ * get the first cluster that will run a heterogeneous job
+ * IN: req - description of resource allocation request
+ * IN: cluster_names - comma separated string of cluster names
+ * OUT: cluster_rec - record of selected cluster or NULL if none found or
+ * 		      cluster_names is NULL
+ * RET: SLURM_SUCCESS on success SLURM_ERROR else
+ *
+ * Note: Cluster_rec needs to be freed with slurmdb_destroy_cluster_rec() when
+ * called
+ * Note: The will_runs are not threaded. Currently it relies on the
+ * working_cluster_rec to pack the job_desc's jobinfo. See previous commit for
+ * an example of how to thread this.
+ */
+extern int slurmdb_get_first_pack_cluster(List job_req_list,
+	char *cluster_names, slurmdb_cluster_rec_t **cluster_rec)
+{
+	job_desc_msg_t *req;
+	local_cluster_rec_t *local_cluster = NULL;
+	int rc = SLURM_SUCCESS;
+	char local_hostname[64] = "";
+	ListIterator itr;
+	List cluster_list = NULL;
+	List ret_list = NULL;
+	List tried_feds = list_create(NULL);
+
+	*cluster_rec = NULL;
+	cluster_list = slurmdb_get_info_cluster(cluster_names);
+
+	/* return if we only have 1 or less clusters here */
+	if (!cluster_list || !list_count(cluster_list)) {
+		rc = SLURM_ERROR;
+		goto end_it;
+	} else if (list_count(cluster_list) == 1) {
+		*cluster_rec = list_pop(cluster_list);
+		goto end_it;
+	}
+
+	(void) gethostname_short(local_hostname, sizeof(local_hostname));
+	itr = list_iterator_create(job_req_list);
+	while ((req = (job_desc_msg_t *) list_next(itr))) {
+		if ((req->alloc_node == NULL) && local_hostname[0])
+			req->alloc_node = local_hostname;
+	}
+	list_iterator_destroy(itr);
+
+	if (working_cluster_rec)
+		*cluster_rec = working_cluster_rec;
+
+	ret_list = list_create(_destroy_local_cluster_rec);
+	itr = list_iterator_create(cluster_list);
+	while ((working_cluster_rec = list_next(itr))) {
+		/* only try one cluster from each federation */
+		if (working_cluster_rec->fed.id &&
+		    list_find_first(tried_feds, slurm_find_char_in_list,
+				    working_cluster_rec->fed.name))
+			continue;
+		if ((local_cluster = _pack_job_will_run(job_req_list))) {
+			list_append(ret_list, local_cluster);
+			if (working_cluster_rec->fed.id)
+				list_append(tried_feds,
+					    working_cluster_rec->fed.name);
+		} else {
+			error("Problem with submit to cluster %s: %m",
+			      working_cluster_rec->name);
+		}
+	}
+	list_iterator_destroy(itr);
+	FREE_NULL_LIST(tried_feds);
+
+	/* restore working_cluster_rec in case it was already set */
+	if (*cluster_rec) {
+		working_cluster_rec = *cluster_rec;
+		*cluster_rec = NULL;
+	}
+
+	itr = list_iterator_create(job_req_list);
+	while ((req = (job_desc_msg_t *) list_next(itr))) {
+		if (req->alloc_node == local_hostname)
+			req->alloc_node = NULL;
+	}
+	list_iterator_destroy(itr);
 
 	if (!list_count(ret_list)) {
 		error("Can't run on any of the specified clusters");
@@ -3118,7 +3264,6 @@ extern void slurmdb_copy_cluster_rec(slurmdb_cluster_rec_t *out,
 	out->fed.name         = xstrdup(in->fed.name);
 	out->fed.id           = in->fed.id;
 	out->fed.state        = in->fed.state;
-	out->fed.weight       = in->fed.weight;
 	out->flags            = in->flags;
 	xfree(out->name);
 	out->name             = xstrdup(in->name);
@@ -3134,6 +3279,13 @@ extern void slurmdb_copy_cluster_rec(slurmdb_cluster_rec_t *out,
 		out->root_assoc = xmalloc(sizeof(slurmdb_assoc_rec_t));
 		slurmdb_init_assoc_rec(out->root_assoc, 0);
 		slurmdb_copy_assoc_rec_limits( out->root_assoc, in->root_assoc);
+	}
+
+	FREE_NULL_LIST(out->fed.feature_list);
+	if (in->fed.feature_list) {
+		out->fed.feature_list = list_create(slurm_destroy_char);
+		slurm_char_list_copy(out->fed.feature_list,
+				     in->fed.feature_list);
 	}
 
 	/* Not copied currently:
@@ -3747,7 +3899,8 @@ extern int slurmdb_find_selected_step_in_list(void *x, void *key)
 
 	if ((query_step->jobid == selected_step->jobid) &&
 	    (query_step->stepid == selected_step->stepid) &&
-	    (query_step->array_task_id == selected_step->array_task_id))
+	    (query_step->array_task_id == selected_step->array_task_id) &&
+	    (query_step->pack_job_offset == selected_step->pack_job_offset))
 		return 1;
 
 	return 0;

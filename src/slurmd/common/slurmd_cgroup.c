@@ -7,7 +7,7 @@
  *  Written by Martin Perry <martin.perry@bull.com>
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://slurm.schedmd.com>.
+ *  For details, see <https://slurm.schedmd.com>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -40,6 +40,7 @@
 
 #define _GNU_SOURCE
 #include <ctype.h>
+#include <limits.h>
 #include <sched.h>
 #include <stdlib.h>
 #include <sys/types.h>
@@ -55,18 +56,14 @@
 #include "src/slurmd/slurmd/slurmd.h"
 #include "src/slurmd/slurmstepd/slurmstepd_job.h"
 
-#ifndef PATH_MAX
-#define PATH_MAX 256
-#endif
-
-static xcgroup_t system_cpuset_cg = {NULL, NULL, NULL, 0, 0, 0, 0};
-static xcgroup_t system_memory_cg = {NULL, NULL, NULL, 0, 0, 0, 0};
+static xcgroup_t system_cpuset_cg = {NULL, NULL, NULL, 0, 0, 0};
+static xcgroup_t system_memory_cg = {NULL, NULL, NULL, 0, 0, 0};
 
 static bool cpuset_prefix_set = false;
 static char *cpuset_prefix = "";
 
-static xcgroup_ns_t cpuset_ns = {NULL, NULL, NULL, NULL};
-static xcgroup_ns_t memory_ns = {NULL, NULL, NULL, NULL};
+static xcgroup_ns_t cpuset_ns = {NULL, NULL, NULL};
+static xcgroup_ns_t memory_ns = {NULL, NULL, NULL};
 
 char cpuset_meta[PATH_MAX];
 
@@ -76,10 +73,12 @@ static slurm_cgroup_conf_t slurm_cgroup_conf;
 
 static bool constrain_ram_space;
 static bool constrain_swap_space;
+static bool constrain_kmem_space;
 
 static float allowed_ram_space;   /* Allowed RAM in percent       */
 static float allowed_swap_space;  /* Allowed Swap percent         */
 
+static uint64_t max_kmem;       /* Upper bound for kmem.limit_in_bytes  */
 static uint64_t max_ram;        /* Upper bound for memory.limit_in_bytes  */
 static uint64_t max_swap;       /* Upper bound for swap                   */
 static uint64_t totalram;       /* Total real memory available on node    */
@@ -201,6 +200,7 @@ extern int init_system_memory_cgroup(void)
 		return SLURM_ERROR;
 	}
 
+	constrain_kmem_space = slurm_cgroup_conf.constrain_kmem_space;
 	constrain_ram_space = slurm_cgroup_conf.constrain_ram_space;
 	constrain_swap_space = slurm_cgroup_conf.constrain_swap_space;
 
@@ -221,23 +221,33 @@ extern int init_system_memory_cgroup(void)
 	if ((totalram = (uint64_t) conf->real_memory_size) == 0)
 		error ("system cgroup: Unable to get RealMemory size");
 
+	max_kmem = _percent_in_bytes(totalram, slurm_cgroup_conf.max_kmem_percent);
 	max_ram = _percent_in_bytes(totalram, slurm_cgroup_conf.max_ram_percent);
 	max_swap = _percent_in_bytes(totalram, slurm_cgroup_conf.max_swap_percent);
 	max_swap += max_ram;
 	min_ram_space = slurm_cgroup_conf.min_ram_space * 1024 * 1024;
 
 	debug ("system cgroup: memory: total:%luM allowed:%.4g%%(%s), "
-	       "swap:%.4g%%(%s), max:%.4g%%(%luM) max+swap:%.4g%%(%luM) min:%uM",
+	       "swap:%.4g%%(%s), max:%.4g%%(%luM) "
+	       "max+swap:%.4g%%(%luM) min:%luM "
+	       "kmem:%.4g%%(%luM %s) min:%luM",
 	       (unsigned long) totalram,
 	       allowed_ram_space,
 	       constrain_ram_space?"enforced":"permissive",
+
 	       allowed_swap_space,
 	       constrain_swap_space?"enforced":"permissive",
 	       slurm_cgroup_conf.max_ram_percent,
 	       (unsigned long) (max_ram/(1024*1024)),
+
 	       slurm_cgroup_conf.max_swap_percent,
 	       (unsigned long) (max_swap/(1024*1024)),
-	       (unsigned) slurm_cgroup_conf.min_ram_space);
+	       (unsigned long) slurm_cgroup_conf.min_ram_space,
+
+	       slurm_cgroup_conf.max_kmem_percent,
+	       (unsigned long)(max_kmem/(1024*1024)),
+	       constrain_kmem_space?"enforced":"permissive",
+	       (unsigned long) slurm_cgroup_conf.min_kmem_space);
 
         /*
          *  Warning: OOM Killer must be disabled for slurmstepd
@@ -318,15 +328,12 @@ static char* _system_cgroup_create_slurm_cg (xcgroup_ns_t* ns)
 	}
 #endif
 
-	/* create slurm cgroup in the ns
-	 * disable notify_on_release to avoid the removal/creation
-	 * of this cgroup for each last/first running job on the node */
+	/* create slurm cgroup in the ns */
 	if (xcgroup_create(ns, &slurm_cg, pre,
 			   getuid(), getgid()) != XCGROUP_SUCCESS) {
 		xfree(pre);
 		return pre;
 	}
-	slurm_cg.notify = 0;
 	if (xcgroup_instantiate(&slurm_cg) != XCGROUP_SUCCESS) {
 		error("system cgroup: unable to build slurm cgroup for "
 		      "ns %s: %m",
@@ -368,7 +375,7 @@ static int _xcgroup_cpuset_init(xcgroup_t* cg)
 
 	/* load ancestor cg */
 	acg_name = (char*) xstrdup(cg->name);
-	p = rindex(acg_name,'/');
+	p = xstrrchr(acg_name, '/');
 	if (p == NULL) {
 		debug2("system cgroup: unable to get ancestor path for "
 		       "cpuset cg '%s' : %m", cg->path);

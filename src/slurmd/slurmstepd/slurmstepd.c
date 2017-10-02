@@ -9,7 +9,7 @@
  *  CODE-OCEC-09-009. All rights reserved.
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://slurm.schedmd.com/>.
+ *  For details, see <https://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -84,7 +84,7 @@ static stepd_step_rec_t *_step_setup(slurm_addr_t *cli, slurm_addr_t *self,
 #ifdef MEMORY_LEAK_DEBUG
 static void _step_cleanup(stepd_step_rec_t *job, slurm_msg_t *msg, int rc);
 #endif
-static int _process_cmdline (int argc, char *argv[]);
+static int _process_cmdline (int argc, char **argv);
 
 int slurmstepd_blocked_signals[] = {
 	SIGPIPE, 0
@@ -95,7 +95,7 @@ slurmd_conf_t * conf;
 extern char  ** environ;
 
 int
-main (int argc, char *argv[])
+main (int argc, char **argv)
 {
 	slurm_addr_t *cli;
 	slurm_addr_t *self;
@@ -182,14 +182,24 @@ main (int argc, char *argv[])
 	 * and blocks until the step is complete */
 	rc = job_manager(job);
 
-	if (job->batch)
-		batch_finish(job, rc); /* sends batch complete message */
-
-	/* signal the message thread to shutdown, and wait for it */
-	eio_signal_shutdown(job->msg_handle);
-	pthread_join(job->msgid, NULL);
-
+	return stepd_cleanup(msg, job, cli, self, rc, 0);
 ending:
+	return stepd_cleanup(msg, job, cli, self, rc, 1);
+}
+
+extern int stepd_cleanup(slurm_msg_t *msg, stepd_step_rec_t *job,
+			 slurm_addr_t *cli, slurm_addr_t *self,
+			 int rc, bool only_mem)
+{
+	if (!only_mem) {
+		if (job->batch)
+			batch_finish(job, rc); /* sends batch complete message */
+
+		/* signal the message thread to shutdown, and wait for it */
+		eio_signal_shutdown(job->msg_handle);
+		pthread_join(job->msgid, NULL);
+	}
+
 	mpi_fini();	/* Remove stale PMI2 sockets */
 #ifdef MEMORY_LEAK_DEBUG
 	acct_gather_conf_destroy();
@@ -203,11 +213,15 @@ ending:
 	xfree(conf->block_map);
 	xfree(conf->block_map_inv);
 	xfree(conf->hostname);
+	xfree(conf->job_acct_gather_freq);
+	xfree(conf->job_acct_gather_type);
 	xfree(conf->logfile);
 	xfree(conf->node_name);
 	xfree(conf->node_topo_addr);
 	xfree(conf->node_topo_pattern);
 	xfree(conf->spooldir);
+	xfree(conf->task_epilog);
+	xfree(conf->task_prolog);
 	xfree(conf);
 #endif
 	info("done with job");
@@ -215,18 +229,23 @@ ending:
 }
 
 
-static slurmd_conf_t * read_slurmd_conf_lite (int fd)
+static slurmd_conf_t *read_slurmd_conf_lite(int fd)
 {
 	int rc;
 	int len;
-	Buf buffer;
-	slurmd_conf_t *confl;
+	Buf buffer = NULL;
+	slurmd_conf_t *confl, *local_conf = NULL;
 	int tmp_int = 0;
 
 	/*  First check to see if we've already initialized the
 	 *   global slurmd_conf_t in 'conf'. Allocate memory if not.
 	 */
-	confl = conf ? conf : xmalloc (sizeof (*confl));
+	if (conf) {
+		confl = conf;
+	} else {
+		local_conf = xmalloc(sizeof(slurmd_conf_t));
+		confl = local_conf;
+	}
 
 	safe_read(fd, &len, sizeof(int));
 
@@ -265,7 +284,10 @@ static slurmd_conf_t * read_slurmd_conf_lite (int fd)
 
 
 	return (confl);
+
 rwfail:
+	FREE_NULL_BUFFER(buffer);
+	xfree(local_conf);
 	return (NULL);
 }
 
@@ -291,9 +313,9 @@ static int get_jobid_uid_from_env (uint32_t *jobidp, uid_t *uidp)
 	return (0);
 }
 
-static int _handle_spank_mode (int argc, char *argv[])
+static int _handle_spank_mode (int argc, char **argv)
 {
-	char prefix[64] = "spank-";
+	char *prefix = NULL;
 	const char *mode = argv[2];
 	uid_t uid = (uid_t) -1;
 	uint32_t jobid = (uint32_t) -1;
@@ -307,8 +329,9 @@ static int _handle_spank_mode (int argc, char *argv[])
 	/*
 	 *  Make our log prefix into spank-prolog: or spank-epilog:
 	 */
-	strcat (prefix, mode);
+	xstrfmtcat(prefix, "spank-%s", mode);
 	log_init(prefix, lopts, LOG_DAEMON, NULL);
+	xfree(prefix);
 
 	/*
 	 *  When we are started from slurmd, a lightweight config is
@@ -347,7 +370,7 @@ static int _handle_spank_mode (int argc, char *argv[])
 /*
  *  Process special "modes" of slurmstepd passed as cmdline arguments.
  */
-static int _process_cmdline (int argc, char *argv[])
+static int _process_cmdline (int argc, char **argv)
 {
 	if ((argc == 2) && (xstrcmp(argv[1], "getenv") == 0)) {
 		print_rlimits();
@@ -589,7 +612,7 @@ _step_setup(slurm_addr_t *cli, slurm_addr_t *self, slurm_msg_t *msg)
 					   job->stepid);
 	}
 	if (msg->msg_type == REQUEST_BATCH_JOB_LAUNCH)
-		gres_plugin_job_set_env(&job->env, job->job_gres_list);
+		gres_plugin_job_set_env(&job->env, job->job_gres_list, 0);
 	else if (msg->msg_type == REQUEST_LAUNCH_TASKS)
 		gres_plugin_step_set_env(&job->env, job->step_gres_list, 0);
 
@@ -600,6 +623,8 @@ _step_setup(slurm_addr_t *cli, slurm_addr_t *self, slurm_msg_t *msg)
 			    conf->node_topo_addr);
 	env_array_overwrite(&job->env,"SLURM_TOPOLOGY_ADDR_PATTERN",
 			    conf->node_topo_pattern);
+
+	set_msg_node_id(job);
 
 	return job;
 }
@@ -613,25 +638,27 @@ _step_cleanup(stepd_step_rec_t *job, slurm_msg_t *msg, int rc)
 		if (!job->batch)
 			stepd_step_rec_destroy(job);
 	}
-	/*
-	 * The message cannot be freed until the jobstep is complete
-	 * because the job struct has pointers into the msg, such
-	 * as the switch jobinfo pointer.
-	 */
-	switch(msg->msg_type) {
-	case REQUEST_BATCH_JOB_LAUNCH:
-		slurm_free_job_launch_msg(msg->data);
-		break;
-	case REQUEST_LAUNCH_TASKS:
-		slurm_free_launch_tasks_request_msg(msg->data);
-		break;
-	default:
-		fatal("handle_launch_message: Unrecognized launch RPC");
-		break;
+
+	if (msg) {
+		/*
+		 * The message cannot be freed until the jobstep is complete
+		 * because the job struct has pointers into the msg, such
+		 * as the switch jobinfo pointer.
+		 */
+		switch(msg->msg_type) {
+		case REQUEST_BATCH_JOB_LAUNCH:
+			slurm_free_job_launch_msg(msg->data);
+			break;
+		case REQUEST_LAUNCH_TASKS:
+			slurm_free_launch_tasks_request_msg(msg->data);
+			break;
+		default:
+			fatal("handle_launch_message: Unrecognized launch RPC");
+			break;
+		}
+		xfree(msg);
 	}
 	jobacctinfo_destroy(step_complete.jobacct);
-
-	xfree(msg);
 }
 #endif
 

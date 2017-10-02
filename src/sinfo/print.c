@@ -3,14 +3,14 @@
  *****************************************************************************
  *  Copyright (C) 2002-2007 The Regents of the University of California.
  *  Copyright (C) 2008-2010 Lawrence Livermore National Security.
- *  Portions Copyright (C) 2010 SchedMD <http://www.schedmd.com>.
+ *  Portions Copyright (C) 2010-2017 SchedMD <https://www.schedmd.com>.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Joey Ekstrom <ekstrom1@llnl.gov> and
  *  Morris Jette <jette1@llnl.gov>
  *  CODE-OCEC-09-009. All rights reserved.
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://slurm.schedmd.com/>.
+ *  For details, see <https://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -72,7 +72,7 @@ static int   _build_free_mem_min_max_64(char *buffer, int buf_size,
 					bool range);
 static void  _print_reservation(reserve_info_t *resv_ptr, int width);
 static int   _print_secs(long time, int width, bool right, bool cut_output);
-static int   _print_str(char *str, int width, bool right, bool cut_output);
+static int   _print_str(const char *str, int width, bool right, bool cut_output);
 static int   _resv_name_width(reserve_info_t *resv_ptr);
 static void  _set_node_field_size(List sinfo_list);
 static void  _set_part_field_size(List sinfo_list);
@@ -178,7 +178,7 @@ static void _print_reservation(reserve_info_t *resv_ptr, int width)
 	return;
 }
 
-static int _print_str(char *str, int width, bool right, bool cut_output)
+static int _print_str(const char *str, int width, bool right, bool cut_output)
 {
 	char format[64];
 	int printed = 0;
@@ -920,6 +920,24 @@ int _print_partition_name(sinfo_data_t * sinfo_data, int width,
 	return SLURM_SUCCESS;
 }
 
+int _print_port(sinfo_data_t * sinfo_data, int width,
+			bool right_justify, char *suffix)
+{
+	char id[FORMAT_STRING_SIZE];
+	if (sinfo_data) {
+		_build_min_max_16_string(id, FORMAT_STRING_SIZE,
+				      sinfo_data->port,
+				      sinfo_data->port, false);
+		_print_str(id, width, right_justify, true);
+	} else {
+		_print_str("PORT", width, right_justify, true);
+	}
+
+	if (suffix)
+		printf("%s", suffix);
+	return SLURM_SUCCESS;
+}
+
 int _print_prefix(sinfo_data_t * job, int width, bool right_justify,
 		char* suffix)
 {
@@ -1335,4 +1353,25 @@ int _print_alloc_mem(sinfo_data_t * sinfo_data, int width,
 		printf ("%s", suffix);
 	}
 	return SLURM_SUCCESS;
+}
+
+
+int _print_cluster_name(sinfo_data_t *sinfo_data, int width,
+			bool right_justify, char *suffix)
+{
+	if (sinfo_data) {
+		if (sinfo_data->cluster_name == NULL) {
+			_print_str("N/A", width, right_justify, true);
+		} else {
+			_print_str(sinfo_data->cluster_name, width,
+				   right_justify, true);
+		}
+	} else {
+		_print_str("CLUSTER", width, right_justify, true);
+	}
+	if (suffix) {
+		printf ("%s", suffix);
+	}
+	return SLURM_SUCCESS;
+
 }

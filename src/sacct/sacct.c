@@ -6,7 +6,7 @@
  *  Copyright (C) 2005 Hewlett-Packard Development Company, L.P.
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://slurm.schedmd.com/>.
+ *  For details, see <https://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -37,18 +37,17 @@
 
 #include "sacct.h"
 
-void invalidSwitchCombo(char *good, char *bad);
-
 /*
  * Globals
  */
 sacct_parameters_t params;
 print_field_t fields[] = {
+	{10, "Account", print_fields_str, PRINT_ACCOUNT},
+	{15, "AdminComment", print_fields_str, PRINT_ADMIN_COMMENT},
 	{10, "AllocCPUS", print_fields_uint, PRINT_ALLOC_CPUS},
 	{12, "AllocGRES", print_fields_str, PRINT_ALLOC_GRES},
 	{10, "AllocNodes", print_fields_str, PRINT_ALLOC_NODES},
 	{10, "AllocTRES", print_fields_str, PRINT_TRESA},
-	{10, "Account", print_fields_str, PRINT_ACCOUNT},
 	{7,  "AssocID", print_fields_uint, PRINT_ASSOCID},
 	{10, "AveCPU", print_fields_str, PRINT_AVECPU},
 	{10, "AveCPUFreq", print_fields_str, PRINT_ACT_CPUFREQ},
@@ -61,7 +60,7 @@ print_field_t fields[] = {
 	{10, "Cluster", print_fields_str, PRINT_CLUSTER},
 	{14, "Comment", print_fields_str, PRINT_COMMENT},
 	{14, "ConsumedEnergy", print_fields_str, PRINT_CONSUMED_ENERGY},
-	{17, "ConsumedEnergyRaw", print_fields_double,
+	{17, "ConsumedEnergyRaw", print_fields_uint64,
 	 PRINT_CONSUMED_ENERGY_RAW},
 	{10, "CPUTime", print_fields_time_from_secs, PRINT_CPU_TIME},
 	{10, "CPUTimeRAW", print_fields_uint64, PRINT_CPU_TIME_RAW},
@@ -129,6 +128,7 @@ print_field_t fields[] = {
 	{10, "UserCPU", print_fields_str, PRINT_USERCPU},
 	{10, "WCKey", print_fields_str, PRINT_WCKEY},
 	{10, "WCKeyID", print_fields_uint, PRINT_WCKEYID},
+	{20, "WorkDir", print_fields_str, PRINT_WORK_DIR},
 	{0,  NULL, NULL, 0}};
 
 List jobs = NULL;
@@ -177,11 +177,4 @@ int main(int argc, char **argv)
 
 	sacct_fini();
 	return (rc);
-}
-
-
-void invalidSwitchCombo(char *good, char *bad)
-{
-	fprintf(stderr, "\"%s\" may not be used with %s\n", good, bad);
-	return;
 }

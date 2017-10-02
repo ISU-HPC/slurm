@@ -2,12 +2,12 @@
  *  cray_config.c
  *
  *****************************************************************************
- *  Copyright (C) 2011 SchedMD LLC <http://www.schedmd.com>.
+ *  Copyright (C) 2011 SchedMD LLC <https://www.schedmd.com>.
  *  Supported by the Oak Ridge National Laboratory Extreme Scale Systems Center
  *  Written by Danny Auble <da@schedmd.com>
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://slurm.schedmd.com/>.
+ *  For details, see <https://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -127,10 +127,10 @@ extern int create_config(void)
 	if (!s_p_get_string(&cray_conf->apkill, "apkill", tbl))
 		cray_conf->apkill = xstrdup(DEFAULT_APKILL);
 
-	s_p_get_string(&cray_conf->alps_engine, "AlpsEngine", tbl);
+	(void) s_p_get_string(&cray_conf->alps_engine, "AlpsEngine", tbl);
 
-	s_p_get_boolean(&cray_conf->no_apid_signal_on_kill,
-			"NoAPIDSignalOnKill", tbl);
+	(void) s_p_get_boolean(&cray_conf->no_apid_signal_on_kill,
+			       "NoAPIDSignalOnKill", tbl);
 
 	if (!s_p_get_string(&cray_conf->sdb_db, "SDBdb", tbl))
 		cray_conf->sdb_db = xstrdup(DEFAULT_CRAY_SDB_DB);
@@ -143,7 +143,7 @@ extern int create_config(void)
 	if (!s_p_get_string(&cray_conf->sdb_user, "SDBuser", tbl))
 		cray_conf->sdb_user = xstrdup(DEFAULT_CRAY_SDB_USER);
 
-	s_p_get_boolean(&cray_conf->sub_alloc, "SubAllocate", tbl);
+	(void) s_p_get_boolean(&cray_conf->sub_alloc, "SubAllocate", tbl);
 
 	if (!s_p_get_uint32(&cray_conf->sync_timeout, "SyncTimeout", tbl))
 		cray_conf->sync_timeout = DEFAULT_CRAY_SYNC_TIMEOUT;

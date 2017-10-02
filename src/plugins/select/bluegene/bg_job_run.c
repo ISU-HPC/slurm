@@ -8,7 +8,7 @@
  *  Written by Morris Jette <jette1@llnl.gov>, Danny Auble <da@llnl.gov>
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://slurm.schedmd.com/>.
+ *  For details, see <https://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -569,7 +569,7 @@ no_reboot:
 		   the batch script, slurm_fail_job()
 		   is a no-op if issued prior
 		   to the script initiation do clean up just
-		   incase the fail job isn't ran */
+		   in case the fail job isn't ran */
 		(void) slurm_fail_job(req_job_id, JOB_BOOT_FAIL);
 	}
 }
@@ -762,7 +762,7 @@ extern int start_job(struct job_record *job_ptr)
 
 	if (!block_ptr_exist_in_list(bg_lists->booted, bg_record))
 		list_push(bg_lists->booted, bg_record);
-	/* Just incase something happens to free this block before we
+	/* Just in case something happens to free this block before we
 	   start the job we will make it so this job doesn't get blown
 	   away.
 	*/

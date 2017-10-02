@@ -10,7 +10,7 @@
  *  CODE-OCEC-09-009. All rights reserved.
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://slurm.schedmd.com/>.
+ *  For details, see <https://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -172,7 +172,7 @@ static int _full_request(select_ba_request_t *request,
 	/*
 	 * Here is where we do the allocating of the partition.
 	 * It will send a request back which we will throw into
-	 * a list just incase we change something later.
+	 * a list just in case we change something later.
 	 */
 	if (!bg_configure_new_ba_request(request)) {
 		memset(error_string, 0, 255);

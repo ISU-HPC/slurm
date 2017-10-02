@@ -6,7 +6,7 @@
  *  CODE-OCEC-09-009. All rights reserved.
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://slurm.schedmd.com/>.
+ *  For details, see <https://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -248,13 +248,13 @@ static void _hardware(void)
 		if (!xstrncmp(buf, "physical id", sizeof("physical id") - 1)) {
 			sscanf(buf, "physical id\t: %d", &pkg);
 
-			if (pkg >= MAX_PKGS)
+			if (pkg >= MAX_PKGS) {
 				fatal("Slurm can only handle %d sockets for "
 				      "rapl, you seem to have more than that.  "
 				      "Update src/plugins/acct_gather_energy/"
 				      "rapl/acct_gather_energy_rapl.h "
 				      "(MAX_PKGS) and recompile.", MAX_PKGS);
-			if (pkg2cpu[pkg] == -1) {
+			} else if (pkg2cpu[pkg] == -1) {
 				nb_pkg++;
 				pkg2cpu[pkg] = cpu;
 			}
@@ -435,6 +435,12 @@ extern int acct_gather_energy_p_update_node_energy(void)
 
 	xassert(_run_in_daemon());
 
+	if (!local_energy) {
+		debug("%s: trying to update node energy, but no local_energy "
+		      "yet.", __func__);
+		acct_gather_energy_p_conf_set(NULL);
+	}
+
 	if (local_energy->current_watts == NO_VAL)
 		return rc;
 
@@ -499,7 +505,7 @@ extern int acct_gather_energy_p_get_data(enum acct_energy_type data_type,
 	case ENERGY_DATA_JOULES_TASK:
 	case ENERGY_DATA_NODE_ENERGY_UP:
 		if (local_energy->current_watts == NO_VAL)
-			energy->consumed_energy = NO_VAL;
+			energy->consumed_energy = NO_VAL64;
 		else
 			_get_joules_task(energy);
 		break;

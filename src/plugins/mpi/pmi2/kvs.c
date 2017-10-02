@@ -6,7 +6,7 @@
  *  All rights reserved.
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://slurm.schedmd.com/>.
+ *  For details, see <https://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -116,9 +116,9 @@ temp_kvs_init(void)
 		/* XXX: TBC */
 		num_children = tree_info.num_children + 1;
 
-		pack32((uint32_t)nodeid, buf); /* from_nodeid */
+		pack32(nodeid, buf); /* from_nodeid */
 		packstr(tree_info.this_node, buf); /* from_node */
-		pack32((uint32_t)num_children, buf); /* num_children */
+		pack32(num_children, buf); /* num_children */
 		pack32(kvs_seq, buf);
 	} else {
 		pack32(kvs_seq, buf);
