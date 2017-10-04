@@ -2252,12 +2252,11 @@ spank_err_t spank_set_item(spank_t spank, spank_item_t item, ...)
 {
 	int *p2int;
 	char ***p2argv;
-	char **p2str;
+	//char **p2str;
 
 	stepd_step_task_info_t *task;
 	stepd_step_rec_t  *slurmd_job = NULL;
 	struct spank_launcher_job_info *launcher_job = NULL;
-	struct job_script_info *s_job_info = NULL;
 	va_list vargs;
 	spank_err_t rc = ESPANK_SUCCESS;
 
@@ -2268,8 +2267,6 @@ spank_err_t spank_set_item(spank_t spank, spank_item_t item, ...)
 		launcher_job = spank->job;
 	else if (spank->stack->type == S_TYPE_REMOTE)
 		slurmd_job = spank->job;
-	else if (spank->stack->type == S_TYPE_JOB_SCRIPT)
-		s_job_info = spank->job;
 
 	/*
 	 *  Check for validity of the given item in the current context
