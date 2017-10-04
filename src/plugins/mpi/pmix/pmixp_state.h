@@ -2,11 +2,11 @@
  **  pmix_state.h - PMIx agent state related code
  *****************************************************************************
  *  Copyright (C) 2014-2015 Artem Polyakov. All rights reserved.
- *  Copyright (C) 2015      Mellanox Technologies. All rights reserved.
+ *  Copyright (C) 2015-2017 Mellanox Technologies. All rights reserved.
  *  Written by Artem Polyakov <artpol84@gmail.com, artemp@mellanox.com>.
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://slurm.schedmd.com/>.
+ *  For details, see <https://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -50,7 +50,7 @@
 
 typedef struct {
 #ifndef NDEBUG
-#define PMIX_STATE_MAGIC 0xFEEDCAFE
+#define PMIXP_STATE_MAGIC 0xFEEDCAFE
 	int magic;
 #endif
 	List coll;
@@ -69,7 +69,7 @@ void pmixp_state_finalize(void);
 
 static inline void pmixp_state_sanity_check(void)
 {
-	xassert(_pmixp_state.magic == PMIX_STATE_MAGIC);
+	xassert(_pmixp_state.magic == PMIXP_STATE_MAGIC);
 }
 
 /*

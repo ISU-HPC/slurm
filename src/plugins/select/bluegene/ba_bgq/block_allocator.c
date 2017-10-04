@@ -9,7 +9,7 @@
  *  Written by Danny Auble <da@schedmd.com>
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://slurm.schedmd.com/>.
+ *  For details, see <https://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -260,7 +260,7 @@ extern void ba_create_system()
 					ba_setup_mp(ba_mp, true, false);
 					ba_mp->state = NODE_STATE_IDLE;
 					/* This might get changed
-					   later, but just incase set
+					   later, but just in case set
 					   it up here.
 					*/
 					ba_mp->index = i++;

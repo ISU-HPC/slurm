@@ -7,7 +7,7 @@
  *  CODE-OCEC-09-009. All rights reserved.
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://slurm.schedmd.com/>.
+ *  For details, see <https://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -136,7 +136,7 @@ static List _build_license_list(char *licenses, bool *valid)
 	tmp_str = xstrdup(licenses);
 	token = strtok_r(tmp_str, ",;", &last);
 	while (token && *valid) {
-		uint32_t num = 1;
+		int32_t num = 1;
 		for (i = 0; token[i]; i++) {
 			if (isspace(token[i])) {
 				*valid = false;
@@ -147,10 +147,13 @@ static List _build_license_list(char *licenses, bool *valid)
 			 */
 			if ((token[i] == ':') || (token[i] == '*')) {
 				token[i++] = '\0';
-				num = (uint32_t)strtol(&token[i], &end_num,10);
+				num = (int32_t)strtol(&token[i], &end_num, 10);
+				if (*end_num != '\0')
+					 *valid = false;
+				break;
 			}
 		}
-		if (num <= 0) {
+		if (num < 0 || !(*valid)) {
 			*valid = false;
 			break;
 		}
@@ -599,9 +602,11 @@ extern void license_job_merge(struct job_record *job_ptr)
  * license_job_test - Test if the licenses required for a job are available
  * IN job_ptr - job identification
  * IN when    - time to check
+ * IN reboot    - true if node reboot required to start job
  * RET: SLURM_SUCCESS, EAGAIN (not available now), SLURM_ERROR (never runnable)
  */
-extern int license_job_test(struct job_record *job_ptr, time_t when)
+extern int license_job_test(struct job_record *job_ptr, time_t when,
+			    bool reboot)
 {
 	ListIterator iter;
 	licenses_t *license_entry, *match;
@@ -630,9 +635,11 @@ extern int license_job_test(struct job_record *job_ptr, time_t when)
 			rc = EAGAIN;
 			break;
 		} else {
+			/* Assume node reboot required since we have not
+			 * selected the compute nodes yet */
 			resv_licenses = job_test_lic_resv(job_ptr,
 							  license_entry->name,
-							  when);
+							  when, reboot);
 			if ((license_entry->total + match->used +
 			     resv_licenses) > match->total) {
 				rc = EAGAIN;
@@ -848,20 +855,6 @@ extern uint32_t get_total_license_cnt(char *name)
 	slurm_mutex_unlock(&license_mutex);
 
 	return count;
-}
-
-/* Get how many of a given license are in a list */
-extern uint32_t license_get_total_cnt_from_list(List license_list, char *name)
-{
-	licenses_t *license_entry;
-	uint32_t total = 0;
-
-	license_entry = list_find_first(
-		license_list, _license_find_rec, name);
-
-	if(license_entry)
-		total = license_entry->total;
-	return total;
 }
 
 /* node_read should be locked before coming in here

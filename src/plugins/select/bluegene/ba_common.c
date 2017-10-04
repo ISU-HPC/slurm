@@ -7,7 +7,7 @@
  *  Written by Danny Auble <da@llnl.gov>
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://slurm.schedmd.com/>.
+ *  For details, see <https://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -250,8 +250,8 @@ static ba_geo_combos_t *_build_geo_bitmap_arrays(int size)
 	combos->set_count_array = xmalloc(sizeof(int) * combos->elem_count);
 	combos->set_bits_array  = xmalloc(sizeof(bitstr_t *) *
 					  combos->elem_count);
-	combos->start_coord = xmalloc(sizeof(uint16_t *) * combos->elem_count);
-	combos->block_size  = xmalloc(sizeof(uint16_t *) * combos->elem_count);
+	combos->start_coord = xmalloc(sizeof(uint16_t) * combos->elem_count);
+	combos->block_size  = xmalloc(sizeof(uint16_t) * combos->elem_count);
 
 	for (i = 1; i <= combos->elem_count; i++) {
 		bool some_bit_set = false, some_gap_set = false;

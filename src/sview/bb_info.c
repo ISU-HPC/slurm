@@ -5,7 +5,7 @@
  *  Written by Nathan Yee <nyee32@shedmd.com>
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://slurm.schedmd.com/>.
+ *  For details, see <https://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -545,7 +545,7 @@ static void _display_info_bb(List info_list, popup_info_t *popup_win)
 		bb_ptr = sview_bb_info->bb_ptr;
 
 		if (bb_ptr->name) {
-			strcpy(bb_name_id, bb_ptr->name);
+			strlcpy(bb_name_id, bb_ptr->name, sizeof(bb_name_id));
 		} else if (bb_ptr->array_task_id == NO_VAL) {
 			convert_num_unit(bb_ptr->job_id,
 					 bb_name_id,
@@ -688,6 +688,17 @@ extern void get_info_bb(GtkTable *table, display_data_t *display_data)
 		display_data_bb->set_menu = local_display_data->set_menu;
 		goto reset_curs;
 	}
+	if (cluster_flags & CLUSTER_FLAG_FED) {
+		view = ERROR_VIEW;
+		if (display_widget)
+			gtk_widget_destroy(display_widget);
+		label = gtk_label_new("Not available in a federated view");
+		gtk_table_attach_defaults(GTK_TABLE(table), label, 0, 1, 0, 1);
+		gtk_widget_show(label);
+		display_widget = gtk_widget_ref(label);
+		goto end_it;
+	}
+
 	if (display_widget && toggled) {
 		gtk_widget_destroy(display_widget);
 		display_widget = NULL;
@@ -860,7 +871,7 @@ display_it:
 		i++;
 		/* Since we will not use any of these pages we will */
 		/* leave them blank */
-		switch(spec_info->type) {
+		switch (spec_info->type) {
 		case PART_PAGE:
 		case BLOCK_PAGE:
 		case NODE_PAGE:
@@ -892,7 +903,7 @@ extern void set_menus_bb(void *arg, void *arg2, GtkTreePath *path, int type)
 	popup_info_t *popup_win = (popup_info_t *)arg;
 	GtkMenu *menu = (GtkMenu *)arg2;
 
-	switch(type) {
+	switch (type) {
 	case TAB_CLICKED:
 		make_fields_menu(NULL, menu, display_data_bb, SORTID_CNT);
 		break;
@@ -930,14 +941,14 @@ extern void set_menus_bb(void *arg, void *arg2, GtkTreePath *path, int type)
 extern void popup_all_bb(GtkTreeModel *model, GtkTreeIter *iter, int id)
 {
 	char *name = NULL;
-	char title[100];
+	char title[100] = {0};
 	ListIterator itr = NULL;
 	popup_info_t *popup_win = NULL;
 	GError *error = NULL;
 
 	gtk_tree_model_get(model, iter, SORTID_NAME, &name, -1);
 
-	switch(id) {
+	switch (id) {
 	case INFO_PAGE:
 		snprintf(title, 100, "Full info for Burst Buffer %s", name);
 		break;
@@ -973,7 +984,7 @@ extern void popup_all_bb(GtkTreeModel *model, GtkTreeIter *iter, int id)
 	popup_win->iter = *iter;
 
 	/* Sets up right click information */
-	switch(id) {
+	switch (id) {
 	case JOB_PAGE:
 	case INFO_PAGE:
 		popup_win->spec_info->search_info->gchar_data = name;

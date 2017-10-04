@@ -9,7 +9,7 @@
  *  All rights reserved.
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://slurm.schedmd.com/>.
+ *  For details, see <https://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -74,7 +74,6 @@ typedef struct pmi2_job_info {
 
 	MPIR_PROCDESC *MPIR_proctable;	/* used only in srun */
 	opt_t      *srun_opt;	/* used only in srun */
-	switch_jobinfo_t *switch_job; /* switch-specific job information */
 	char *resv_ports; /* MPI reserved ports */
 } pmi2_job_info_t;
 

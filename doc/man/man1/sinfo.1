@@ -1,4 +1,4 @@
-.TH sinfo "1" "Slurm Commands" "March 2016" "Slurm Commands"
+.TH sinfo "1" "Slurm Commands" "November 2016" "Slurm Commands"
 
 .SH "NAME"
 sinfo \- view information about Slurm nodes and partitions.
@@ -34,6 +34,10 @@ with the minimum value followed by a "+" for nodes with the
 same partition and state (e.g., "250+").
 
 .TP
+\fB\-\-federation\fR
+Show all partitions from the federation if a member of one.
+
+.TP
 \fB\-h\fR, \fB\-\-noheader\fR
 Do not print a header on the output.
 
@@ -54,6 +58,11 @@ Sleep for the indicated number of seconds between reports.
 By default, prints a time stamp with the header.
 
 .TP
+\fB\-\-local\fR
+Show only jobs local to this cluster. Ignore other clusters in this federation
+(if any). Overrides \-\-federation.
+
+.TP
 \fB\-l\fR, \fB\-\-long\fR
 Print more detailed information.
 This is ignored if the \fB\-\-format\fR option is specified.
@@ -62,6 +71,8 @@ This is ignored if the \fB\-\-format\fR option is specified.
 \fB\-M\fR, \fB\-\-clusters\fR=<\fIstring\fR>
 Clusters to issue commands to.  Multiple cluster names may be comma separated.
 A value of of '\fIall\fR' will query to run on all clusters.
+Note that the SlurmDBD must be up for this option to work properly.
+This option implicitly sets the \fB\-\-local\fR option.
 
 .TP
 \fB\-n <nodes>\fR, \fB\-\-nodes=<nodes>\fR
@@ -168,9 +179,9 @@ Features available the nodes, also see \fB%b\fR
 .TP
 \fB%F\fR
 Number of nodes by state in the format
-"allocated/idle/other/total".  Do not use this with a node
-state option ("%t" or "%T") or the different node states will
-be placed on separate lines.
+"allocated/idle/other/total".  Note the use of this format option with a node
+state format option ("%t" or "%T") will result in the different node states
+being be reported on separate lines.
 .TP
 \fB%g\fR
 Groups which may use the nodes
@@ -245,6 +256,9 @@ Print the user name and uid of who set the reason a node is unavailable.
 \fB%v\fR
 Print the version of the running slurmd daemon.
 .TP
+\fB%V\fR
+Print the cluster name if running in a federation
+.TP
 \fB%w\fR
 Scheduling weight of the nodes
 .TP
@@ -304,6 +318,9 @@ Allowed allocating nodes.
 .TP
 \fBavailable\fR
 State/availability of a partition.
+.TP
+\fBcluster\fR
+Print the cluster name if running in a federation
 .TP
 \fBcpus\fR
 Number of CPUs per node.
@@ -379,6 +396,9 @@ Partition name followed by "*" for the default partition, also see \fB%R\fR.
 .TP
 \fBpartitionname\fR
 Partition name, also see \fB%P\fR.
+.TP
+\fBport\fR
+Node TCP port.
 .TP
 \fBpreemptmode\fR
 PreemptionMode.
@@ -566,6 +586,9 @@ state in the form "available/idle/other/total".
 Name of a partition.  Note that the suffix "*" identifies the
 default partition.
 .TP
+\fBPORT\fR
+Local TCP port used by slurmd on the node.
+.TP
 \fBROOT\fR
 Is the ability to allocate resources in this partition
 restricted to user root, \fByes\fR or \fBno\fR.
@@ -617,8 +640,10 @@ running at reduced frequency).
 The node is presently being powered up or configured.
 .TP
 \fB$\fR
-The node is currently in a reservation with a flag value of "maintenance"
-or is scheduled to be rebooted.
+The node is currently in a reservation with a flag value of "maintenance".
+.TP
+\fB@\fR
+The node is pending reboot.
 .TP 12
 \fBALLOCATED\fR
 The node has been allocated to one or more jobs.
@@ -687,8 +712,10 @@ some point in the indefinite future for use.
 The node is not allocated to any jobs and is available for use.
 .TP
 \fBMAINT\fR
-The node is currently in a reservation with a flag value of "maintenance"
-or is scheduled to be rebooted.
+The node is currently in a reservation with a flag value of "maintainence".
+.TP
+\fBREBOOT\fR
+The node is currently scheduled to be rebooted.
 .TP
 \fBMIXED\fR
 The node has some of its CPUs ALLOCATED while others are IDLE.
@@ -720,8 +747,14 @@ Commandline options will always override these settings.)
 \fBSINFO_ALL\fR
 \fB\-a, \-\-all\fR
 .TP
+\fBSINFO_FEDERATION\fR
+Same as \fB\-\-federation\fR
+.TP
 \fBSINFO_FORMAT\fR
 \fB\-o <output_format>, \-\-format=<output_format>\fR
+.TP
+\fBSINFO_LOCAL\fR
+Same as \fB\-\-local\fR
 .TP
 \fBSINFO_PARTITION\fR
 \fB\-p <partition>, \-\-partition=<partition>\fR
@@ -819,10 +852,10 @@ Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
 .br
 Copyright (C) 2008\-2009 Lawrence Livermore National Security.
 .br
-Copyright (C) 2010-2016 SchedMD LLC.
+Copyright (C) 2010-2017 SchedMD LLC.
 .LP
 This file is part of Slurm, a resource management program.
-For details, see <http://slurm.schedmd.com/>.
+For details, see <https://slurm.schedmd.com/>.
 .LP
 Slurm is free software; you can redistribute it and/or modify it under
 the terms of the GNU General Public License as published by the Free

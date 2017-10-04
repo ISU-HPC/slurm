@@ -8,7 +8,7 @@
  *  CODE-OCEC-09-009. All rights reserved.
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://slurm.schedmd.com/>.
+ *  For details, see <https://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -70,6 +70,7 @@
 const char plugin_name[]        = "switch NONE plugin";
 const char plugin_type[]        = "switch/none";
 const uint32_t plugin_version   = SLURM_VERSION_NUMBER;
+const uint32_t plugin_id	= SWITCH_PLUGIN_NONE;
 
 /*
  * init() is called when the plugin is loaded, before any other functions

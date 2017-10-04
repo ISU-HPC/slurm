@@ -1,4 +1,4 @@
-.TH sacct "1" "Slurm Commands" "April 2015" "Slurm Commands"
+.TH sacct "1" "Slurm Commands" "April 2017" "Slurm Commands"
 
 .SH "NAME"
 sacct \- displays accounting data for all jobs and job steps in the
@@ -91,8 +91,9 @@ Displays a brief listing, which includes the following data:
 
 .TP
 \f3\-c\fP\f3,\fP \f3\-\-completion\fP
-Use job completion instead of job accounting.  The \f3JobCompType\fP
-parameter in the slurm.conf file must be defined to a non-none option.
+Use job completion data instead of job accounting.  The \f3JobCompType\fP
+parameter in the slurm.conf file must be defined to a non\-none option.
+Does not support federated cluster information (local data only).
 .IP
 
 .TP
@@ -114,6 +115,10 @@ When data for specific jobs are requested with the \-\-jobs option,
 \f3sacct\fP returns the most recent job with that number. This
 behavior can be overridden by specifying \-\-duplicates, in which case
 all records that match the selection criteria will be returned.
+
+.IP
+NOTE: Revoked federated sibling jobs are hidden unless the \-\-duplicates option
+is specified.
 
 .TP
 \f3\-e\fP\f3,\fP \f3\-\-helpformat\fP
@@ -172,6 +177,10 @@ YYYY\-MM\-DD[THH:MM[:SS]]
 .IP
 
 .TP
+\fB\-\-federation\fR
+Show jobs from the federation if a member of one.
+
+.TP
 \f3\-f \fP\f2file\fP\f3,\fP  \f3\-\-file\fP\f3=\fP\f2file\fP
 Causes the \f3sacct\fP command to read job accounting data from the
 named \f2file\fP instead of the current Slurm job accounting log
@@ -219,6 +228,11 @@ Ignored by itself, but if timelimit_min is set this will be the
 maximum timelimit of the range.  Default is no restriction.
 
 .TP
+\f3\-\-local\fP
+Show only jobs local to this cluster. Ignore other clusters in this federation
+(if any). Overrides \-\-federation.
+
+.TP
 \f3\-l\fP\f3,\fP \f3\-\-long\fP
 Equivalent to specifying:
 .IP
@@ -241,8 +255,11 @@ cluster from where \f3sacct\fP is called are displayed.
 Displays the statistics only for the jobs started on the clusters
 specified by the \f2cluster_list\fP operand, which is a
 comma\-separated list of clusters.  Space characters are not allowed
-in the \f2cluster_list\fP. Use \-1 for all clusters.  The default is
-current cluster you are executing the \f3sacct\fP command on\&.
+in the \f2cluster_list\fP.
+A value of \(aq\fIall\fR' will query to run on all clusters.
+The default is current cluster you are executing the \f3sacct\fP command on or
+all clusters in the federation when executed on a federated cluster.
+This option implicitly sets the \fB\-\-local\fR option.
 
 .TP
 \f3\-n\fP\f3,\fP \f3\-\-noheader\fP
@@ -863,6 +880,12 @@ be set via environment variables. These environment variables,
 along with their corresponding options, are listed below. (Note:
 Commandline options will always override these settings.)
 .TP 20
+\fBSACCT_FEDERATION\fR
+Same as \fB\-\-federation\fR
+.TP
+\fBSACCT_LOCAL\fR
+Same as \fB\-\-local\fR
+.TP
 \fBSLURM_CONF\fR
 The location of the Slurm configuration file.
 .TP
@@ -1014,7 +1037,7 @@ Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
 Copyright (C) 2010\-2014 SchedMD LLC.
 .LP
 This file is part of Slurm, a resource management program.
-For details, see <http://slurm.schedmd.com/>.
+For details, see <https://slurm.schedmd.com/>.
 .LP
 Slurm is free software; you can redistribute it and/or modify it under
 the terms of the GNU General Public License as published by the Free

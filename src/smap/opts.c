@@ -8,7 +8,7 @@
  *  CODE-OCEC-09-009. All rights reserved.
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://slurm.schedmd.com/>.
+ *  For details, see <https://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -51,7 +51,7 @@ static void _usage(void);
 /*
  * parse_command_line, fill in params data structure with data
  */
-extern void parse_command_line(int argc, char *argv[])
+extern void parse_command_line(int argc, char **argv)
 {
 	int opt_char;
 	int option_index;
@@ -335,6 +335,7 @@ Usage: smap [OPTIONS]\n\
   -M, --cluster=cluster_name cluster to issue commands to.  Default is\n\
                              current cluster.  cluster with no name will\n\
                              reset to default.\n\
+                             NOTE: SlurmDBD must be up.\n\
   -n, --nodes=[nodes]        only show objects with these nodes.\n\
                              If querying to the ionode level use the -I\n\
                              option in conjunction with this option.\n\

@@ -14,7 +14,7 @@
  *  CODE-OCEC-09-009. All rights reserved.
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://slurm.schedmd.com/>.
+ *  For details, see <https://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -72,8 +72,6 @@
 #define SECS_PER_DAY	(24 * 60 * 60)
 #define SECS_PER_WEEK	(7 * SECS_PER_DAY)
 
-#define MIN_USAGE_FACTOR 0.01
-
 /* These are defined here so when we link with something other than
  * the slurmctld we will have these symbols defined.  They will get
  * overwritten when linking with the slurmctld.
@@ -130,6 +128,8 @@ const uint32_t plugin_version	= SLURM_VERSION_NUMBER;
 static pthread_t decay_handler_thread;
 static pthread_t cleanup_handler_thread;
 static pthread_mutex_t decay_lock = PTHREAD_MUTEX_INITIALIZER;
+static pthread_mutex_t decay_init_mutex = PTHREAD_MUTEX_INITIALIZER;
+static pthread_cond_t decay_init_cond = PTHREAD_COND_INITIALIZER;
 static bool running_decay = 0, reconfig = 0, calc_fairshare = 1;
 static bool favor_small; /* favor small jobs over large */
 static uint16_t damp_factor = 1;  /* weight for age factor */
@@ -197,6 +197,8 @@ static int _apply_decay(double real_decay)
 
 	itr = list_iterator_create(assoc_mgr_qos_list);
 	while ((qos = list_next(itr))) {
+		if (qos->flags & QOS_FLAG_NO_DECAY)
+			continue;
 		qos->usage->usage_raw *= real_decay;
 		for (i=0; i<slurmctld_tres_cnt; i++)
 			qos->usage->usage_tres_raw[i] *= real_decay;
@@ -312,6 +314,8 @@ static void _read_last_decay_ran(time_t *last_ran, time_t *last_reset)
 	return;
 
 unpack_error:
+	if (!ignore_state_errors)
+		fatal("Incomplete priority last decay file exiting, start with '-i' to ignore this");
 	error("Incomplete priority last decay file returning");
 	free_buf(buffer);
 	return;
@@ -441,7 +445,7 @@ static double _get_fairshare_priority(struct job_record *job_ptr)
 
 	assoc_mgr_lock(&locks);
 
-	job_assoc = (slurmdb_assoc_rec_t *)job_ptr->assoc_ptr;
+	job_assoc = job_ptr->assoc_ptr;
 
 	if (!job_assoc) {
 		assoc_mgr_unlock(&locks);
@@ -609,8 +613,12 @@ static uint32_t _get_priority_internal(time_t start_time,
 				tmp_64 = 0xffffffff;
 				priority_part = (double) tmp_64;
 			}
-			job_ptr->priority_array[i] = (uint32_t) priority_part;
-
+			if (((flags & PRIORITY_FLAGS_INCR_ONLY) == 0) ||
+			    (job_ptr->priority_array[i] <
+			     (uint32_t) priority_part)) {
+				job_ptr->priority_array[i] =
+					(uint32_t) priority_part;
+			}
 			debug("Job %u has more than one partition (%s)(%u)",
 			      job_ptr->job_id, part_ptr->name,
 			      job_ptr->priority_array[i]);
@@ -657,7 +665,7 @@ static uint32_t _get_priority_internal(time_t start_time,
 		}
 
 		info("Job %u priority: %.2f + %.2f + %.2f + %.2f + %.2f + %2.f "
-		     "- %ld = %.2f",
+		     "- %"PRId64" = %.2f",
 		     job_ptr->job_id, job_ptr->prio_factors->priority_age,
 		     job_ptr->prio_factors->priority_fs,
 		     job_ptr->prio_factors->priority_js,
@@ -796,6 +804,8 @@ static void _handle_qos_tres_run_secs(long double *tres_run_decay,
 		return;
 
 	for (i=0; i<slurmctld_tres_cnt; i++) {
+		if (i == TRES_ARRAY_ENERGY)
+			continue;
 		if (tres_run_decay)
 			qos->usage->usage_tres_raw[i] += tres_run_decay[i];
 
@@ -840,6 +850,8 @@ static void _handle_assoc_tres_run_secs(long double *tres_run_decay,
 		return;
 
 	for (i=0; i<slurmctld_tres_cnt; i++) {
+		if (i == TRES_ARRAY_ENERGY)
+			continue;
 		if (tres_run_decay)
 			assoc->usage->usage_tres_raw[i] += tres_run_decay[i];
 
@@ -877,7 +889,7 @@ static void _handle_tres_run_secs(uint64_t *tres_run_delta,
 				  struct job_record *job_ptr)
 {
 
-	slurmdb_assoc_rec_t *assoc = (slurmdb_assoc_rec_t *)job_ptr->assoc_ptr;
+	slurmdb_assoc_rec_t *assoc = job_ptr->assoc_ptr;
 
 	_handle_qos_tres_run_secs(NULL, tres_run_delta,
 				  job_ptr->job_id, job_ptr->qos_ptr);
@@ -926,6 +938,12 @@ static void _init_grp_used_cpu_run_secs(time_t last_ran)
 		if (priority_debug)
 			debug2("job: %u", job_ptr->job_id);
 
+		/* If end_time_exp is NO_VAL we have already ran the end for
+		 * this job.  We don't want to do it again, so just exit.
+		 */
+		if (job_ptr->end_time_exp == (time_t)NO_VAL)
+			continue;
+
 		if (!IS_JOB_RUNNING(job_ptr))
 			continue;
 
@@ -956,9 +974,12 @@ static int _apply_new_usage(struct job_record *job_ptr,
 {
 	slurmdb_qos_rec_t *qos;
 	slurmdb_assoc_rec_t *assoc;
-	double run_delta = 0.0, run_decay = 0.0, real_decay = 0.0;
+	double run_delta = 0.0, run_decay = 0.0, run_nodecay = 0.0;
+	double billable_tres = 0.0;
+	double real_decay = 0.0, real_nodecay = 0.0;
 	uint64_t tres_run_delta[slurmctld_tres_cnt];
 	long double tres_run_decay[slurmctld_tres_cnt];
+	long double tres_run_nodecay[slurmctld_tres_cnt];
 	uint64_t tres_time_delta = 0;
 	int i;
 	uint64_t job_time_limit_ends = 0;
@@ -1049,7 +1070,22 @@ static int _apply_new_usage(struct job_record *job_ptr,
 	run_decay = run_delta * pow(decay_factor, run_delta);
 	/* clang needs these memset to avoid a warning */
 	memset(tres_run_decay, 0, sizeof(tres_run_decay));
+	memset(tres_run_nodecay, 0, sizeof(tres_run_nodecay));
 	memset(tres_run_delta, 0, sizeof(tres_run_delta));
+	assoc_mgr_lock(&locks);
+
+	billable_tres = _calc_billable_tres(job_ptr, start_period);
+	real_decay    = run_decay * billable_tres;
+	real_nodecay  = run_delta * billable_tres;
+	run_nodecay   = run_delta;
+
+	qos = job_ptr->qos_ptr;
+	if (qos && (qos->usage_factor >= 0)) {
+		real_decay *= qos->usage_factor;
+		run_decay  *= qos->usage_factor;
+		real_nodecay *= qos->usage_factor;
+		run_nodecay  *= qos->usage_factor;
+	}
 	if (job_ptr->tres_alloc_cnt) {
 		for (i=0; i<slurmctld_tres_cnt; i++) {
 			if (!job_ptr->tres_alloc_cnt[i])
@@ -1058,38 +1094,36 @@ static int _apply_new_usage(struct job_record *job_ptr,
 				job_ptr->tres_alloc_cnt[i];
 			tres_run_decay[i] = (long double)run_decay *
 				(long double)job_ptr->tres_alloc_cnt[i];
+			tres_run_nodecay[i] = (long double)run_nodecay *
+				(long double)job_ptr->tres_alloc_cnt[i];
 		}
 	}
 
-	assoc_mgr_lock(&locks);
-
-	real_decay = run_decay * _calc_billable_tres(job_ptr, start_period);
-
-	/* Just to make sure we don't make a
-	   window where the qos_ptr could of
-	   changed make sure we get it again
-	   here.
-	*/
-	qos = (slurmdb_qos_rec_t *)job_ptr->qos_ptr;
-	assoc = (slurmdb_assoc_rec_t *)job_ptr->assoc_ptr;
+	assoc = job_ptr->assoc_ptr;
 
 	/* now apply the usage factor for this qos */
 	if (qos) {
-		if (qos->usage_factor >= 0) {
-			real_decay *= qos->usage_factor;
-			run_decay *= qos->usage_factor;
-		}
-		qos->usage->grp_used_wall += run_decay;
-		qos->usage->usage_raw += (long double)real_decay;
+		if (qos->flags & QOS_FLAG_NO_DECAY) {
+			qos->usage->grp_used_wall += run_nodecay;
+			qos->usage->usage_raw += (long double)real_nodecay;
 
-		_handle_qos_tres_run_secs(tres_run_decay, tres_run_delta,
-					  job_ptr->job_id, qos);
+			_handle_qos_tres_run_secs(tres_run_nodecay,
+						  tres_run_delta,
+						  job_ptr->job_id, qos);
+		} else {
+			qos->usage->grp_used_wall += run_decay;
+			qos->usage->usage_raw += (long double)real_decay;
+
+			_handle_qos_tres_run_secs(tres_run_decay,
+						  tres_run_delta,
+						  job_ptr->job_id, qos);
+		}
 	}
 
 	/* sanity check, there should always be a part_ptr here, but only do
 	 * the qos if it isn't the same qos as the job is using */
 	if (job_ptr->part_ptr && (job_ptr->part_ptr->qos_ptr != qos))
-		qos = (slurmdb_qos_rec_t *)job_ptr->part_ptr->qos_ptr;
+		qos = job_ptr->part_ptr->qos_ptr;
 	else
 		qos = NULL;
 
@@ -1100,11 +1134,21 @@ static int _apply_new_usage(struct job_record *job_ptr,
 		/* 	real_decay *= qos->usage_factor; */
 		/* 	run_decay *= qos->usage_factor; */
 		/* } */
-		qos->usage->grp_used_wall += run_decay;
-		qos->usage->usage_raw += (long double)real_decay;
+		if (qos->flags & QOS_FLAG_NO_DECAY) {
+			qos->usage->grp_used_wall += run_nodecay;
+			qos->usage->usage_raw += (long double)real_nodecay;
 
-		_handle_qos_tres_run_secs(tres_run_decay, tres_run_delta,
-					  job_ptr->job_id, qos);
+			_handle_qos_tres_run_secs(tres_run_nodecay,
+						  tres_run_delta,
+						  job_ptr->job_id, qos);
+		} else {
+			qos->usage->grp_used_wall += run_decay;
+			qos->usage->usage_raw += (long double)real_decay;
+
+			_handle_qos_tres_run_secs(tres_run_decay,
+						  tres_run_delta,
+						  job_ptr->job_id, qos);
+		}
 	}
 
 
@@ -1206,6 +1250,9 @@ static void *_decay_thread(void *no_data)
 	 *
 	 * This explain the following declaration.
 	 */
+
+	slurm_mutex_lock(&decay_init_mutex);
+
 	if (decay_hl > 0)
 		decay_factor = 1 - (0.693 / decay_hl);
 
@@ -1215,6 +1262,9 @@ static void *_decay_thread(void *no_data)
 	_read_last_decay_ran(&g_last_ran, &last_reset);
 	if (last_reset == 0)
 		last_reset = start_time;
+
+	slurm_cond_signal(&decay_init_cond);
+	slurm_mutex_unlock(&decay_init_mutex);
 
 	_init_grp_used_cpu_run_secs(g_last_ran);
 
@@ -1340,17 +1390,23 @@ static void *_decay_thread(void *no_data)
 	return NULL;
 }
 
-/* Selects the specific jobs that the user wanted to see
- * Requests that include job id(s) and user id(s) must match both to be passed.
- * Returns 1 if job should be omitted */
-static int _filter_job(struct job_record *job_ptr, List req_job_list,
-		       List req_user_list)
+/* If the specified job record satisfies the filter specifications in req_msg
+ * and part_ptr_list (partition name filters), then add its priority specs
+ * to ret_list */
+static void _filter_job(struct job_record *job_ptr,
+			priority_factors_request_msg_t *req_msg,
+			List part_ptr_list, List ret_list)
 {
-	int filter = 0;
-	ListIterator iterator;
+	priority_factors_object_t *obj = NULL;
+	struct part_record *job_part_ptr = NULL, *filter_part_ptr = NULL;
+	List req_job_list, req_user_list;
+	int filter = 0, inx;
+	ListIterator iterator, job_iter, filter_iter;
 	uint32_t *job_id;
 	uint32_t *user_id;
 
+	/* Filter by job ID */
+	req_job_list = req_msg->job_id_list;
 	if (req_job_list) {
 		filter = 1;
 		iterator = list_iterator_create(req_job_list);
@@ -1361,11 +1417,12 @@ static int _filter_job(struct job_record *job_ptr, List req_job_list,
 			}
 		}
 		list_iterator_destroy(iterator);
-		if (filter == 1) {
-			return 1;
-		}
+		if (filter == 1)
+			return;
 	}
 
+	/* Filter by user/UID */
+	req_user_list = req_msg->uid_list;
 	if (req_user_list) {
 		filter = 1;
 		iterator = list_iterator_create(req_user_list);
@@ -1377,10 +1434,69 @@ static int _filter_job(struct job_record *job_ptr, List req_job_list,
 		}
 		list_iterator_destroy(iterator);
 		if (filter == 1)
-			return 1;
+			return;
 	}
 
-	return filter;
+	/* Filter by partition, job in one partition */
+	if (!job_ptr->part_ptr_list || !job_ptr->priority_array) {
+		job_part_ptr =  job_ptr->part_ptr;
+		filter = 0;
+		if (part_ptr_list) {
+			filter = 1;
+			filter_iter = list_iterator_create(part_ptr_list);
+			while ((filter_part_ptr = list_next(filter_iter))) {
+				if (filter_part_ptr == job_part_ptr) {
+					filter = 0;
+					break;
+				}
+			}
+			list_iterator_destroy(filter_iter);
+		}
+
+		if (filter == 0) {
+			obj = xmalloc(sizeof(priority_factors_object_t));
+			slurm_copy_priority_factors_object(obj,
+						job_ptr->prio_factors);
+			obj->job_id = job_ptr->job_id;
+			obj->partition = job_part_ptr->name;
+			obj->user_id = job_ptr->user_id;
+			list_append(ret_list, obj);
+		}
+		return;
+	}
+
+	/* Filter by partition, job in multiple partitions */
+	inx = 0;
+	job_iter = list_iterator_create(job_ptr->part_ptr_list);
+	while ((job_part_ptr = list_next(job_iter))) {
+		filter = 0;
+		if (part_ptr_list) {
+			filter = 1;
+			filter_iter = list_iterator_create(part_ptr_list);
+			while ((filter_part_ptr = list_next(filter_iter))) {
+				if (filter_part_ptr == job_part_ptr) {
+					filter = 0;
+					break;
+				}
+			}
+			list_iterator_destroy(filter_iter);
+		}
+
+		if (filter == 0) {
+			obj = xmalloc(sizeof(priority_factors_object_t));
+			slurm_copy_priority_factors_object(obj,
+						job_ptr->prio_factors);
+			obj->priority_part = job_part_ptr->priority_job_factor /
+					     (double)part_max_priority *
+					     (double)weight_part;
+			obj->job_id = job_ptr->job_id;
+			obj->partition = job_part_ptr->name;
+			obj->user_id = job_ptr->user_id;
+			list_append(ret_list, obj);
+		}
+		inx++;
+	}
+	list_iterator_destroy(job_iter);
 }
 
 static void *_cleanup_thread(void *no_data)
@@ -1586,8 +1702,10 @@ static void _set_usage_efctv(slurmdb_assoc_rec_t *assoc)
  */
 int init ( void )
 {
-	pthread_attr_t thread_attr;
 	char *temp = NULL;
+	/* Write lock on jobs, read lock on nodes and partitions */
+	slurmctld_lock_t job_write_lock =
+		{ NO_LOCK, WRITE_LOCK, READ_LOCK, READ_LOCK, NO_LOCK };
 
 	/* This means we aren't running from the controller so skip setup. */
 	if (cluster_cpus == NO_VAL) {
@@ -1601,6 +1719,7 @@ int init ( void )
 	temp = slurm_get_accounting_storage_type();
 	if (xstrcasecmp(temp, "accounting_storage/slurmdbd")
 	    && xstrcasecmp(temp, "accounting_storage/mysql")) {
+		time_t start_time = time(NULL);
 		error("You are not running a supported "
 		      "accounting_storage plugin\n(%s).\n"
 		      "Fairshare can only be calculated with either "
@@ -1611,26 +1730,42 @@ int init ( void )
 		      temp);
 		calc_fairshare = 0;
 		weight_fs = 0;
+
+		/* Initialize job priority factors for valid sprio output */
+		lock_slurmctld(job_write_lock);
+		list_for_each(
+			job_list,
+			(ListForF) _decay_apply_new_usage_and_weighted_factors,
+			&start_time);
+		unlock_slurmctld(job_write_lock);
 	} else if (assoc_mgr_root_assoc) {
 		if (!cluster_cpus)
 			fatal("We need to have a cluster cpu count "
 			      "before we can init the priority/multifactor "
 			      "plugin");
 		assoc_mgr_root_assoc->usage->usage_efctv = 1.0;
-		slurm_attr_init(&thread_attr);
-		if (pthread_create(&decay_handler_thread, &thread_attr,
-				   _decay_thread, NULL))
-			fatal("pthread_create error %m");
+
+		/* The decay_thread sets up some global variables that are
+		 * needed outside of the decay_thread (i.e. decay_factor,
+		 * g_last_ran).  These are needed if a job was completing and
+		 * the slurmctld was reset.  If they aren't setup before
+		 * continuing we could get more time added than should be on a
+		 * restart.  So wait until they are set up. Set the lock now so
+		 * that the decay thread won't trigger the conditional before we
+		 * wait for it. */
+		slurm_mutex_lock(&decay_init_mutex);
+
+		slurm_thread_create(&decay_handler_thread,
+				    _decay_thread, NULL);
+
+		slurm_cond_wait(&decay_init_cond, &decay_init_mutex);
+		slurm_mutex_unlock(&decay_init_mutex);
 
 		/* This is here to join the decay thread so we don't core
 		 * dump if in the sleep, since there is no other place to join
 		 * we have to create another thread to do it. */
-		slurm_attr_init(&thread_attr);
-		if (pthread_create(&cleanup_handler_thread, &thread_attr,
-				   _cleanup_thread, NULL))
-			fatal("pthread_create error %m");
-
-		slurm_attr_destroy(&thread_attr);
+		slurm_thread_create(&cleanup_handler_thread,
+				    _cleanup_thread, NULL);
 	} else {
 		if (weight_fs) {
 			fatal("It appears you don't have any association "
@@ -1764,29 +1899,41 @@ extern double priority_p_calc_fs_factor(long double usage_efctv,
 extern List priority_p_get_priority_factors_list(
 	priority_factors_request_msg_t *req_msg, uid_t uid)
 {
-	List req_job_list;
-	List req_user_list;
-	List ret_list = NULL;
+	List ret_list = NULL, part_filter_list = NULL;
 	ListIterator itr;
-	priority_factors_object_t *obj = NULL;
 	struct job_record *job_ptr = NULL;
+	struct part_record *part_ptr;
 	time_t start_time = time(NULL);
-
+	char *part_str, *tok, *last = NULL;
 	/* Read lock on jobs, nodes, and partitions */
 	slurmctld_lock_t job_read_lock =
 		{ NO_LOCK, READ_LOCK, READ_LOCK, READ_LOCK, NO_LOCK };
 
 	xassert(req_msg);
-	req_job_list = req_msg->job_id_list;
-	req_user_list = req_msg->uid_list;
 
 	lock_slurmctld(job_read_lock);
+	if (req_msg->partitions) {
+		part_filter_list = list_create(NULL);
+		part_str = xstrdup(req_msg->partitions);
+		tok = strtok_r(part_str, ",", &last);
+		while (tok) {
+			if ((part_ptr = find_part_record(tok)))
+				list_append(part_filter_list, part_ptr);
+			tok = strtok_r(NULL, ",", &last);
+		}
+		xfree(part_str);
+	}
+
 	if (job_list && list_count(job_list)) {
 		ret_list = list_create(slurm_destroy_priority_factors_object);
 		itr = list_iterator_create(job_list);
 		while ((job_ptr = list_next(itr))) {
 			if (!(flags & PRIORITY_FLAGS_CALCULATE_RUNNING) &&
 			    !IS_JOB_PENDING(job_ptr))
+				continue;
+
+			/* Job is not active on this cluster. */
+			if (IS_JOB_REVOKED(job_ptr))
 				continue;
 
 			/*
@@ -1808,9 +1955,6 @@ extern List priority_p_get_priority_factors_list(
 			if (job_ptr->direct_set_prio)
 				continue;
 
-			if (_filter_job(job_ptr, req_job_list, req_user_list))
-				continue;
-
 			if ((slurmctld_conf.private_data & PRIVATE_DATA_JOBS) &&
 			    (job_ptr->user_id != uid) &&
 			    !validate_operator(uid) &&
@@ -1822,21 +1966,15 @@ extern List priority_p_get_priority_factors_list(
 			       != 0))))
 				continue;
 
-			obj = xmalloc(sizeof(priority_factors_object_t));
-
-			slurm_copy_priority_factors_object(
-				obj, job_ptr->prio_factors);
-
-			obj->job_id = job_ptr->job_id;
-			obj->user_id = job_ptr->user_id;
-			list_append(ret_list, obj);
+			_filter_job(job_ptr, req_msg, part_filter_list,
+				    ret_list);
 		}
 		list_iterator_destroy(itr);
-		if (!list_count(ret_list)) {
+		if (!list_count(ret_list))
 			FREE_NULL_LIST(ret_list);
-		}
 	}
 	unlock_slurmctld(job_read_lock);
+	FREE_NULL_LIST(part_filter_list);
 
 	return ret_list;
 }
@@ -1862,6 +2000,7 @@ extern bool decay_apply_new_usage(struct job_record *job_ptr,
 	/* apply new usage */
 	if (((flags & PRIORITY_FLAGS_CALCULATE_RUNNING) ||
 	     !IS_JOB_PENDING(job_ptr)) &&
+	    !IS_JOB_POWER_UP_NODE(job_ptr) &&
 	    job_ptr->start_time && job_ptr->assoc_ptr) {
 		if (!_apply_new_usage(job_ptr, g_last_ran, *start_time_ptr, 0))
 			return false;
@@ -1873,21 +2012,28 @@ extern bool decay_apply_new_usage(struct job_record *job_ptr,
 extern int decay_apply_weighted_factors(struct job_record *job_ptr,
 					 time_t *start_time_ptr)
 {
+	uint32_t new_prio;
+
 	/* Always return SUCCESS so that list_for_each will
 	 * continue processing list of jobs. */
 
 	/*
-	 * Priority 0 is reserved for held
-	 * jobs. Also skip priority
-	 * calculation for non-pending jobs.
+	 * Priority 0 is reserved for held jobs. Also skip priority
+	 * re_calculation for non-pending jobs.
 	 */
 	if ((job_ptr->priority == 0) ||
+	    IS_JOB_POWER_UP_NODE(job_ptr) ||
 	    (!IS_JOB_PENDING(job_ptr) &&
 	     !(flags & PRIORITY_FLAGS_CALCULATE_RUNNING)))
 		return SLURM_SUCCESS;
 
-	job_ptr->priority = _get_priority_internal(*start_time_ptr, job_ptr);
-	last_job_update = time(NULL);
+	new_prio = _get_priority_internal(*start_time_ptr, job_ptr);
+	if (((flags & PRIORITY_FLAGS_INCR_ONLY) == 0) ||
+	    (job_ptr->priority < new_prio)) {
+		job_ptr->priority = new_prio;
+		last_job_update = time(NULL);
+	}
+
 	debug2("priority for job %u is now %u",
 	       job_ptr->job_id, job_ptr->priority);
 
@@ -1901,17 +2047,17 @@ extern void set_priority_factors(time_t start_time, struct job_record *job_ptr)
 
 	xassert(job_ptr);
 
-	if (!job_ptr->prio_factors)
+	if (!job_ptr->prio_factors) {
 		job_ptr->prio_factors =
 			xmalloc(sizeof(priority_factors_object_t));
-	else {
+	} else {
 		xfree(job_ptr->prio_factors->tres_weights);
 		xfree(job_ptr->prio_factors->priority_tres);
 		memset(job_ptr->prio_factors, 0,
 		       sizeof(priority_factors_object_t));
 	}
 
-	qos_ptr = (slurmdb_qos_rec_t *)job_ptr->qos_ptr;
+	qos_ptr = job_ptr->qos_ptr;
 
 	if (weight_age) {
 		uint32_t diff = 0;

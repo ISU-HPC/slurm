@@ -6,7 +6,7 @@
  *  All rights reserved.
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://slurm.schedmd.com/>.
+ *  For details, see <https://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -597,6 +597,29 @@ handle_pmi2_cmd(int fd, int lrank)
 	buf[len] = '\0';
 
 	debug2("mpi/pmi2: got client request: %s %s", len_buf, buf);
+
+	if (!len) {
+		/*
+		 * This is an invalid request.
+		 *
+		 * The most likely cause of an invalid client request is a
+		 * second PMI2_Init call from the client end. This arrives
+		 * first as a "cmd=init" call. Ideally, we'd capture that
+		 * request, and respond with "cmd=response_to_init" with the rc
+		 * field set to PMI2_ERR_INIT and expect the client to cleanup
+		 * and die correctly.
+		 *
+		 * However - Slurm's libpmi2 has historically ignored the rc
+		 * value and immediately sends the FULLINIT_CMD regardless, and
+		 * then waits for a response to that. Rather than construct
+		 * two successive error messages, this call will send back
+		 * "cmd=finalize-response" back that will trigger the desired
+		 * error handling paths, and then tears down the connection
+		 * for good measure.
+		 */
+		_handle_finalize(fd, 0, NULL);
+		return SLURM_ERROR;
+	}
 
 	req = client_req_init(len, buf);
 	if (req == NULL) {

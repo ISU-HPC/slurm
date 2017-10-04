@@ -7,7 +7,7 @@
  *  CODE-OCEC-09-009. All rights reserved.
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://slurm.schedmd.com/>.
+ *  For details, see <https://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -88,6 +88,7 @@ typedef enum {	HEADLINE,
 
 typedef enum {
 		PRINT_ACCOUNT,
+		PRINT_ADMIN_COMMENT,
 		PRINT_ALLOC_CPUS,
 		PRINT_ALLOC_GRES,
 		PRINT_ALLOC_NODES,
@@ -168,20 +169,24 @@ typedef enum {
 		PRINT_USER,
 		PRINT_USERCPU,
 		PRINT_WCKEY,
-		PRINT_WCKEYID
+		PRINT_WCKEYID,
+		PRINT_WORK_DIR
 } sacct_print_types_t;
 
 typedef struct {
+	char *cluster_name;	/* Set if in federated cluster */
+	int opt_allocs;		/* --total */
 	uint32_t convert_flags;	/* --noconvert */
 	slurmdb_job_cond_t *job_cond;
 	int opt_completion;	/* --completion */
 	int opt_dup;		/* --duplicates; +1 = explicitly set */
+	bool opt_federation;	/* --federation */
 	char *opt_field_list;	/* --fields= */
+	char *opt_filein;	/* --file */
 	int opt_gid;		/* running persons gid */
 	int opt_help;		/* --help */
-	char *opt_filein;
+	bool opt_local;		/* --local */
 	int opt_noheader;	/* can only be cleared */
-	int opt_allocs;		/* --total */
 	int opt_uid;		/* running persons uid */
 	int units;		/* --units*/
 } sacct_parameters_t;
@@ -204,12 +209,12 @@ void aggregate_stats(slurmdb_stats_t *dest, slurmdb_stats_t *from);
 void print_fields(type_t type, void *object);
 
 /* options.c */
-int get_data(void);
+int  get_data(void);
 void parse_command_line(int argc, char **argv);
 void do_help(void);
 void do_list(void);
 void do_list_completion(void);
-void sacct_init();
-void sacct_fini();
+void sacct_init(void);
+void sacct_fini(void);
 
 #endif /* !_SACCT_H */

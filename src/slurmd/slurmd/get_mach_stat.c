@@ -10,7 +10,7 @@
  *  CODE-OCEC-09-009. All rights reserved.
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://slurm.schedmd.com/>.
+ *  For details, see <https://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -63,7 +63,7 @@
 #include <string.h>
 #include <syslog.h>
 
-#if defined(__sun) || defined(__APPLE__)
+#if defined(__APPLE__)
 #  include <sys/times.h>
 #  include <sys/types.h>
 #elif defined(__NetBSD__) || defined(__FreeBSD__)
@@ -209,11 +209,7 @@ get_tmp_disk(uint32_t *tmp_disk, char *tmp_fs)
 
 	if (tmp_fs_name == NULL)
 		tmp_fs_name = "/tmp";
-#if defined (__sun)
-	if (statfs(tmp_fs_name, &stat_buf, 0, 0) == 0) {
-#else
 	if (statfs(tmp_fs_name, &stat_buf) == 0) {
-#endif
 		total_size = (long)stat_buf.f_blocks;
 	}
 	else if (errno != ENOENT) {
@@ -231,7 +227,7 @@ get_tmp_disk(uint32_t *tmp_disk, char *tmp_fs)
 
 extern int get_up_time(uint32_t *up_time)
 {
-#if defined(__sun) || defined(__APPLE__) || defined(__NetBSD__) || defined(__FreeBSD__)
+#if defined(__APPLE__) || defined(__NetBSD__) || defined(__FreeBSD__)
 	clock_t tm;
 	struct tms buf;
 
@@ -242,20 +238,6 @@ extern int get_up_time(uint32_t *up_time)
 	}
 
 	*up_time = tm / sysconf(_SC_CLK_TCK);
-#elif defined(__CYGWIN__)
-	FILE *uptime_file;
-	char buffer[128];
-	char* _uptime_path = "/proc/uptime";
-
-	if (!(uptime_file = fopen(_uptime_path, "r"))) {
-		error("get_up_time: error %d opening %s", errno, _uptime_path);
-		return errno;
-	}
-
-	if (fgets(buffer, sizeof(buffer), uptime_file))
-		*up_time = atoi(buffer);
-
-	fclose(uptime_file);
 #else
 	/* NOTE for Linux: The return value of times() may overflow the
 	 * possible range of type clock_t. There is also an offset of
@@ -284,28 +266,10 @@ extern int get_up_time(uint32_t *up_time)
 
 extern int get_cpu_load(uint32_t *cpu_load)
 {
-#if defined(__sun) || defined(__APPLE__) || defined(__NetBSD__) || defined(__FreeBSD__)
+#if defined(__APPLE__) || defined(__NetBSD__) || defined(__FreeBSD__)
 	/* Not sure how to get CPU load on above systems.
 	 * Perhaps some method below works. */
 	*cpu_load = 0;
-#elif defined(__CYGWIN__)
-	FILE *load_file;
-	char buffer[128];
-	char *space;
-	char *_load_path = "/proc/loadavg";
-
-	if (!(load_file = fopen(_load_path, "r"))) {
-		error("get_cpu_load: error %d opening %s", errno, _load_path);
-		return errno;
-	}
-
-	if (fgets(buffer, sizeof(buffer), load_file) &&
-	    (space = strchr(buffer, ' '))) {
-		*cpu_load = atof(space + 1) * 100.0;
-	} else
-		*cpu_load = 0;
-
-	fclose(load_file);
 #else
 	struct sysinfo info;
 	float shift_float = (float) (1 << SI_LOAD_SHIFT);
@@ -322,7 +286,7 @@ extern int get_cpu_load(uint32_t *cpu_load)
 
 extern int get_free_mem(uint64_t *free_mem)
 {
-#if defined(__sun) || defined(__APPLE__) || defined(__NetBSD__) || defined(__FreeBSD__) || defined(__CYGWIN__)
+#if defined(__APPLE__) || defined(__NetBSD__) || defined(__FreeBSD__)
 	/* Not sure how to get CPU load on above systems.
 	 * Perhaps some method below works. */
 	*free_mem = 0;

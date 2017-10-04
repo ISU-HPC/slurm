@@ -8,7 +8,7 @@
  *  Written by Rod Schultz <rod.schultz@bull.com>
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://slurm.schedmd.com>.
+ *  For details, see <https://slurm.schedmd.com>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -53,7 +53,7 @@
 #include "src/common/plugin.h"
 #include "src/common/plugrack.h"
 #include "src/common/read_config.h"
-#include "src/common/slurm_acct_gather_infiniband.h"
+#include "src/common/slurm_acct_gather_interconnect.h"
 #include "src/common/slurm_acct_gather_profile.h"
 #include "src/common/slurm_acct_gather_energy.h"
 #include "src/common/slurm_jobacct_gather.h"
@@ -171,7 +171,7 @@ static void *_timer_thread(void *args)
 				continue;
 			if (!acct_gather_profile_test())
 				break;	/* Shutting down */
-			debug2("profile signalling type %s",
+			debug2("profile signaling type %s",
 			       acct_gather_profile_type_t_name(i));
 
 			/* signal poller to start */
@@ -253,7 +253,7 @@ extern int acct_gather_profile_fini(void)
 			acct_gather_filesystem_fini();
 			break;
 		case PROFILE_NETWORK:
-			acct_gather_infiniband_fini();
+			acct_gather_interconnect_fini();
 			break;
 		default:
 			fatal("Unhandled profile option %d please update "
@@ -422,8 +422,6 @@ extern char *acct_gather_profile_dataset_str(
 
 extern int acct_gather_profile_startpoll(char *freq, char *freq_def)
 {
-	int retval = SLURM_SUCCESS;
-	pthread_attr_t attr;
 	int i;
 	uint32_t profile = ACCT_GATHER_PROFILE_NOT_SET;
 
@@ -434,7 +432,7 @@ extern int acct_gather_profile_startpoll(char *freq, char *freq_def)
 	if (acct_gather_profile_running) {
 		slurm_mutex_unlock(&profile_running_mutex);
 		error("acct_gather_profile_startpoll: poll already started!");
-		return retval;
+		return SLURM_SUCCESS;
 	}
 	acct_gather_profile_running = true;
 	slurm_mutex_unlock(&profile_running_mutex);
@@ -482,7 +480,7 @@ extern int acct_gather_profile_startpoll(char *freq, char *freq_def)
 				break;
 			_set_freq(i, freq, freq_def);
 
-			acct_gather_infiniband_startpoll(
+			acct_gather_interconnect_startpoll(
 				acct_gather_profile_timer[i].freq);
 			break;
 		default:
@@ -493,17 +491,11 @@ extern int acct_gather_profile_startpoll(char *freq, char *freq_def)
 	}
 
 	/* create polling thread */
-	slurm_attr_init(&attr);
+	slurm_thread_create(&timer_thread_id, _timer_thread, NULL);
 
-	if  (pthread_create(&timer_thread_id, &attr,
-			    &_timer_thread, NULL)) {
-		debug("acct_gather_profile_startpoll failed to create "
-		      "_timer_thread: %m");
-	} else
-		debug3("acct_gather_profile_startpoll dynamic logging enabled");
-	slurm_attr_destroy(&attr);
+	debug3("acct_gather_profile_startpoll dynamic logging enabled");
 
-	return retval;
+	return SLURM_SUCCESS;
 }
 
 extern void acct_gather_profile_endpoll(void)
@@ -524,7 +516,6 @@ extern void acct_gather_profile_endpoll(void)
 		slurm_mutex_lock(&acct_gather_profile_timer[i].notify_mutex);
 		slurm_cond_signal(&acct_gather_profile_timer[i].notify);
 		slurm_mutex_unlock(&acct_gather_profile_timer[i].notify_mutex);
-		pthread_cond_destroy(&acct_gather_profile_timer[i].notify);
 		acct_gather_profile_timer[i].freq = 0;
 		switch (i) {
 		case PROFILE_ENERGY:

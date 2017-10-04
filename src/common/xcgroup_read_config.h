@@ -5,7 +5,7 @@
  *  Written by Matthieu Hautreux <matthieu.hautreux@cea.fr>
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://slurm.schedmd.com/>.
+ *  For details, see <https://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -50,8 +50,6 @@ typedef struct slurm_cgroup_conf {
 
 	bool      cgroup_automount;
 	char *    cgroup_mountpoint;
-	char *    cgroup_subsystems;
-	char *    cgroup_release_agent;
 
 	char *    cgroup_prepend;
 
@@ -65,8 +63,11 @@ typedef struct slurm_cgroup_conf {
 	uint64_t  min_ram_space;         /* Lower bound on memory limit (MB) */
 
 	bool      constrain_kmem_space;
-	bool      constrain_swap_space;
+	float     allowed_kmem_space;
+	float     max_kmem_percent;
+	uint64_t  min_kmem_space;
 
+	bool      constrain_swap_space;
 	float     allowed_swap_space;
 	float     max_swap_percent;      /* Upper bound on swap as % of RAM  */
 

@@ -7,7 +7,7 @@
  *  Written by Danny Auble <da@llnl.gov>
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://slurm.schedmd.com/>.
+ *  For details, see <https://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -204,7 +204,8 @@ extern int init ( void )
 		      "Please use a database plugin");
 	}
 
-	/* This check for the slurm user id is a quick and dirty patch
+	/*
+	 * This check for the slurm user id is a quick and dirty patch
 	 * to see if the controller is calling this, since we open the
 	 * file in append mode stats could fail on it if the file
 	 * isn't world writable.
@@ -230,8 +231,10 @@ extern int init ( void )
 			xfree(log_file);
 			slurm_mutex_unlock( &logfile_lock );
 			return SLURM_ERROR;
-		} else
-			chmod(log_file, prot);
+		} else {
+			if (chmod(log_file, prot))
+				error("%s: chmod(%s):%m", __func__, log_file);
+		}
 
 		xfree(log_file);
 
@@ -240,8 +243,10 @@ extern int init ( void )
 		LOGFILE_FD = fileno(LOGFILE);
 		slurm_mutex_unlock( &logfile_lock );
 		storage_init = 1;
-		/* since this can be loaded from many different places
-		   only tell us once. */
+		/*
+		 * since this can be loaded from many different places
+		 * only tell us once.
+		 */
 		verbose("%s loaded", plugin_name);
 		first = 0;
 	} else {
@@ -719,7 +724,7 @@ extern int jobacct_storage_p_job_complete(void *db_conn,
 
 	exit_code = job_ptr->exit_code;
 	if (exit_code == 1) {
-		/* This wasn't signalled, it was set by Slurm so don't
+		/* This wasn't signaled, it was set by Slurm so don't
 		 * treat it like a signal.
 		 */
 		exit_code = 256;

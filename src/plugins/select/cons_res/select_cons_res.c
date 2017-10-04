@@ -62,7 +62,7 @@
  *  from select/linear
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://slurm.schedmd.com/>.
+ *  For details, see <https://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -184,6 +184,7 @@ bool     preempt_by_qos       = false;
 uint16_t priority_flags       = 0;
 uint64_t select_debug_flags   = 0;
 uint16_t select_fast_schedule = 0;
+bool     spec_cores_first     = false;
 bool     topo_optional        = false;
 
 struct part_res_record *select_part_record = NULL;
@@ -193,6 +194,7 @@ static bool select_state_initializing = true;
 static int select_node_cnt = 0;
 static int preempt_reorder_cnt = 1;
 static bool preempt_strict_order = false;
+static int  bf_window_scale      = 0;
 
 struct select_nodeinfo {
 	uint16_t magic;		/* magic number */
@@ -415,13 +417,25 @@ static void _destroy_part_data(struct part_res_record *this_ptr)
 	}
 }
 
+static int _sort_part_prio(void *x, void *y)
+{
+	struct part_res_record *part1 = *(struct part_res_record **) x;
+	struct part_res_record *part2 = *(struct part_res_record **) y;
+
+	if (part1->part_ptr->priority_tier > part2->part_ptr->priority_tier)
+		return -1;
+	if (part1->part_ptr->priority_tier < part2->part_ptr->priority_tier)
+		return 1;
+	return 0;
+}
 
 /* (re)create the global select_part_record array */
 static void _create_part_data(void)
 {
+	List part_rec_list = NULL;
 	ListIterator part_iterator;
 	struct part_record *p_ptr;
-	struct part_res_record *this_ptr;
+	struct part_res_record *this_ptr, *last_ptr = NULL;
 	int num_parts;
 
 	_destroy_part_data(select_part_record);
@@ -432,11 +446,10 @@ static void _create_part_data(void)
 		return;
 	info("cons_res: preparing for %d partitions", num_parts);
 
-	select_part_record = xmalloc(sizeof(struct part_res_record));
-	this_ptr = select_part_record;
-
+	part_rec_list = list_create(NULL);
 	part_iterator = list_iterator_create(part_list);
 	while ((p_ptr = (struct part_record *) list_next(part_iterator))) {
+		this_ptr = xmalloc(sizeof(struct part_res_record));
 		this_ptr->part_ptr = p_ptr;
 		this_ptr->num_rows = p_ptr->max_share;
 		if (this_ptr->num_rows & SHARED_FORCE)
@@ -448,15 +461,22 @@ static void _create_part_data(void)
 			this_ptr->num_rows = 1;
 		/* we'll leave the 'row' array blank for now */
 		this_ptr->row = NULL;
-		num_parts--;
-		if (num_parts) {
-			this_ptr->next =xmalloc(sizeof(struct part_res_record));
-			this_ptr = this_ptr->next;
-		}
+		list_append(part_rec_list, this_ptr);
 	}
 	list_iterator_destroy(part_iterator);
 
-	/* should we sort the select_part_record list by priority here? */
+	/* Sort the select_part_records by priority */
+	list_sort(part_rec_list, _sort_part_prio);
+	part_iterator = list_iterator_create(part_rec_list);
+	while ((this_ptr = (struct part_res_record *)list_next(part_iterator))){
+		if (last_ptr)
+			last_ptr->next = this_ptr;
+		else
+			select_part_record = this_ptr;
+		last_ptr = this_ptr;
+	}
+	list_iterator_destroy(part_iterator);
+	list_destroy(part_rec_list);
 }
 
 
@@ -545,21 +565,24 @@ static void _swap_rows(struct part_row_data *a, struct part_row_data *b)
 /* sort the rows of a partition from "most allocated" to "least allocated" */
 extern void cr_sort_part_rows(struct part_res_record *p_ptr)
 {
-	uint32_t i, j, a, b;
+	uint32_t i, j, b;
+	uint32_t a[p_ptr->num_rows];
 
 	if (!p_ptr->row)
 		return;
 
 	for (i = 0; i < p_ptr->num_rows; i++) {
 		if (p_ptr->row[i].row_bitmap)
-			a = bit_set_count(p_ptr->row[i].row_bitmap);
+			a[i] = bit_set_count(p_ptr->row[i].row_bitmap);
 		else
-			a = 0;
+			a[i] = 0;
+	}
+	for (i = 0; i < p_ptr->num_rows; i++) {
 		for (j = i+1; j < p_ptr->num_rows; j++) {
-			if (!p_ptr->row[j].row_bitmap)
-				continue;
-			b = bit_set_count(p_ptr->row[j].row_bitmap);
-			if (b > a) {
+			if (a[j] > a[i]) {
+				b = a[j];
+				a[j] = a[i];
+				a[i] = b;
 				_swap_rows(&(p_ptr->row[i]), &(p_ptr->row[j]));
 			}
 		}
@@ -616,9 +639,7 @@ static void _build_row_bitmaps(struct part_res_record *p_ptr,
 	/* gather data */
 	num_jobs = 0;
 	for (i = 0; i < p_ptr->num_rows; i++) {
-		if (p_ptr->row[i].num_jobs) {
-			num_jobs += p_ptr->row[i].num_jobs;
-		}
+		num_jobs += p_ptr->row[i].num_jobs;
 	}
 	if (num_jobs == 0) {
 		size = bit_size(p_ptr->row[0].row_bitmap);
@@ -948,7 +969,10 @@ static int _job_expand(struct job_record *from_job_ptr,
 	bitstr_t *tmp_bitmap, *tmp_bitmap2;
 
 	xassert(from_job_ptr);
+	xassert(from_job_ptr->details);
 	xassert(to_job_ptr);
+	xassert(to_job_ptr->details);
+
 	if (from_job_ptr->job_id == to_job_ptr->job_id) {
 		error("select/cons_res: attempt to merge job %u with self",
 		      from_job_ptr->job_id);
@@ -1105,22 +1129,17 @@ static int _job_expand(struct job_record *from_job_ptr,
 	to_job_ptr->job_resrcs = new_job_resrcs_ptr;
 
 	to_job_ptr->cpu_cnt = to_job_ptr->total_cpus;
-	if (to_job_ptr->details) {
-		to_job_ptr->details->min_cpus = to_job_ptr->total_cpus;
-		to_job_ptr->details->max_cpus = to_job_ptr->total_cpus;
-	}
+	to_job_ptr->details->min_cpus = to_job_ptr->total_cpus;
+	to_job_ptr->details->max_cpus = to_job_ptr->total_cpus;
 	from_job_ptr->total_cpus   = 0;
 	from_job_resrcs_ptr->ncpus = 0;
-	if (from_job_ptr->details) {
-		from_job_ptr->details->min_cpus = 0;
-		from_job_ptr->details->max_cpus = 0;
-	}
+	from_job_ptr->details->min_cpus = 0;
+	from_job_ptr->details->max_cpus = 0;
 
 	from_job_ptr->total_nodes   = 0;
 	from_job_resrcs_ptr->nhosts = 0;
 	from_job_ptr->node_cnt      = 0;
-	if (from_job_ptr->details)
-		from_job_ptr->details->min_nodes = 0;
+	from_job_ptr->details->min_nodes = 0;
 	to_job_ptr->total_nodes     = new_job_resrcs_ptr->nhosts;
 	to_job_ptr->node_cnt        = new_job_resrcs_ptr->nhosts;
 
@@ -1263,7 +1282,7 @@ static int _rm_job_from_res(struct part_res_record *part_record_ptr,
 						p_ptr->row[i].job_list[j+1];
 				}
 				p_ptr->row[i].job_list[j] = NULL;
-				p_ptr->row[i].num_jobs -= 1;
+				p_ptr->row[i].num_jobs--;
 				/* found job - we're done */
 				n = 1;
 				i = p_ptr->num_rows;
@@ -1721,16 +1740,21 @@ top:	orig_map = bit_copy(save_bitmap);
 static time_t _guess_job_end(struct job_record * job_ptr, time_t now)
 {
 	time_t end_time;
+	uint16_t over_time_limit;
 
-	if (slurmctld_conf.over_time_limit == 0) {
-		end_time = job_ptr->end_time +
-			   slurmctld_conf.kill_wait;
-	} else if (slurmctld_conf.over_time_limit == (uint16_t) INFINITE) {
+	if (job_ptr->part_ptr &&
+	    (job_ptr->part_ptr->over_time_limit != NO_VAL16)) {
+		over_time_limit = job_ptr->part_ptr->over_time_limit;
+	} else {
+		over_time_limit = slurmctld_conf.over_time_limit;
+	}
+	if (over_time_limit == 0) {
+		end_time = job_ptr->end_time + slurmctld_conf.kill_wait;
+	} else if (over_time_limit == (uint16_t) INFINITE) {
 		end_time = now + (365 * 24 * 60 * 60);	/* one year */
 	} else {
-		end_time = job_ptr->end_time +
-			   slurmctld_conf.kill_wait +
-			   (slurmctld_conf.over_time_limit  * 60);
+		end_time = job_ptr->end_time + slurmctld_conf.kill_wait +
+			   (over_time_limit  * 60);
 	}
 	if (end_time <= now)
 		end_time = now + 1;
@@ -1815,18 +1839,26 @@ static int _will_run_test(struct job_record *job_ptr, bitstr_t *bitmap,
 
 	/* Build list of running and suspended jobs */
 	cr_job_list = list_create(NULL);
-	if (!cr_job_list)
-		fatal("list_create: memory allocation error");
 	job_iterator = list_iterator_create(job_list);
 	while ((tmp_job_ptr = (struct job_record *) list_next(job_iterator))) {
+		bool cleaning = _job_cleaning(tmp_job_ptr);
 		if (!IS_JOB_RUNNING(tmp_job_ptr) &&
 		    !IS_JOB_SUSPENDED(tmp_job_ptr) &&
-		    !_job_cleaning(tmp_job_ptr))
+		    !cleaning)
 			continue;
 		if (tmp_job_ptr->end_time == 0) {
-			if (!_job_cleaning(tmp_job_ptr)) {
-				error("Job %u has zero end_time",
-				      tmp_job_ptr->job_id);
+			if (!cleaning) {
+				error("%s: Active job %u has zero end_time",
+				      __func__, tmp_job_ptr->job_id);
+			}
+			continue;
+		}
+		if (tmp_job_ptr->node_bitmap == NULL) {
+			/* This should indicated a requeued job was cancelled
+			 * while NHC was running */
+			if (!cleaning) {
+				error("%s: Job %u has NULL node_bitmap",
+				      __func__, tmp_job_ptr->job_id);
 			}
 			continue;
 		}
@@ -1868,15 +1900,18 @@ static int _will_run_test(struct job_record *job_ptr, bitstr_t *bitmap,
 	 * pending job after each one (or a few jobs that end close in time). */
 	if ((rc != SLURM_SUCCESS) &&
 	    ((job_ptr->bit_flags & TEST_NOW_ONLY) == 0)) {
-		int time_window = 0;
+		int time_window = 30;
 		bool more_jobs = true;
+		DEF_TIMERS;
 		list_sort(cr_job_list, _cr_job_list_sort);
+		START_TIMER;
 		job_iterator = list_iterator_create(cr_job_list);
 		while (more_jobs) {
 			struct job_record *first_job_ptr = NULL;
 			struct job_record *last_job_ptr = NULL;
 			struct job_record *next_job_ptr = NULL;
 			int overlap, rm_job_cnt = 0;
+
 			while (true) {
 				tmp_job_ptr = list_next(job_iterator);
 				if (!tmp_job_ptr) {
@@ -1895,7 +1930,7 @@ static int _will_run_test(struct job_record *job_ptr, bitstr_t *bitmap,
 				last_job_ptr = tmp_job_ptr;
 				_rm_job_from_res(future_part, future_usage,
 						 tmp_job_ptr, 0);
-				if (rm_job_cnt++ > 20)
+				if (rm_job_cnt++ > 200)
 					break;
 				next_job_ptr = list_peek_next(job_iterator);
 				if (!next_job_ptr) {
@@ -1907,9 +1942,12 @@ static int _will_run_test(struct job_record *job_ptr, bitstr_t *bitmap,
 					break;
 				}
 			}
-			if (!last_job_ptr)
+			if (!last_job_ptr)	/* Should never happen */
 				break;
-			time_window += 60;
+			if (bf_window_scale)
+				time_window += bf_window_scale;
+			else
+				time_window *= 2;
 			rc = cr_job_test(job_ptr, bitmap, min_nodes,
 					 max_nodes, req_nodes,
 					 SELECT_MODE_WILL_RUN, tmp_cr_type,
@@ -1928,6 +1966,9 @@ static int _will_run_test(struct job_record *job_ptr, bitstr_t *bitmap,
 				}
 				break;
 			}
+			END_TIMER;
+			if (DELTA_TIMER >= 2000000)
+				break;	/* Quit after 2 seconds wall time */
 		}
 		list_iterator_destroy(job_iterator);
 	}
@@ -2099,10 +2140,24 @@ extern int select_p_node_init(struct node_record *node_ptr, int node_cnt)
 			      preempt_reorder_cnt);
 		}
 	}
+        if (sched_params &&
+            (tmp_ptr = strstr(sched_params, "bf_window_linear="))) {
+		bf_window_scale = atoi(tmp_ptr + 17);
+		if (bf_window_scale <= 0) {
+			fatal("Invalid SchedulerParameters bf_window_linear: %d",
+			      bf_window_scale);
+		}
+	} else
+		bf_window_scale = 0;
+
 	if (sched_params && strstr(sched_params, "pack_serial_at_end"))
 		pack_serial_at_end = true;
 	else
 		pack_serial_at_end = false;
+	if (sched_params && strstr(sched_params, "spec_cores_first"))
+		spec_cores_first = true;
+	else
+		spec_cores_first = false;
 	if (sched_params && strstr(sched_params, "bf_busy_nodes"))
 		backfill_busy_nodes = true;
 	else
@@ -3315,9 +3370,7 @@ extern bitstr_t * select_p_resv_test(resv_desc_msg_t *resv_desc_ptr,
 			_make_core_bitmap_filtered(switches_bitmap[i], 1);
 
 		if (*core_bitmap) {
-			bit_not(*core_bitmap);
-			bit_and(switches_core_bitmap[i], *core_bitmap);
-			bit_not(*core_bitmap);
+			bit_and_not(switches_core_bitmap[i], *core_bitmap);
 		}
 		bit_fmt(str, sizeof(str), switches_core_bitmap[i]);
 		switches_cpu_cnt[i] = bit_set_count(switches_core_bitmap[i]);
@@ -3379,7 +3432,7 @@ extern bitstr_t * select_p_resv_test(resv_desc_msg_t *resv_desc_ptr,
 	}
 #endif
 
-	/* Determine lowest level switch satifying request with best fit */
+	/* Determine lowest level switch satisfying request with best fit */
 	best_fit_inx = -1;
 	for (j = 0; j < switch_record_cnt; j++) {
 		if ((switches_node_cnt[j] < rem_nodes) ||
@@ -3605,4 +3658,27 @@ extern int *select_p_ba_get_dims(void)
 extern bitstr_t *select_p_ba_cnodelist2bitmap(char *cnodelist)
 {
 	return NULL;
+}
+
+extern int cr_cpus_per_core(struct job_details *details, int node_inx)
+{
+	uint16_t ncpus_per_core = 0xffff;	/* Usable CPUs per core */
+	uint16_t threads_per_core = select_node_record[node_inx].vpus;
+
+	if (details && details->mc_ptr) {
+		multi_core_data_t *mc_ptr = details->mc_ptr;
+		if ((mc_ptr->ntasks_per_core != (uint16_t) INFINITE) &&
+		    (mc_ptr->ntasks_per_core)) {
+			ncpus_per_core = MIN(threads_per_core,
+					     (mc_ptr->ntasks_per_core *
+					      details->cpus_per_task));
+		}
+		if ((mc_ptr->threads_per_core != (uint16_t) NO_VAL) &&
+		    (mc_ptr->threads_per_core <  ncpus_per_core)) {
+			ncpus_per_core = mc_ptr->threads_per_core;
+		}
+	}
+
+	threads_per_core = MIN(threads_per_core, ncpus_per_core);
+	return threads_per_core;
 }

@@ -7,7 +7,7 @@
  *  CODE-OCEC-09-009. All rights reserved.
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://slurm.schedmd.com/>.
+ *  For details, see <https://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -129,9 +129,6 @@ extern uint32_t slurmdb_setup_cluster_flags(void)
 
 static uint32_t _str_2_cluster_flags(char *flags_in)
 {
-	if (xstrcasestr(flags_in, "AIX"))
-		return CLUSTER_FLAG_AIX;
-
 	if (xstrcasestr(flags_in, "BGQ"))
 		return CLUSTER_FLAG_BGQ;
 
@@ -175,12 +172,6 @@ extern uint32_t slurmdb_str_2_cluster_flags(char *flags_in)
 extern char *slurmdb_cluster_flags_2_str(uint32_t flags_in)
 {
 	char *cluster_flags = NULL;
-
-	if (flags_in & CLUSTER_FLAG_AIX) {
-		if (cluster_flags)
-			xstrcat(cluster_flags, ",");
-		xstrcat(cluster_flags, "AIX");
-	}
 
 	if (flags_in & CLUSTER_FLAG_BG) {
 		if (cluster_flags)
@@ -226,7 +217,30 @@ extern char *slurmdb_cluster_flags_2_str(uint32_t flags_in)
 
 extern uint32_t slurmdb_setup_plugin_id_select(void)
 {
-	if (working_cluster_rec)
-		return working_cluster_rec->plugin_id_select;
 	return select_get_plugin_id();
+}
+
+extern void
+slurm_setup_remote_working_cluster(resource_allocation_response_msg_t *msg)
+{
+	xassert(msg);
+	xassert(msg->working_cluster_rec);
+	xassert(msg->node_list);
+	xassert(msg->node_addr);
+
+	if (working_cluster_rec)
+		slurmdb_destroy_cluster_rec(working_cluster_rec);
+
+	working_cluster_rec = (slurmdb_cluster_rec_t *)msg->working_cluster_rec;
+	msg->working_cluster_rec = NULL;
+
+	slurm_set_addr(&working_cluster_rec->control_addr,
+		       working_cluster_rec->control_port,
+		       working_cluster_rec->control_host);
+
+	if (setenvf(NULL, "SLURM_CLUSTER_NAME", "%s",
+		    working_cluster_rec->name) < 0)
+		error("unable to set SLURM_CLUSTER_NAME in environment");
+
+	add_remote_nodes_to_conf_tbls(msg->node_list, msg->node_addr);
 }

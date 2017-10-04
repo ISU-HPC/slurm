@@ -2,12 +2,12 @@
  *  proc_args.c - helper functions for command argument processing
  *****************************************************************************
  *  Copyright (C) 2007 Hewlett-Packard Development Company, L.P.
- *  Portions Copyright (C) 2010-2015 SchedMD LLC <http://www.schedmd.com>.
+ *  Portions Copyright (C) 2010-2015 SchedMD LLC <https://www.schedmd.com>.
  *  Written by Christopher Holmes <cholmes@hp.com>, who borrowed heavily
  *  from existing SLURM source code, particularly src/srun/opt.c
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://slurm.schedmd.com/>.
+ *  For details, see <https://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -68,6 +68,7 @@
 #include "src/common/list.h"
 #include "src/common/log.h"
 #include "src/common/proc_args.h"
+#include "src/common/slurm_protocol_api.h"
 #include "src/common/xmalloc.h"
 #include "src/common/xstring.h"
 
@@ -587,11 +588,7 @@ char * base_name(char* command)
 	return name;
 }
 
-/*
- * str_to_mbytes(): verify that arg is numeric with optional "K", "M", "G"
- * or "T" at end and return the number in mega-bytes
- */
-long str_to_mbytes(const char *arg)
+static long _str_to_mbtyes(const char *arg, int use_gbytes)
 {
 	long result;
 	char *endptr;
@@ -600,7 +597,9 @@ long str_to_mbytes(const char *arg)
 	result = strtol(arg, &endptr, 10);
 	if ((errno != 0) && ((result == LONG_MIN) || (result == LONG_MAX)))
 		result = -1;
-	else if (endptr[0] == '\0')
+	else if ((endptr[0] == '\0') && (use_gbytes == 1))  /* GB default */
+		result *= 1024;
+	else if (endptr[0] == '\0')	/* MB default */
 		;
 	else if ((endptr[0] == 'k') || (endptr[0] == 'K'))
 		result = (result + 1023) / 1024;	/* round up */
@@ -614,6 +613,36 @@ long str_to_mbytes(const char *arg)
 		result = -1;
 
 	return result;
+}
+
+/*
+ * str_to_mbytes(): verify that arg is numeric with optional "K", "M", "G"
+ * or "T" at end and return the number in mega-bytes. Default units are MB.
+ */
+long str_to_mbytes(const char *arg)
+{
+	return _str_to_mbtyes(arg, 0);
+}
+
+/*
+ * str_to_mbytes2(): verify that arg is numeric with optional "K", "M", "G"
+ * or "T" at end and return the number in mega-bytes. Default units are GB
+ * if "SchedulerParameters=default_gbytes" is configured, otherwise MB.
+ */
+long str_to_mbytes2(const char *arg)
+{
+	static int use_gbytes = -1;
+
+	if (use_gbytes == -1) {
+		char *sched_params = slurm_get_sched_params();
+		if (sched_params && strstr(sched_params, "default_gbytes"))
+			use_gbytes = 1;
+		else
+			use_gbytes = 0;
+		xfree(sched_params);
+	}
+
+	return _str_to_mbtyes(arg, use_gbytes);
 }
 
 /* Convert a string into a node count */
@@ -653,7 +682,7 @@ bool verify_node_count(const char *arg, int *min_nodes, int *max_nodes)
 
 	/* Does the string contain a "-" character?  If so, treat as a range.
 	 * otherwise treat as an absolute node count. */
-	if ((ptr = index(arg, '-')) != NULL) {
+	if ((ptr = xstrchr(arg, '-')) != NULL) {
 		min_str = xstrndup(arg, ptr-arg);
 		*min_nodes = _str_to_nodes(min_str, &leftover);
 		if (!xstring_is_whitespace(leftover)) {
@@ -828,12 +857,16 @@ bool verify_socket_core_thread_count(const char *arg, int *min_sockets,
 				     int *min_cores, int *min_threads,
 				     cpu_bind_type_t *cpu_bind_type)
 {
-	bool tmp_val,ret_val;
+	bool tmp_val, ret_val;
 	int i, j;
 	int max_sockets = 0, max_cores = 0, max_threads = 0;
 	const char *cur_ptr = arg;
 	char buf[3][48]; /* each can hold INT64_MAX - INT64_MAX */
 
+	if (!arg) {
+		error("%s: argument is NULL", __func__);
+		return false;
+	}
 	memset(buf, 0, sizeof(buf));
 	for (j = 0; j < 3; j++) {
 		for (i = 0; i < 47; i++) {
@@ -894,9 +927,9 @@ bool verify_hint(const char *arg, int *min_sockets, int *min_cores,
 		 cpu_bind_type_t *cpu_bind_type)
 {
 	char *buf, *p, *tok;
-	if (!arg) {
+
+	if (!arg)
 		return true;
-	}
 
 	buf = xstrdup(arg);
 	p = buf;
@@ -918,6 +951,7 @@ bool verify_hint(const char *arg, int *min_sockets, int *min_cores,
 "        memory_bound    use only one core in each socket\n"
 "        [no]multithread [don't] use extra threads with in-core multi-threading\n"
 "        help            show this help message\n");
+			xfree(buf);
 			return 1;
 		} else if (xstrcasecmp(tok, "compute_bound") == 0) {
 			*min_sockets = NO_VAL;
@@ -1389,25 +1423,24 @@ extern int parse_uint64(char *aval, uint64_t *ival)
  *  Get a decimal integer from arg.
  *
  *  Returns the integer on success, exits program on failure.
- *
  */
 extern int parse_int(const char *name, const char *val, bool positive)
 {
 	char *p = NULL;
-	int result = 0;
+	long int result = 0;
 
 	if (val)
 		result = strtol(val, &p, 10);
 
-	if ((p == NULL) || (p[0] != '\0') || (result < 0L)
-	||  (positive && (result <= 0L))) {
+	if ((p == NULL) || (p[0] != '\0') || (result < 0L) ||
+	    (positive && (result <= 0L))) {
 		error ("Invalid numeric value \"%s\" for %s.", val, name);
 		exit(1);
-	} else if (result > INT_MAX) {
-		error ("Numeric argument (%d) to big for %s.", result, name);
+	} else if (result == LONG_MAX) {
+		error ("Numeric argument (%ld) to big for %s.", result, name);
 		exit(1);
-	} else if (result < INT_MIN) {
-		error ("Numeric argument %d to small for %s.", result, name);
+	} else if (result == LONG_MIN) {
+		error ("Numeric argument (%ld) to small for %s.", result, name);
 		exit(1);
 	}
 
@@ -1674,6 +1707,12 @@ parse_resv_flags(const char *flagstr, const char *msg)
 			/* "-OVERLAP" is not supported since that's the
 			 * default behavior and the option only applies
 			 * for reservation creation, not updates */
+		} else if (strncasecmp(curr, "Flex", MAX(taglen,1)) == 0) {
+			curr += taglen;
+			if (flip)
+				outflags |= RESERVE_FLAG_NO_FLEX;
+			else
+				outflags |= RESERVE_FLAG_FLEX;
 		} else if (strncasecmp(curr, "Ignore_Jobs", MAX(taglen,1))
 			   == 0) {
 			curr += taglen;
@@ -1687,6 +1726,18 @@ parse_resv_flags(const char *flagstr, const char *msg)
 				outflags |= RESERVE_FLAG_NO_DAILY;
 			else
 				outflags |= RESERVE_FLAG_DAILY;
+		} else if (strncasecmp(curr, "Weekday", MAX(taglen,1)) == 0) {
+			curr += taglen;
+			if (flip)
+				outflags |= RESERVE_FLAG_NO_WEEKDAY;
+			else
+				outflags |= RESERVE_FLAG_WEEKDAY;
+		} else if (strncasecmp(curr, "Weekend", MAX(taglen,1)) == 0) {
+			curr += taglen;
+			if (flip)
+				outflags |= RESERVE_FLAG_NO_WEEKEND;
+			else
+				outflags |= RESERVE_FLAG_WEEKEND;
 		} else if (strncasecmp(curr, "Weekly", MAX(taglen,1)) == 0) {
 			curr += taglen;
 			if (flip)
@@ -1762,6 +1813,8 @@ uint16_t parse_compress_type(const char *arg)
 		return COMPRESS_ZLIB;
 	else if (!strcasecmp(arg, "lz4"))
 		return COMPRESS_LZ4;
+	else if (!strcasecmp(arg, "none"))
+		return COMPRESS_OFF;
 
 	error("Compression type '%s' unknown, disabling compression support.",
 	      arg);

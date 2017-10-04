@@ -5,7 +5,7 @@
  *  Written by Aline Roy <aline.roy@cea.fr>
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://slurm.schedmd.com/>.
+ *  For details, see <https://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -40,6 +40,10 @@
 #include <inttypes.h>
 
 #include "src/slurmctld/slurmctld.h"
+
+#define MCS_SELECT_NOSELECT		0x00
+#define MCS_SELECT_ONDEMANDSELECT	0x01
+#define MCS_SELECT_SELECT		0x02
 
 extern int slurm_mcs_init(void);
 extern int slurm_mcs_fini(void);

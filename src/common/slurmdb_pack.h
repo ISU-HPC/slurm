@@ -7,7 +7,7 @@
  *  CODE-OCEC-09-009. All rights reserved.
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://slurm.schedmd.com/>.
+ *  For details, see <https://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -56,11 +56,12 @@ extern void slurmdb_pack_coord_rec(void *in,
 				   uint16_t protocol_version, Buf buffer);
 extern int slurmdb_unpack_coord_rec(void **object, uint16_t protocol_version,
 				    Buf buffer);
-extern void pack_cluster_accounting_rec(void *in,
-					uint16_t protocol_version, Buf buffer);
-extern int unpack_cluster_accounting_rec(void **object,
-					 uint16_t protocol_version,
-					 Buf buffer);
+extern void slurmdb_pack_cluster_accounting_rec(void *in,
+						uint16_t protocol_version,
+						Buf buffer);
+extern int slurmdb_unpack_cluster_accounting_rec(void **object,
+						 uint16_t protocol_version,
+						 Buf buffer);
 extern void slurmdb_pack_clus_res_rec(void *in,
 				      uint16_t protocol_version, Buf buffer);
 extern int slurmdb_unpack_clus_res_rec(void **object, uint16_t protocol_version,

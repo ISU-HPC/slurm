@@ -3,14 +3,14 @@
  *****************************************************************************
  *  Copyright (C) 2002-2007 The Regents of the University of California.
  *  Copyright (C) 2008-2010 Lawrence Livermore National Security.
- *  Portions Copyright (C) 2010-2015 SchedMD LLC <http://www.schedmd.com>
+ *  Portions Copyright (C) 2010-2015 SchedMD LLC <https://www.schedmd.com>
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Mark Grondona <grondona1@llnl.gov>,
  *    Christopher J. Morrone <morrone2@llnl.gov>, et. al.
  *  CODE-OCEC-09-009. All rights reserved.
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://slurm.schedmd.com/>.
+ *  For details, see <https://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -56,7 +56,6 @@
 #  define SYSTEM_DIMENSIONS 1
 #endif
 
-
 typedef struct sbatch_options {
 	char *clusters;		/* cluster to run this on. */
 	char *progname;		/* argv[0] of this program or   */
@@ -81,9 +80,13 @@ typedef struct sbatch_options {
 	int cores_per_socket;	/* --cores-per-socket=n		*/
 	uint32_t job_flags;	/* --kill_invalid_dep, --gres-flags */
 	int threads_per_core;	/* --threads-per-core=n		*/
+	bool threads_per_core_set;/* --threads-per-core set explicitly set */
 	int ntasks_per_node;	/* --ntasks-per-node=n		*/
 	int ntasks_per_socket;	/* --ntasks-per-socket=n	*/
 	int ntasks_per_core;	/* --ntasks-per-core=n		*/
+	int ntasks_per_core_set; /* true if ntasks-per-core explicitly set */
+	char *hint_env;		/* SLURM_HINT env var setting	*/
+	bool hint_set;		/* --hint set explicitly set	*/
 	mem_bind_type_t mem_bind_type; /* --mem_bind=		*/
 	char *mem_bind;		/* binding map for map/mask_mem	*/
 	bool extra_set;		/* true if extra node info explicitly set */
@@ -139,6 +142,7 @@ typedef struct sbatch_options {
 	int64_t realmem;	/* --mem=n			*/
 	long tmpdisk;		/* --tmp=n			*/
 	char *constraints;	/* --constraints=, -C constraint*/
+	char *c_constraints;	/* --cluster-constraints=       */
 	char *gres;		/* --gres			*/
 	bool contiguous;	/* --contiguous			*/
 	char *nodelist;		/* --nodelist=node1,node2,...	*/
@@ -188,11 +192,31 @@ typedef struct sbatch_options {
 	char *mcs_label;	/* mcs label if mcs plugin in use */
 	time_t deadline;	/* ---deadline                  */
 	uint32_t delay_boot;	/* --delay-boot			*/
+	uint16_t x11;		/* --x11			*/
+	char *x11_magic_cookie;	/* cookie retrieved from xauth */
+	/* no x11_target_host here, alloc_host will be equivalent */
+	uint16_t x11_target_port; /* target display TCP port on localhost */
 } opt_t;
 
+typedef struct sbatch_env_opts {
+	uint32_t cpus_per_task;
+	char *   dist;
+	char *   dist_lllp;
+	char *   mem_bind;
+	char *   mem_bind_sort;
+	char *   mem_bind_verbose;
+	uint32_t ntasks;
+	uint32_t ntasks_per_core;
+	uint32_t ntasks_per_node;
+	uint32_t ntasks_per_socket;
+	uint32_t plane_size;
+} sbatch_env_t;
+
 extern opt_t opt;
-extern int error_exit;
-extern int ignore_pbs;
+extern sbatch_env_t pack_env;
+extern int   error_exit;
+extern int   ignore_pbs;
+extern bool  is_pack_job;
 
 /*
  * process_options_first_pass()
@@ -209,16 +233,25 @@ extern int ignore_pbs;
  * line, otherwise return NULL (in which case the script will need to be read
  * from standard input).
  */
-char *process_options_first_pass(int argc, char **argv);
+extern char *process_options_first_pass(int argc, char **argv);
 
 /* process options:
  * 1. update options with option set in the script
  * 2. update options with env vars
  * 3. update options with commandline args
  * 4. perform some verification that options are reasonable
+ *
+ * argc IN - Count of elements in argv
+ * argv IN - Array of elements to parse
+ * argc_off OUT - Offset of first non-parsable element
+ * pack_inx IN - pack job component ID, zero origin
+ * more_packs OUT - more packs job specifications in script to process
  */
-int process_options_second_pass(int argc, char *argv[], const char *file,
-				const void *script_body, int script_size);
+extern void process_options_second_pass(int argc, char **argv, int *argc_off,
+					int pack_inx, bool *more_packs,
+					const char *file,
+					const void *script_body,
+					int script_size);
 
 /* external functions available for SPANK plugins to modify the environment
  * exported to the SLURM Prolog and Epilog programs */
@@ -227,4 +260,8 @@ extern int   spank_set_job_env(const char *name, const char *value,
 			       int overwrite);
 extern int   spank_unset_job_env(const char *name);
 
+
+extern void init_envs(sbatch_env_t *local_env);
+extern void set_envs(char ***array_ptr, sbatch_env_t *local_env,
+		     int pack_offset);
 #endif	/* _HAVE_OPT_H */

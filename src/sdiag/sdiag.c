@@ -5,7 +5,7 @@
  *  Written by Alejandro Lucero <alucero@bsc.es>
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://slurm.schedmd.com/>.
+ *  For details, see <https://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -64,9 +64,9 @@ static void _sort_rpc(void);
 
 stats_info_request_msg_t req;
 
-extern void parse_command_line(int argc, char *argv[]);
+extern void parse_command_line(int argc, char **argv);
 
-int main(int argc, char *argv[])
+int main(int argc, char **argv)
 {
 	int rc = 0;
 

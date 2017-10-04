@@ -7,7 +7,7 @@
  *  CODE-OCEC-09-009. All rights reserved.
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://slurm.schedmd.com/>.
+ *  For details, see <https://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -82,7 +82,7 @@ int waitpid_timeout (const char *name, pid_t pid, int *pstatus, int timeout)
 			killpg(pid, SIGKILL);
 			options = 0;
 		} else {
-			poll(NULL, 0, delay);
+			(void) poll(NULL, 0, delay);
 			timeout_ms -= delay;
 			delay = MIN (timeout_ms, MIN(max_delay, delay*2));
 		}

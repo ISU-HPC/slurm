@@ -34,7 +34,7 @@
  *  CODE-OCEC-09-009. All rights reserved.
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://slurm.schedmd.com/>.
+ *  For details, see <https://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -91,7 +91,6 @@
 #define	bit_set_count_range	slurm_bit_set_count_range
 #define	bit_clear_count		slurm_bit_clear_count
 #define	bit_nset_max_count	slurm_bit_nset_max_count
-#define	bit_and_set_count	slurm_bit_and_set_count
 #define	bit_rotate_copy		slurm_bit_rotate_copy
 #define	bit_rotate		slurm_bit_rotate
 #define	bit_fmt			slurm_bit_fmt
@@ -198,12 +197,6 @@
 #define	log_fp			slurm_log_fp
 #define	log_has_data		slurm_log_has_data
 #define	log_flush		slurm_log_flush
-#define	dump_cleanup_list	slurm_dump_cleanup_list
-#define	fatal_add_cleanup	slurm_fatal_add_cleanup
-#define	fatal_add_cleanup_job	slurm_fatal_add_cleanup_job
-#define	fatal_remove_cleanup	slurm_fatal_remove_cleanup
-#define	fatal_remove_cleanup_job slurm_fatal_remove_cleanup_job
-#define	fatal_cleanup		slurm_fatal_cleanup
 #define	fatal			slurm_fatal
 #define	error			slurm_error
 #define	info			slurm_info
@@ -220,7 +213,6 @@
 
 /* net.[ch] functions */
 #define net_stream_listen	slurm_net_stream_listen
-#define net_accept_stream	slurm_net_accept_stream
 #define net_set_low_water	slurm_net_set_low_water
 
 /* pack.[ch] functions */
@@ -275,6 +267,7 @@
 #define env_array_append_fmt	slurm_env_array_append_fmt
 #define env_array_overwrite	slurm_env_array_overwrite
 #define env_array_overwrite_fmt slurm_env_array_overwrite_fmt
+#define env_array_overwrite_pack_fmt  slurm_env_array_overwrite_pack_fmt
 
 /* read_config.[ch] functions */
 #define destroy_config_key_pair	slurm_destroy_config_key_pair
@@ -323,6 +316,7 @@
 #define xstring_is_whitespace   slurm_xstring_is_whitespace
 #define	xstrtolower		slurm_xstrtolower
 #define xstrchr			slurm_xstrchr
+#define xstrrchr		slurm_xstrrchr
 #define xstrcmp			slurm_xstrcmp
 #define xstrcasecmp		slurm_xstrcasecmp
 #define xstrcasestr		slurm_xstrcasestr
@@ -351,9 +345,11 @@
 #define reservation_flags_string slurm_reservation_flags_string
 
 /* slurmdbd_defs.[ch] functions */
-#define slurmdbd_free_list_msg	slurmdb_slurmdbd_free_list_msg
-#define slurmdbd_free_usage_msg slurmdb_slurmdbd_free_usage_msg
-#define slurmdbd_free_id_rc_msg slurmdb_slurmdbd_free_id_rc_msg
+#define slurmdbd_defs_init      slurm_slurmdbd_defs_init
+#define slurmdbd_defs_fini      slurm_slurmdbd_defs_fini
+#define slurmdbd_free_list_msg	slurm_slurmdbd_free_list_msg
+#define slurmdbd_free_usage_msg slurm_slurmdbd_free_usage_msg
+#define slurmdbd_free_id_rc_msg slurm_slurmdbd_free_id_rc_msg
 
 /* plugin.[ch] functions */
 #define plugin_get_syms         slurm_plugin_get_syms
@@ -388,6 +384,7 @@
 #define s_p_get_long		slurm_s_p_get_long
 #define s_p_get_uint16		slurm_s_p_get_uint16
 #define s_p_get_uint32		slurm_s_p_get_uint32
+#define s_p_get_uint64		slurm_s_p_get_uint64
 #define s_p_get_pointer		slurm_s_p_get_pointer
 #define s_p_get_array		slurm_s_p_get_array
 #define s_p_get_boolean		slurm_s_p_get_boolean
@@ -423,6 +420,7 @@
 #define stepd_connect			slurm_stepd_connect
 #define stepd_get_uid			slurm_stepd_get_uid
 #define stepd_add_extern_pid		slurm_stepd_add_extern_pid
+#define stepd_get_x11_display		slurm_stepd_get_x11_display
 
 
 #endif /* USE_ALIAS */

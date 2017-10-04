@@ -6,7 +6,7 @@
  *  Written by Marlys Kohnke
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://slurm.schedmd.com/>.
+ *  For details, see <https://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -86,8 +86,7 @@ typedef struct {
 #define CRAY_ERR(fmt, ...) error("(%s: %d: %s) "fmt, THIS_FILE, __LINE__, \
 				 __FUNCTION__, ##__VA_ARGS__);
 
-extern void ccm_get_config();
-extern void spawn_ccm_thread(void *obj_ptr, void *(*start_routine) (void *));
+extern void ccm_get_config(void);
 extern int ccm_check_partitions(struct job_record *job_ptr);
 extern void *ccm_begin(void *args);
 extern void *ccm_fini(void *args);

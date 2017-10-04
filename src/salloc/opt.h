@@ -9,7 +9,7 @@
  *  CODE-OCEC-09-009. All rights reserved.
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://slurm.schedmd.com/>.
+ *  For details, see <https://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -60,7 +60,7 @@
 typedef enum {BELL_NEVER, BELL_AFTER_DELAY, BELL_ALWAYS} bell_flag_t;
 
 typedef struct salloc_options {
-
+	char *clusters;		/* cluster to run this on. */
 	char *progname;		/* argv[0] of this program or
 				 * configuration file if multi_prog */
 	char* user;		/* local username		*/
@@ -79,9 +79,13 @@ typedef struct salloc_options {
 	int sockets_per_node;	/* --sockets-per-node=n		*/
 	int cores_per_socket;	/* --cores-per-socket=n		*/
 	int threads_per_core;	/* --threads-per-core=n		*/
+	bool threads_per_core_set;/* --threads-per-core set explicitly set */
 	int ntasks_per_node;	/* --ntasks-per-node=n		*/
 	int ntasks_per_socket;	/* --ntasks-per-socket=n	*/
 	int ntasks_per_core;	/* --ntasks-per-core=n		*/
+	bool ntasks_per_core_set; /* --ntasks-per-core set explicitly set */
+	char *hint_env;		/* SLURM_HINT env var setting	*/
+	bool hint_set;		/* --hint set explicitly set	*/
 	mem_bind_type_t mem_bind_type; /* --mem_bind=		*/
 	char *mem_bind;		/* binding map for map/mask_mem	*/
 	bool extra_set;		/* true if extra node info explicitly set */
@@ -97,6 +101,7 @@ typedef struct salloc_options {
 				 * when -m plane=<# of lllp per
 				 * plane> */
 	char *job_name;		/* --job-name=,     -J name	*/
+	bool default_job_name;	/* Set if no command or job name specified */
 	unsigned int jobid;	/* --jobid=jobid		*/
 	char *dependency;	/* --dependency, -P type:jobid	*/
 	int nice;		/* --nice			*/
@@ -127,6 +132,7 @@ typedef struct salloc_options {
 	int64_t realmem;	/* --mem=n			*/
 	long tmpdisk;		/* --tmp=n			*/
 	char *constraints;	/* --constraints=, -C constraint*/
+	char *c_constraints;	/* --cluster-constraints=       */
 	char *gres;		/* --gres			*/
 	bool contiguous;	/* --contiguous			*/
 	char *nodelist;		/* --nodelist=node1,node2,...	*/
@@ -170,19 +176,26 @@ typedef struct salloc_options {
 	time_t deadline;	/* --deadline                   */
 	uint32_t job_flags;	/* --kill_invalid_dep, --gres-flags */
 	uint32_t delay_boot;	/* --delay-boot			*/
+	uint16_t x11;           /* --x11                        */
+	char *x11_magic_cookie; /* cookie retrieved from xauth */
+	/* no x11_target_host here, alloc_host will be equivalent */
+	uint16_t x11_target_port; /* target display TCP port on localhost */
 } opt_t;
 
 extern opt_t opt;
 extern int error_exit;		/* exit code for slurm errors */
-extern int immediate_exit;	/* exit code for --imediate option & busy */
+extern int immediate_exit;	/* exit code for --immediate option & busy */
 
 /* process options:
  * 1. set defaults
  * 2. update options with env vars
  * 3. update options with commandline args
  * 4. perform some verification that options are reasonable
- */
-int initialize_and_process_args(int argc, char *argv[]);
+ *
+ * argc IN - Count of elements in argv
+ * argv IN - Array of elements to parse
+ * argc_off OUT - Offset of first non-parsable element  */
+extern int initialize_and_process_args(int argc, char **argv, int *argc_off);
 
 /* set options based upon commandline args */
 void set_options(const int argc, char **argv);

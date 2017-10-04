@@ -5,7 +5,7 @@
  *  Written by Matthieu Hautreux <matthieu.hautreux@cea.fr>
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://slurm.schedmd.com/>.
+ *  For details, see <https://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -76,8 +76,6 @@ static void _clear_slurm_cgroup_conf(slurm_cgroup_conf_t *slurm_cgroup_conf)
 	if (slurm_cgroup_conf) {
 		slurm_cgroup_conf->cgroup_automount = false ;
 		xfree(slurm_cgroup_conf->cgroup_mountpoint);
-		xfree(slurm_cgroup_conf->cgroup_subsystems);
-		xfree(slurm_cgroup_conf->cgroup_release_agent);
 		xfree(slurm_cgroup_conf->cgroup_prepend);
 		slurm_cgroup_conf->constrain_cores = false ;
 		slurm_cgroup_conf->task_affinity = false ;
@@ -87,6 +85,9 @@ static void _clear_slurm_cgroup_conf(slurm_cgroup_conf_t *slurm_cgroup_conf)
 		slurm_cgroup_conf->min_ram_space = XCGROUP_DEFAULT_MIN_RAM;
 		slurm_cgroup_conf->constrain_swap_space = false ;
 		slurm_cgroup_conf->constrain_kmem_space = false ;
+		slurm_cgroup_conf->allowed_kmem_space = -1;
+		slurm_cgroup_conf->max_kmem_percent = 100;
+		slurm_cgroup_conf->min_kmem_space = XCGROUP_DEFAULT_MIN_RAM;
 		slurm_cgroup_conf->allowed_swap_space = 0 ;
 		slurm_cgroup_conf->max_swap_percent = 100 ;
 		slurm_cgroup_conf->memlimit_enforcement = 0 ;
@@ -135,7 +136,6 @@ extern int read_slurm_cgroup_conf(slurm_cgroup_conf_t *slurm_cgroup_conf)
 	s_p_options_t options[] = {
 		{"CgroupAutomount", S_P_BOOLEAN},
 		{"CgroupMountpoint", S_P_STRING},
-		{"CgroupSubsystems", S_P_STRING},
 		{"CgroupReleaseAgentDir", S_P_STRING},
 		{"ConstrainCores", S_P_BOOLEAN},
 		{"TaskAffinity", S_P_BOOLEAN},
@@ -145,16 +145,18 @@ extern int read_slurm_cgroup_conf(slurm_cgroup_conf_t *slurm_cgroup_conf)
 		{"MinRAMSpace", S_P_UINT64},
 		{"ConstrainSwapSpace", S_P_BOOLEAN},
 		{"ConstrainKmemSpace", S_P_BOOLEAN},
+		{"AllowedKmemSpace", S_P_STRING},
+		{"MaxKmemPercent", S_P_STRING},
+		{"MinKmemSpace", S_P_UINT64},
 		{"AllowedSwapSpace", S_P_STRING},
 		{"MaxSwapPercent", S_P_STRING},
-		{"ConstrainCores", S_P_BOOLEAN},
 		{"MemoryLimitEnforcement", S_P_BOOLEAN},
 		{"MemoryLimitThreshold", S_P_STRING},
 		{"ConstrainDevices", S_P_BOOLEAN},
 		{"AllowedDevicesFile", S_P_STRING},
 		{NULL} };
 	s_p_hashtbl_t *tbl = NULL;
-	char *conf_path = NULL;
+	char *conf_path = NULL, *tmp_str;
 	struct stat buf;
 
 	/* Set initial values */
@@ -187,13 +189,10 @@ extern int read_slurm_cgroup_conf(slurm_cgroup_conf_t *slurm_cgroup_conf)
 			slurm_cgroup_conf->cgroup_mountpoint =
 				xstrdup(DEFAULT_CGROUP_BASEDIR);
 
-		s_p_get_string(&slurm_cgroup_conf->cgroup_subsystems,
-			       "CgroupSubsystems", tbl);
-		s_p_get_string(&slurm_cgroup_conf->cgroup_release_agent,
-			       "CgroupReleaseAgentDir", tbl);
-		if (! slurm_cgroup_conf->cgroup_release_agent)
-			slurm_cgroup_conf->cgroup_release_agent =
-				xstrdup("/etc/slurm/cgroup");
+		if (s_p_get_string(&tmp_str, "CgroupReleaseAgentDir", tbl)) {
+			xfree(tmp_str);
+			debug("Ignoring obsolete CgroupReleaseAgentDir option.");
+		}
 
 		/* cgroup prepend directory */
 #ifndef MULTIPLE_SLURMD
@@ -232,6 +231,17 @@ extern int read_slurm_cgroup_conf(slurm_cgroup_conf_t *slurm_cgroup_conf)
 			slurm_cgroup_conf->constrain_kmem_space = true;
 
 		conf_get_float (tbl,
+				"AllowedKmemSpace",
+				&slurm_cgroup_conf->allowed_kmem_space);
+
+		conf_get_float (tbl,
+				"MaxKmemPercent",
+				&slurm_cgroup_conf->max_kmem_percent);
+
+		(void) s_p_get_uint64 (&slurm_cgroup_conf->min_kmem_space,
+				       "MinKmemSpace", tbl);
+
+		conf_get_float (tbl,
 				"AllowedSwapSpace",
 				&slurm_cgroup_conf->allowed_swap_space);
 
@@ -239,8 +249,8 @@ extern int read_slurm_cgroup_conf(slurm_cgroup_conf_t *slurm_cgroup_conf)
 				"MaxSwapPercent",
 				&slurm_cgroup_conf->max_swap_percent);
 
-		s_p_get_uint64 (&slurm_cgroup_conf->min_ram_space,
-		                "MinRAMSpace", tbl);
+		(void) s_p_get_uint64 (&slurm_cgroup_conf->min_ram_space,
+				      "MinRAMSpace", tbl);
 
 		/* Memory limits */
 		if (!s_p_get_boolean(&slurm_cgroup_conf->memlimit_enforcement,
@@ -260,7 +270,8 @@ extern int read_slurm_cgroup_conf(slurm_cgroup_conf_t *slurm_cgroup_conf)
                                "AllowedDevicesFile", tbl);
                 if (! slurm_cgroup_conf->allowed_devices_file)
                         slurm_cgroup_conf->allowed_devices_file =
-                                xstrdup("/etc/slurm/cgroup_allowed_devices_file.conf");
+				get_extra_conf_path(
+					"cgroup_allowed_devices_file.conf");
 
 		s_p_hashtbl_destroy(tbl);
 	}

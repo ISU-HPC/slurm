@@ -1,10 +1,15 @@
-.TH srun "1" "Slurm Commands" "March 2016" "Slurm Commands"
+.TH srun "1" "Slurm Commands" "June 2017" "Slurm Commands"
 
 .SH "NAME"
 srun \- Run parallel jobs
 
 .SH "SYNOPSIS"
-\fBsrun\fR [\fIOPTIONS\fR...]  \fIexecutable \fR[\fIargs\fR...]
+\fBsrun\fR [\fIOPTIONS(0)\fR...] \fR[ : \fR[\fIOPTIONS(n)\fR...]\fR] \fIexecutable(0) \fR[\fIargs(0)\fR...]
+
+Option(s) define multiple jobs in a co-scheduled heterogeneous job.
+For more details about heterogeneous jobs see the document
+.br
+http://slurm.schedmd.com/heterogeneous_jobs.html
 
 .SH "DESCRIPTION"
 Run a parallel job on cluster managed by Slurm.  If necessary, srun will
@@ -13,7 +18,7 @@ first create a resource allocation in which to run the parallel job.
 The following document describes the influence of various options on the
 allocation of cpus to jobs and tasks.
 .br
-http://slurm.schedmd.com/cpu_management.html
+https://slurm.schedmd.com/cpu_management.html
 
 .SH "OPTIONS"
 .LP
@@ -103,17 +108,14 @@ applications having less than 10,000 tasks. This option applies job allocations.
 
 .TP
 \fB\-B\fR \fB\-\-extra\-node\-info\fR=<\fIsockets\fR[:\fIcores\fR[:\fIthreads\fR]]>
-Request a specific allocation of resources with details as to the
-number and type of computational resources within a cluster:
-number of sockets (or physical processors) per node,
-cores per socket, and threads per core.
-The total amount of resources being requested is the product of all of
-the terms.
+Restrict node selection to nodes with at least the specified number of
+sockets, cores per socket and/or threads per core.
+NOTE: These options do not specify the resource allocation size.
 Each value specified is considered a minimum.
 An asterisk (*) can be used as a placeholder indicating that all available
-resources of that type are to be utilized.
-As with nodes, the individual levels can also be specified in separate
-options if desired:
+resources of that type are to be utilized. Values can also be specified as
+min-max. The individual levels can also be specified in separate options if
+desired:
 .nf
     \fB\-\-sockets\-per\-node\fR=<\fIsockets\fR>
     \fB\-\-cores\-per\-socket\fR=<\fIcores\fR>
@@ -214,6 +216,12 @@ The default value is the current working directory.
 Checkpoint files will be of the form "<job_id>.ckpt" for jobs
 and "<job_id>.<step_id>.ckpt" for job steps. This option applies to job and
 step allocations.
+
+.TP
+\fB\-\-cluster\-constraint\fR=<\fIlist\fR>
+Specifies features that a federated cluster must have to have a sibling job
+submitted to it. Slurm will attempt to submit a sibling job to a cluster if it
+has at least one of the specified features.
 
 .TP
 \fB\-\-comment\fR=<\fIstring\fR>
@@ -382,6 +390,9 @@ with '0x' in which case they interpreted as hexadecimal values.
 If the number of tasks (or ranks) exceeds the number of elements in this list,
 elements in the list will be reused as needed starting from the beginning of
 the list.
+To simplify support for large task counts, the lists may follow a map with an
+asterisk and repetition count
+For example "map_cpu:0x0f*4,0xf0*4".
 Not supported unless the entire node is allocated to the job.
 .TP
 .B mask_cpu:<list>
@@ -393,6 +404,9 @@ first mask specified in the list, etc.).
 CPU masks are \fBalways\fR interpreted as hexadecimal values but can be
 preceded with an optional '0x'. Not supported unless the entire node is
 allocated to the job.
+To simplify support for large task counts, the lists may follow a map with an
+asterisk and repetition count
+For example "mask_cpu:0x0f*4,0xf0*4".
 Not supported unless the entire node is allocated to the job.
 .TP
 .B rank_ldom
@@ -597,7 +611,7 @@ This option applies only to job allocations.
 
 .TP
 \fB\-\-delay\-boot\fR=<\fIminutes\fR>
-Do not reboot nodes in order to satified this job's feature specification if
+Do not reboot nodes in order to satisfied this job's feature specification if
 the job has been eligible to run for less than this time period.
 If the job has waited for less than the specified period, it will use only
 nodes which already have the specified features.
@@ -667,7 +681,7 @@ relative path to the directory where the command is executed. This
 option applies to job allocations.
 
 .TP
-\fB\-e\fR, \fB\-\-error\fR=<\fImode\fR>
+\fB\-e\fR, \fB\-\-error\fR=<\fIfilename pattern\fR>
 Specify how stderr is to be redirected. By default in interactive mode,
 .B srun
 redirects stderr to the same file as stdout, if one is specified. The
@@ -716,7 +730,7 @@ shell invoked on the allocated node. If that shell is not invoked with the
 \fB\-\-exclusive\fR option, then it may create a job step with four tasks
 using the \fB\-\-exclusive\fR option and not conflict with the remote shell's
 resource allocation.
-Use the \fB\-\-exclusive\fR option to invoke every job step to insure distinct
+Use the \fB\-\-exclusive\fR option to invoke every job step to ensure distinct
 resources for each step.
 
 Note that all CPUs allocated to a job are available
@@ -910,6 +924,17 @@ Multiple license names should be comma separated (e.g.
 "\-\-licenses=foo:4,bar"). This option applies to job allocations.
 
 .TP
+\fB\-M\fR, \fB\-\-clusters\fR=<\fIstring\fR>
+Clusters to issue commands to.  Multiple cluster names may be comma separated.
+The job will be submitted to the one cluster providing the earliest expected
+job initiation time. The default value is the current cluster. A value of
+\(aq\fIall\fR' will query to run on all clusters.  Note the
+\fB\-\-export\fR option to control environment variables exported
+between clusters.
+This option applies only to job allocations.
+Note that the SlurmDBD must be up for this option to work properly.
+
+.TP
 .na
 \fB\-m\fR, \fB\-\-distribution\fR=
 \fI*\fR|\fIblock\fR|\fIcyclic\fR|\fIarbitrary\fR|\fIplane=<options>
@@ -932,7 +957,7 @@ configured. The default value for each distribution type is specified by *.
 
 Note that with select/cons_res, the number of CPUs allocated on each
 socket and node may be different. Refer to
-http://slurm.schedmd.com/mc_support.html
+https://slurm.schedmd.com/mc_support.html
 for more information on resource allocation, distribution of tasks to
 nodes, and binding of tasks to CPUs.
 .RS
@@ -974,11 +999,11 @@ distributed to each node is the same as for cyclic distribution, but the
 taskids assigned to each node depend on the plane size. For more
 details (including examples and diagrams), please see
 .br
-http://slurm.schedmd.com/mc_support.html
+https://slurm.schedmd.com/mc_support.html
 .br
 and
 .br
-http://slurm.schedmd.com/dist_plane.html
+https://slurm.schedmd.com/dist_plane.html
 .TP
 .B arbitrary
 The arbitrary method of distribution will allocate processes in\-order
@@ -994,6 +1019,11 @@ will be laid out on the nodes in the order of the file.
 controls the nodes to be allocated to the job and not the allocation of
 CPUs on those nodes. This option is meant primarily to control a job step's
 task layout in an existing job allocation for the srun command.
+.br
+\fBNOTE:\fR If number of tasks is given and a list of requested nodes is also
+given the number of nodes used from that list will be reduced to match that of
+the number of tasks if the number of nodes in the list is greater than the
+number of tasks.
 
 .TP
 Second distribution method (distribution of CPUs across sockets for binding):
@@ -1087,8 +1117,10 @@ Default value is calculated by the Plugin mcs if it's enabled. This option
 applies to job allocations.
 
 .TP
-\fB\-\-mem\fR=<\fIMB\fR>
-Specify the real memory required per node in megabytes.
+\fB\-\-mem\fR=<\fIsize[units]\fR>
+Specify the real memory required per node.
+Default units are megabytes unless the SchedulerParameters configuration
+parameter includes the "default_gbytes" option for gigabytes.
 Different units can be specified using the suffix [K|M|G|T].
 Default value is \fBDefMemPerNode\fR and the maximum value is
 \fBMaxMemPerNode\fR. If configured, both of parameters can be
@@ -1116,8 +1148,10 @@ the next periodic accounting sample.
 This option applies to job and step allocations.
 
 .TP
-\fB\-\-mem\-per\-cpu\fR=<\fIMB\fR>
-Minimum memory required per allocated CPU in megabytes.
+\fB\-\-mem\-per\-cpu\fR=<\fIsize[units]\fR>
+Minimum memory required per allocated CPU.
+Default units are megabytes unless the SchedulerParameters configuration
+parameter includes the "default_gbytes" option for gigabytes.
 Different units can be specified using the suffix [K|M|G|T].
 Default value is \fBDefMemPerCPU\fR and the maximum value is \fBMaxMemPerCPU\fR
 (see exception below). If configured, both of parameters can be
@@ -1151,7 +1185,7 @@ at the level of the cores within a processor while memory binding will
 be performed at the level of nodes, where the definition of "nodes"
 may differ from system to system.
 By default no memory binding is performed; any task using any CPU can use
-any memory. This option is typically used to insure that each task is bound to
+any memory. This option is typically used to ensure that each task is bound to
 the memory closest to it's assigned CPU. \fBThe use of any type other than
 "none" or "local" is not recommended.\fR
 If you want greater control, try running a simple test code with the
@@ -1166,9 +1200,11 @@ The following informational environment variables are set when
 \fB\-\-mem_bind\fR is in use:
 
 .nf
-	SLURM_MEM_BIND_VERBOSE
-	SLURM_MEM_BIND_TYPE
 	SLURM_MEM_BIND_LIST
+	SLURM_MEM_BIND_PREFER
+	SLURM_MEM_BIND_SORT
+	SLURM_MEM_BIND_TYPE
+	SLURM_MEM_BIND_VERBOSE
 .fi
 
 See the \fBENVIRONMENT VARIABLES\fR section for a more detailed description
@@ -1177,17 +1213,8 @@ of the individual SLURM_MEM_BIND* variables.
 Supported options include:
 .RS
 .TP
-.B q[uiet]
-quietly bind before task runs (default)
-.TP
-.B v[erbose]
-verbosely report binding before task runs
-.TP
-.B no[ne]
-don't bind tasks to memory (default)
-.TP
-.B rank
-bind by task rank (not recommended)
+.B help
+show this help message
 .TP
 .B local
 Use memory local to the processor in use
@@ -1203,6 +1230,9 @@ with '0x' in which case they interpreted as hexadecimal values.
 If the number of tasks (or ranks) exceeds the number of elements in this list,
 elements in the list will be reused as needed starting from the beginning of
 the list.
+To simplify support for large task counts, the lists may follow a map with an
+asterisk and repetition count
+For example "map_mem:0x0f*4,0xf0*4".
 Not supported unless the entire node is allocated to the job.
 .TP
 .B mask_mem:<list>
@@ -1217,10 +1247,33 @@ with [0-9] so they are seen as numerical values.
 If the number of tasks (or ranks) exceeds the number of elements in this list,
 elements in the list will be reused as needed starting from the beginning of
 the list.
+To simplify support for large task counts, the lists may follow a mask with an
+asterisk and repetition count
+For example "mask_mem:0*4,1*4".
 Not supported unless the entire node is allocated to the job.
 .TP
-.B help
-show this help message
+.B no[ne]
+don't bind tasks to memory (default)
+.TP
+.B nosort
+avoid sorting free cache pages (default, LaunchParameters configuration
+parameter can override this default)
+.TP
+.B p[refer]
+Prefer use of first specified NUMA node, but permit
+ use of other available NUMA nodes.
+.TP
+.B q[uiet]
+quietly bind before task runs (default)
+.TP
+.B rank
+bind by task rank (not recommended)
+.TP
+.B sort
+sort free cache pages (run zonesort on Intel KNL nodes)
+.TP
+.B v[erbose]
+verbosely report binding before task runs
 .TP
 This option applies to job and step allocations.
 .RE
@@ -1245,21 +1298,6 @@ procedures.
 .TP
 .B list
 Lists available mpi types to choose from.
-.TP
-.B lam
-Initiates one 'lamd' process per node and establishes necessary
-environment variables for LAM/MPI.
-.TP
-.B mpich1_shmem
-Initiates one process per node and establishes necessary
-environment variables for mpich1 shared memory model.
-This also works for mvapich built for shared memory.
-.TP
-.B mpichgm
-For use with Myrinet.
-.TP
-.B mvapich
-For use with Infiniband.
 .TP
 .B openmpi
 For use with OpenMPI.
@@ -1325,6 +1363,10 @@ behavior is to allocate enough nodes to satisfy the requirements of
 the \fB\-n\fR and \fB\-c\fR options.
 The job will be allocated as many nodes as possible within the range specified
 and without delaying the initiation of the job.
+If number of tasks is given and a number of requested nodes is also given the
+number of nodes used from that request will be reduced to match that of the
+number of tasks if the number of nodes in the request is greater than the number
+of tasks.
 The node count specification may include a numeric value followed by a suffix
 of "k" (multiplies numeric value by 1,024) or "m" (multiplies numeric value by
 1,048,576). This option applies to job and step allocations.
@@ -1491,8 +1533,6 @@ Run the job with an adjusted scheduling priority within Slurm. With no
 adjustment value the scheduling priority is decreased by 100. A negative nice
 value increases the priority, otherwise decreases it. The adjustment range is
 +/\- 2147483645. Only privileged users can specify a negative adjustment.
-NOTE: This option is presently ignored if \fISchedulerType=sched/wiki\fR or
-\fISchedulerType=sched/wiki2\fR.
 
 .TP
 \fB\-\-ntasks\-per\-core\fR=<\fIntasks\fR>
@@ -1556,13 +1596,14 @@ defined in the file \fIslurm.h\fR and is not a variable, it is set at
 Slurm build time.
 
 .TP
-\fB\-o\fR, \fB\-\-output\fR=<\fImode\fR>
-Specify the mode for stdout redirection. By default in interactive mode,
+\fB\-o\fR, \fB\-\-output\fR=<\fIfilename pattern\fR>
+Specify the "\fIfilename pattern\fR" for stdout redirection. By default in
+interactive mode,
 .B srun
 collects stdout from all tasks and sends this output via TCP/IP to
 the attached terminal. With \fB\-\-output\fR stdout may be redirected
 to a file, to one file per task, or to /dev/null. See section
-\fBIO Redirection\fR below for the various forms of \fImode\fR.
+\fBIO Redirection\fR below for the various forms of \fIfilename pattern\fR.
 If the specified file already exists, it will be overwritten.
 .br
 
@@ -1575,6 +1616,16 @@ option applies to job and step allocations.
 Open the output and error files using append or truncate mode as specified.
 The default value is specified by the system configuration parameter
 \fIJobFileAppend\fR. This option applies to job allocations.
+
+.TP
+\fB\-\-pack\-group\fR=<\fIexpr\fR>
+Identify each job in a heterogeneous (pack) job allocation for which a step is
+to be created. Applies only to srun commands issued inside a salloc allocation
+or sbatch script.
+\fR<\fIexpr\fR> is a set of integers corresponding to one or more options
+indexes on the salloc or sbatch command line.
+Examples: "\-\-pack\-group=2", "\-\-pack\-group=0,4", "\-\-pack\-group=1,3\-5".
+The default value is \-\-pack\-group=0.
 
 .TP
 \fB\-p\fR, \fB\-\-partition\fR=<\fIpartition_names\fR>
@@ -1707,24 +1758,24 @@ in that situation).
 This option applies to step allocations.
 
 .TP
-\fB\-Q\fR, \fB\-\-quiet\fR
-Suppress informational messages from srun. Errors will still be displayed. This
-option applies to job and step allocations.
-
-.TP
-\fB\-q\fR, \fB\-\-quit\-on\-interrupt\fR
-Quit immediately on single SIGINT (Ctrl\-C). Use of this option
-disables the status feature normally available when \fBsrun\fR receives
-a single Ctrl\-C and causes \fBsrun\fR to instead immediately terminate the
-running job. This option applies to step allocations.
-
-.TP
-\fB\-\-qos\fR=<\fIqos\fR>
+\fB\-q\fR, \fB\-\-qos\fR=<\fIqos\fR>
 Request a quality of service for the job.  QOS values can be defined
 for each user/cluster/account association in the Slurm database.
 Users will be limited to their association's defined set of qos's when
 the Slurm configuration parameter, AccountingStorageEnforce, includes
 "qos" in it's definition. This option applies to job allocations.
+
+.TP
+\fB\-Q\fR, \fB\-\-quiet\fR
+Suppress informational messages from srun. Errors will still be displayed. This
+option applies to job and step allocations.
+
+.TP
+\fB\-\-quit\-on\-interrupt\fR
+Quit immediately on single SIGINT (Ctrl\-C). Use of this option
+disables the status feature normally available when \fBsrun\fR receives
+a single Ctrl\-C and causes \fBsrun\fR to instead immediately terminate the
+running job. This option applies to step allocations.
 
 .TP
 \fB\-r\fR, \fB\-\-relative\fR=<\fIn\fR>
@@ -1748,12 +1799,13 @@ This is only supported with some system configurations and will otherwise be
 silently ignored. This option applies to job allocations.
 
 .TP
-\fB\-\-resv\-ports\fR
+\fB\-\-resv\-ports\fR[=\fIcount\fR]
 Reserve communication ports for this job. Users can specify the number
 of port they want to reserve. The parameter MpiParams=ports=12000-12999
-must be specified in \fIslurm.conf\fR. If not specified the default reserve
-number of ports equal to the number of tasks. If the number of reserved ports
-is zero no ports is reserved.
+must be specified in \fIslurm.conf\fR. If not specified and Slurm's OpenMPI
+plugin is used, then by default the number of reserved equal to the highest
+number of tasks on any node in the job step allocation.
+If the number of reserved ports is zero then no ports is reserved.
 Used for OpenMPI. This option applies to job and step allocations.
 
 .TP
@@ -1845,6 +1897,7 @@ task/affinity plugin is enabled. This option applies to job allocations.
 \fB\-\-spread\-job\fR
 Spread the job allocation over as many nodes as possible and attempt to
 evenly distribute tasks across the allocated nodes.
+This option disables the topology/tree plugin.
 This option applies to job allocations.
 
 .TP
@@ -1861,6 +1914,9 @@ Acceptable time formats include "minutes", "minutes:seconds",
 The job's maximum time delay may be limited by the system administrator using
 the \fBSchedulerParameters\fR configuration parameter with the
 \fBmax_switch_wait\fR parameter option.
+On a dragonfly network the only switch count supported is 1 since communication
+performance will be highest when a job is allocate resources on one leaf switch
+or more than 2 leaf switches.
 The default max\-time is the max_switch_wait SchedulerParameters. This option
 applies to job allocations.
 
@@ -1953,9 +2009,12 @@ Acceptable time formats include "minutes", "minutes:seconds",
 "days\-hours:minutes:seconds". This option applies to job allocations.
 
 .TP
-\fB\-\-tmp\fR=<\fIMB\fR>
-Specify a minimum amount of temporary disk space. This option applies to job
-allocations.
+\fB\-\-tmp\fR=<\fIsize[units]\fR>
+Specify a minimum amount of temporary disk space per node.
+Default units are megabytes unless the SchedulerParameters configuration
+parameter includes the "default_gbytes" option for gigabytes.
+Different units can be specified using the suffix [K|M|G|T].
+This option applies to job allocations.
 
 .TP
 \fB\-u\fR, \fB\-\-unbuffered\fR
@@ -2000,7 +2059,7 @@ Specify how long to wait after the first task terminates before terminating
 all remaining tasks. A value of 0 indicates an unlimited wait (a warning will
 be issued after 60 seconds). The default value is set by the WaitTime
 parameter in the slurm configuration file (see \fBslurm.conf(5)\fR). This
-option can be useful to insure that a job is terminated in a timely fashion
+option can be useful to ensure that a job is terminated in a timely fashion
 in the event that one or more tasks terminate prematurely.
 Note: The \fB\-K\fR, \fB\-\-kill\-on\-bad\-exit\fR option takes precedence
 over \fB\-W\fR, \fB\-\-wait\fR to terminate the job immediately if a task
@@ -2019,8 +2078,11 @@ by the supplied host list, additional resources will be allocated on other
 nodes as needed.
 Rather than repeating a host name multiple times, an asterisk and
 a repetition count may be appended to a host name. For example
-"host1,host1" and "host1*2" are equivalent. This option applies to job and step
-allocations.
+"host1,host1" and "host1*2" are equivalent. If number of tasks is given and a
+list of requested nodes is also given the number of nodes used from that list
+will be reduced to match that of the number of tasks if the number of nodes in
+the list is greater than the number of tasks. This option applies to job and
+step allocations.
 
 .TP
 \fB\-\-wckey\fR=<\fIwckey\fR>
@@ -2216,8 +2278,8 @@ that runs \fBsrun\fR.  Depending on the cluster's file system layout,
 this may result in the output appearing in different places depending
 on whether the job is run in batch mode.
 .TP
-\fBformat string\fR
-\fBsrun\fR allows for a format string to be used to generate the
+\fBfilename pattern\fR
+\fBsrun\fR allows for a filename pattern to be used to generate the
 named IO file
 described above. The following list of format specifiers may be
 used in the format string to generate a filename that will be
@@ -2263,6 +2325,9 @@ separate IO file per task.
 .TP
 \fB%u\fR
 User name.
+.TP
+\fB%x\fR
+Job name.
 .PP
 A number placed between the percent character and format specifier may be
 used to zero\-pad the result in the IO filename. This number is ignored if
@@ -2356,6 +2421,9 @@ Same as \fB\-\-compress\fR
 .TP
 \fBSLURM_CONN_TYPE\fR
 Same as \fB\-\-conn\-type\fR
+.TP
+\fBSLURM_CONSTRAINT\fR
+Same as \fB\-C\fR, \fB\-\-constraint\fR
 .TP
 \fBSLURM_CORE_SPEC\fR
 Same as \fB\-\-core\-spec\fR
@@ -2604,6 +2672,10 @@ of the executing tasks on the remote compute nodes.
 These environment variables are:
 
 .TP 22
+\fBSLURM_*_PACK_GROUP_#\fR
+For a heterogenous job allocation, the environment variables are set separately
+for each component.
+.TP
 \fBSLURM_CHECKPOINT_IMAGE_DIR\fR
 Directory into which checkpoint images should be written
 if specified on the execute line.
@@ -2688,14 +2760,20 @@ initiated (where the srun command ran from).
 Node local task ID for the process within a job.
 
 .TP
-\fBSLURM_MEM_BIND_VERBOSE\fR
-\-\-mem_bind verbosity (quiet,verbose).
+\fBSLURM_MEM_BIND_LIST\fR
+\-\-mem_bind map or mask list (<list of IDs or masks for this node>).
+.TP
+\fBSLURM_MEM_BIND_PREFER\fR
+\-\-mem_bind prefer (prefer).
+.TP
+\fBSLURM_MEM_BIND_SORT\fR
+Sort free cache pages (run zonesort on Intel KNL nodes).
 .TP
 \fBSLURM_MEM_BIND_TYPE\fR
 \-\-mem_bind type (none,rank,map_mem:,mask_mem:).
 .TP
-\fBSLURM_MEM_BIND_LIST\fR
-\-\-mem_bind map or mask list (<list of IDs or masks for this node>).
+\fBSLURM_MEM_BIND_VERBOSE\fR
+\-\-mem_bind verbosity (quiet,verbose).
 
 .TP
 \fBSLURM_NNODES\fR
@@ -2717,6 +2795,9 @@ List of nodes allocated to the job.
 .TP
 \fBSLURM_NTASKS\fR (and \fBSLURM_NPROCS\fR for backwards compatibility)
 Total number of processes in the current job.
+.TP
+\fBSLURM_PACK_SIZE\fR
+Set to count of components in heterogeneous job.
 .TP
 \fBSLURM_PRIO_PROCESS\fR
 The scheduling priority (nice value) at the time of job submission.
@@ -2828,21 +2909,21 @@ There are three fundamentally different modes of operation used
 by these various MPI implementation.
 
 1. Slurm directly launches the tasks and performs initialization
-of communications (Quadrics MPI, MPICH2, MPICH-GM, MVAPICH, MVAPICH2
-and some MPICH1 modes). For example: "srun \-n16 a.out".
+of communications through the PMI2 or PMIx APIs.
+For example: "srun \-n16 a.out".
 
 2. Slurm creates a resource allocation for the job and then
-mpirun launches tasks using Slurm's infrastructure (OpenMPI,
-LAM/MPI, HP-MPI and some MPICH1 modes).
+mpirun launches tasks using Slurm's infrastructure (OpenMPI).
 
 3. Slurm creates a resource allocation for the job and then
 mpirun launches tasks using some mechanism other than Slurm,
-such as SSH or RSH (BlueGene MPI and some MPICH1 modes).
-These tasks initiated outside of Slurm's monitoring
+such as SSH or RSH.
+These tasks are initiated outside of Slurm's monitoring
 or control. Slurm's epilog should be configured to purge
-these tasks when the job's allocation is relinquished.
+these tasks when the job's allocation is relinquished,
+or the use of pam_slurm_adopt is highly recommended.
 
-See \fIhttp://slurm.schedmd.com/mpi_guide.html\fR
+See \fIhttps://slurm.schedmd.com/mpi_guide.html\fR
 for more information on use of these various MPI implementation
 with Slurm.
 
@@ -2968,7 +3049,7 @@ STEPID     PARTITION     USER      TIME NODELIST
 
 .fi
 .PP
-This example demonstrates how one executes a simple MPICH job.
+This example demonstrates how one executes a simple MPI job.
 We use \fBsrun\fR to build a list of machines (nodes) to be used by
 \fBmpirun\fR in its required format. A sample command line and
 the script to be executed follow.
@@ -2979,7 +3060,7 @@ the script to be executed follow.
 #!/bin/sh
 MACHINEFILE="nodes.$SLURM_JOB_ID"
 
-# Generate Machinefile for mpich such that hosts are in the same
+# Generate Machinefile for mpi such that hosts are in the same
 #  order as if run via srun
 #
 srun \-l /bin/hostname | sort \-n | awk '{print $2}' > $MACHINEFILE
@@ -3042,6 +3123,15 @@ srun \-\-exclusive \-n1 prog4 &
 wait
 .fi
 
+.PP
+This example shows how to launch an application called "master" with one task,
+8 CPUs and and 16 GB of memory (2 GB per CPU) plus another application called
+"slave" with 16 tasks, 1 CPU per task (the default) and 1 GB of memory per task.
+
+.nf
+
+> srun \-n1 \-c16 \-\-mem\-per\-cpu=1gb master : \-n16 \-\-mem\-per\-cpu=1gb slave
+.fi
 
 .SH "COPYING"
 Copyright (C) 2006\-2007 The Regents of the University of California.
@@ -3052,7 +3142,7 @@ Copyright (C) 2008\-2010 Lawrence Livermore National Security.
 Copyright (C) 2010\-2015 SchedMD LLC.
 .LP
 This file is part of Slurm, a resource management program.
-For details, see <http://slurm.schedmd.com/>.
+For details, see <https://slurm.schedmd.com/>.
 .LP
 Slurm is free software; you can redistribute it and/or modify it under
 the terms of the GNU General Public License as published by the Free

@@ -2,11 +2,11 @@
  **  mpi_pmix.c - Main plugin callbacks for PMIx support in SLURM
  *****************************************************************************
  *  Copyright (C) 2014-2015 Artem Polyakov. All rights reserved.
- *  Copyright (C) 2015      Mellanox Technologies. All rights reserved.
+ *  Copyright (C) 2015-2017 Mellanox Technologies. All rights reserved.
  *  Written by Artem Y. Polyakov <artpol84@gmail.com, artemp@mellanox.com>.
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://slurm.schedmd.com/>.
+ *  For details, see <https://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -85,6 +85,8 @@ const char plugin_type[] = "mpi/pmix_v2";
 
 const uint32_t plugin_version = SLURM_VERSION_NUMBER;
 
+#include "pmixp_dconn_ucx.h"
+
 /*
  * init() is called when the plugin is loaded, before any other functions
  * are called.  Put global initialization here.
@@ -145,8 +147,8 @@ int p_mpi_hook_slurmstepd_task(const mpi_plugin_task_info_t *job, char ***env)
 				*value = '\0';
 				value++;
 				env_array_overwrite(env,
-						(const char *)tmp_env[i],
-						value);
+						    (const char *)tmp_env[i],
+						    value);
 			}
 			free(tmp_env[i]);
 		}
@@ -159,27 +161,39 @@ int p_mpi_hook_slurmstepd_task(const mpi_plugin_task_info_t *job, char ***env)
 mpi_plugin_client_state_t *p_mpi_hook_client_prelaunch(
 		const mpi_plugin_client_info_t *job, char ***env)
 {
-	char *mapping = NULL;
+	static pthread_mutex_t setup_mutex = PTHREAD_MUTEX_INITIALIZER;
+	static pthread_cond_t setup_cond  = PTHREAD_COND_INITIALIZER;
+	static char *mapping = NULL;
+	static bool setup_done = false;
+	uint32_t nnodes, ntasks, **tids;
+	uint16_t *task_cnt;
+
 	PMIXP_DEBUG("setup process mapping in srun");
-	uint32_t nnodes = job->step_layout->node_cnt;
-	uint32_t ntasks = job->step_layout->task_cnt;
-	uint16_t *task_cnt = job->step_layout->tasks;
-	uint32_t **tids = job->step_layout->tids;
-	mapping = pack_process_mapping(nnodes, ntasks, task_cnt, tids);
+	if ((job->pack_jobid == NO_VAL) || (job->pack_jobid == job->jobid)) {
+		nnodes = job->step_layout->node_cnt;
+		ntasks = job->step_layout->task_cnt;
+		task_cnt = job->step_layout->tasks;
+		tids = job->step_layout->tids;
+		mapping = pack_process_mapping(nnodes, ntasks, task_cnt, tids);
+		slurm_mutex_lock(&setup_mutex);
+		setup_done = true;
+		slurm_cond_broadcast(&setup_cond);
+		slurm_mutex_unlock(&setup_mutex);
+	} else {
+		slurm_mutex_lock(&setup_mutex);
+		while (!setup_done)
+			slurm_cond_wait(&setup_cond, &setup_mutex);
+		slurm_mutex_unlock(&setup_mutex);
+	}
+
 	if (NULL == mapping) {
 		PMIXP_ERROR("Cannot create process mapping");
 		return NULL;
 	}
 	setenvf(env, PMIXP_SLURM_MAPPING_ENV, "%s", mapping);
-	xfree(mapping);
 
 	/* only return NULL on error */
 	return (void *)0xdeadbeef;
-}
-
-int p_mpi_hook_client_single_task_per_node(void)
-{
-	return false;
 }
 
 int p_mpi_hook_client_fini(void)

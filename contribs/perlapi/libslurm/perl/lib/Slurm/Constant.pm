@@ -244,7 +244,7 @@ This package export constants for use with Slurm. This includes enumerations and
 
 =item * CR_CORE_DEFAULT_DIST_BLOCK 0x1000
 
-=item * MEM_PER_CPU                0x80000000
+=item * MEM_PER_CPU                0x8000000000000000
 
 =item * SHARED_FORCE               0x8000
 
@@ -383,18 +383,6 @@ This package export constants for use with Slurm. This includes enumerations and
 =item * DEBUG_FLAG_GANG            0x00002000
 
 =item * DEBUG_FLAG_RESERVATION     0x00004000
-
-=back
-
-=head3 Group cache
-
-=over 2
-
-=item * GROUP_FORCE                0x8000
-
-=item * GROUP_CACHE                0x4000
-
-=item * GROUP_TIME_MASK            0x0fff
 
 =back
 

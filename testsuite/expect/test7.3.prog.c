@@ -11,7 +11,7 @@
  *  CODE-OCEC-09-009. All rights reserved.
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://slurm.schedmd.com/>.
+ *  For details, see <https://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -98,8 +98,8 @@ int main (int argc, char *argv[])
 		while ((job_resp->node_list == NULL) ||
 		       (strlen(job_resp->node_list) == 0)) {
 			sleep(5);
-			if (slurm_allocation_lookup_lite(job_resp->job_id,
-							 &job_resp) &&
+			if (slurm_allocation_lookup(job_resp->job_id,
+						    &job_resp) &&
 			    (slurm_get_errno() != ESLURM_JOB_PENDING)) {
 				slurm_perror("slurm_confirm_allocation");
 				exit(0);
@@ -162,7 +162,7 @@ int main (int argc, char *argv[])
 	launch->mpi_plugin_name = "none"; /* Don't try to use PMI */
 	launch->cpus_per_task = 1;
 
-	if (slurm_step_launch(ctx, launch, NULL) != SLURM_SUCCESS) {
+	if (slurm_step_launch(ctx, launch, NULL, -1) != SLURM_SUCCESS) {
 		slurm_perror("slurm_step_launch");
 		rc = 1;
 		goto done;

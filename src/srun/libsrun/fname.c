@@ -7,7 +7,7 @@
  *  CODE-OCEC-09-009. All rights reserved.
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://slurm.schedmd.com/>.
+ *  For details, see <https://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -59,9 +59,10 @@ static char *_is_path_escaped(char *);
 /*
  * Fill in as much of filename as possible from srun, update
  * filename type to one of the io types ALL, NONE, PER_TASK, ONE
+ * These options should mirror those used with "sbatch" (parsed in
+ * _batch_path_check found in src/slurmd/common/fname.c)
  */
-fname_t *
-fname_create(srun_job_t *job, char *format)
+extern fname_t *fname_create(srun_job_t *job, char *format, int task_count)
 {
 	unsigned int wid     = 0;
 	unsigned long int taskid  = 0;
@@ -99,7 +100,7 @@ fname_create(srun_job_t *job, char *format)
 	}
 
 	taskid = strtoul(format, &p, 10);
-	if ((*p == '\0') && ((int) taskid < opt.ntasks)) {
+	if ((*p == '\0') && ((int) taskid < task_count)) {
 		fname->type   = IO_ONE;
 		fname->taskid = (uint32_t) taskid;
 		/* Set the name string to pass to slurmd
@@ -213,6 +214,11 @@ fname_create(srun_job_t *job, char *format)
 				tmp_perc = NULL;
 				q = p;
 				p++;
+				break;
+			case 'x':
+				xmemcat(name, q, p - 1);
+				xstrfmtcat(name, "%s", getenv("SLURM_JOB_NAME"));
+				q = ++p;
 				break;
 			default:
 				break;

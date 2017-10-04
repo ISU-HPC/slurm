@@ -4,10 +4,10 @@
  *
  *  Usage: "capmc_resume <hostlist> [features]"
  *****************************************************************************
- *  Copyright (C) 2016 SchedMD LLC.
+ *  Copyright (C) 2016-2017 SchedMD LLC.
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://slurm.schedmd.com/>.
+ *  For details, see <https://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -98,6 +98,7 @@ static s_p_options_t knl_conf_file_options[] = {
 	{"AllowMCDRAM", S_P_STRING},
 	{"AllowNUMA", S_P_STRING},
 	{"AllowUserBoot", S_P_STRING},
+	{"BootTime", S_P_UINT32},
 	{"CapmcPath", S_P_STRING},
 	{"CapmcPollFreq", S_P_UINT32},
 	{"CapmcRetries", S_P_UINT32},
@@ -106,7 +107,9 @@ static s_p_options_t knl_conf_file_options[] = {
 	{"DefaultMCDRAM", S_P_STRING},
 	{"DefaultNUMA", S_P_STRING},
 	{"LogFile", S_P_STRING},
+	{"McPath", S_P_STRING},
 	{"SyscfgPath", S_P_STRING},
+	{"UmeCheckInterval", S_P_UINT32},
 	{NULL}
 };
 
@@ -314,7 +317,7 @@ static char *_node_names_2_nid_list(char *node_names)
 	return nid_list;
 }
 
-/* Attempt to shutdown all nodes in a single capmc call.
+/* Attempt to modify modes and reboot nodes in a single capmc call.
  * RET 0 on success, -1 on failure */
 static int _update_all_nodes(char *host_list)
 {
@@ -557,7 +560,7 @@ int main(int argc, char *argv[])
 		xfree(features);
 	}
 
-	/* Attempt to update and restart all nodes in a single capmc call */
+	/* Attempt to update modes and restart nodes in a single capmc call */
 	node_bitmap = bit_alloc(100000);
 	if (_update_all_nodes(argv[1]) != 0) {
 		/* Could not reboot nodes.
@@ -586,7 +589,7 @@ int main(int argc, char *argv[])
 	xfree(mcdram_mode);
 	xfree(numa_mode);
 
-	if ((argc == 3) && !syscfg_path) {
+	if (argc == 3) {
 		slurm_init_update_node_msg(&node_msg);
 		node_msg.node_names = argv[1];
 		node_msg.features_act = argv[2];

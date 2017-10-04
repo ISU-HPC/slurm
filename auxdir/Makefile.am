@@ -4,11 +4,11 @@
 
 EXTRA_DIST = \
     ax_check_zlib.m4 \
+    ax_gcc_builtin.m4 \
     ax_lib_hdf5.m4 \
     ax_pthread.m4 \
     slurm.m4 \
     test-driver \
-    type_socklen_t.m4 \
     x_ac__system_configuration.m4 \
     x_ac_affinity.m4 \
     x_ac_blcr.m4 \
@@ -35,4 +35,6 @@ EXTRA_DIST = \
     x_ac_readline.m4 \
     x_ac_setproctitle.m4 \
     x_ac_sgi_job.m4 \
-    x_ac_slurm_ssl.m4
+    x_ac_slurm_ssl.m4 \
+    x_ac_systemd.m4 \
+    x_ac_uid_gid_size.m4

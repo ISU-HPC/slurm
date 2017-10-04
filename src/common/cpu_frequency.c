@@ -8,7 +8,7 @@
  *  intel_pstate support
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://slurm.schedmd.com/>.
+ *  For details, see <https://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -53,6 +53,7 @@
 #include "src/common/log.h"
 #include "src/common/slurm_protocol_api.h"
 #include "src/common/slurm_protocol_defs.h"
+#include "src/common/strlcpy.h"
 #include "src/common/xmalloc.h"
 #include "src/common/xstring.h"
 #include "src/common/read_config.h"
@@ -72,6 +73,8 @@
 static uint16_t cpu_freq_count = 0;
 static uint32_t cpu_freq_govs = 0; /* Governors allowed. */
 static uint64_t debug_flags = NO_VAL; /* init value for slurmd, slurmstepd */
+static int set_batch_freq = -1;
+
 static struct cpu_freq_data {
 	uint8_t  avail_governors;
 	uint8_t  nfreq;
@@ -424,6 +427,19 @@ cpu_freq_cpuset_validate(stepd_step_rec_t *job)
 	char *cpu_str;
 	char *savestr = NULL;
 
+	if (set_batch_freq == -1) {
+		char *launch_params = slurm_get_launch_params();
+		if (xstrcasestr(launch_params, "batch_step_set_cpu_freq"))
+			set_batch_freq = 1;
+		else
+			set_batch_freq = 0;
+		xfree(launch_params);
+	}
+
+	if (((job->stepid == SLURM_BATCH_SCRIPT) && !set_batch_freq) ||
+	    (job->stepid == SLURM_EXTERN_CONT))
+		return;
+
 	debug_flags = slurm_get_debug_flags(); /* init for slurmstepd */
 	if (debug_flags & DEBUG_FLAG_CPU_FREQ) {
 		info("cpu_freq_cpuset_validate: request: min=(%12d  %8x) "
@@ -508,6 +524,19 @@ cpu_freq_cgroup_validate(stepd_step_rec_t *job, char *step_alloc_cores)
 	uint16_t end    = USHRT_MAX;
 	uint16_t cpuidx =  0;
 	char *core_range;
+
+	if (set_batch_freq == -1) {
+		char *launch_params = slurm_get_launch_params();
+		if (xstrcasestr(launch_params, "batch_step_set_cpu_freq"))
+			set_batch_freq = 1;
+		else
+			set_batch_freq = 0;
+		xfree(launch_params);
+	}
+
+	if (((job->stepid == SLURM_BATCH_SCRIPT) && !set_batch_freq) ||
+	    (job->stepid == SLURM_EXTERN_CONT))
+		return;
 
 	debug_flags = slurm_get_debug_flags(); /* init for slurmstepd */
 	if (debug_flags & DEBUG_FLAG_CPU_FREQ) {
@@ -845,7 +874,7 @@ uint32_t
 _cpu_freq_freqspec_num(uint32_t cpu_freq, int cpuidx)
 {
 	int fx, j;
-	if (!cpufreq || (cpufreq[cpuidx].nfreq == (uint8_t) NO_VAL))
+	if (!cpufreq || !cpufreq[cpuidx].nfreq)
 		return NO_VAL;
 	/* assume the frequency list is in ascending order */
 	if (cpu_freq & CPU_FREQ_RANGE_FLAG) {	/* Named values */
@@ -874,19 +903,37 @@ _cpu_freq_freqspec_num(uint32_t cpu_freq, int cpuidx)
 			return NO_VAL;
 		}
 	}		
-	for (j = 0; j < cpufreq[cpuidx].nfreq; j++) {
+
+	/* check for request above or below available values */
+	if (cpu_freq < cpufreq[cpuidx].avail_freq[0]) {
+		error("Rounding requested frequency %d "
+		      "up to lowest available %d", cpu_freq,
+		      cpufreq[cpuidx].avail_freq[0]);
+		return cpufreq[cpuidx].avail_freq[0];
+	} else if (cpufreq[cpuidx].avail_freq[cpufreq[cpuidx].nfreq - 1]
+		   < cpu_freq) {
+		error("Rounding requested frequency %d "
+		      "down to highest available %d", cpu_freq,
+		      cpufreq[cpuidx].avail_freq[cpufreq[cpuidx].nfreq - 1]);
+		return cpufreq[cpuidx].avail_freq[cpufreq[cpuidx].nfreq - 1];
+	}
+
+	/* check for frequency, round up if no exact match */
+	for (j = 0; j < cpufreq[cpuidx].nfreq; ) {
 		if (cpu_freq == cpufreq[cpuidx].avail_freq[j]) {
 			return cpufreq[cpuidx].avail_freq[j];
 		}
-		if (j > 0) {
-			if ((cpu_freq > cpufreq[cpuidx].avail_freq[j-1]) &&
-			    (cpu_freq < cpufreq[cpuidx].avail_freq[j])) {
-				return cpufreq[cpuidx].avail_freq[j];
-			}
+		j++; 	/* step up to next element to round up *
+			 * safe to advance due to bounds checks above here */
+		if (cpu_freq < cpufreq[cpuidx].avail_freq[j]) {
+			info("Rounding requested frequency %d "
+			     "up to next available %d", cpu_freq,
+			     cpufreq[cpuidx].avail_freq[j]);
+			return cpufreq[cpuidx].avail_freq[j];
 		}
 	}
-
-	error("failed to find frequency %d on cpu=%d", cpu_freq, cpuidx);
+	/* loop above must return due to previous bounds checks
+	 * but return NO_VAL here anyways to silence compiler warnings */
 	return NO_VAL;
 }
 
@@ -1372,15 +1419,12 @@ cpu_freq_govlist_to_string(char* buf, uint16_t bufsz, uint32_t govs)
 			xstrcat(list,"UserSpace");
 		}
 	}
-	if (list) {
-		if (strlen(list) < bufsz)
-			strcpy(buf, list);
-		else
-			strncpy(buf, list, bufsz-1);
 
+	if (list) {
+		strlcpy(buf, list, bufsz);
 		xfree(list);
 	} else {
-		strncpy(buf,"No Governors defined", bufsz-1);
+		strlcpy(buf, "No Governors defined", bufsz);
 	}
 }
 
@@ -1617,7 +1661,7 @@ cpu_freq_debug(char* label, char* noval_str, char* freq_str, int freq_len,
 	} else {
 		sep1 = "";
 	}
-	if (min != NO_VAL && min != 0) {
+	if ((min != NO_VAL) && (min != 0)) {
 		rc = 1;
 		if (min & CPU_FREQ_RANGE_FLAG) {
 			strcpy(bfmin, "CPU_min_freq=");
@@ -1626,11 +1670,16 @@ cpu_freq_debug(char* label, char* noval_str, char* freq_str, int freq_len,
 			sprintf(bfmin, "CPU_min_freq=%u", min);
 		}
 	} else if (noval_str) {
-		strcpy(bfmin, noval_str);
+		if (strlen(noval_str) >= sizeof(bfmin)) {
+			error("%s: minimum CPU frequency string too large",
+			      __func__);
+		} else {
+			strlcpy(bfmin, noval_str, sizeof(bfmin));
+		}
 	} else {
 		sep2 = "";
 	}
-	if (max != NO_VAL && max != 0) {
+	if ((max != NO_VAL) && (max != 0)) {
 		rc = 1;
 		if (max & CPU_FREQ_RANGE_FLAG) {
 			strcpy(bfmax, "CPU_max_freq=");
@@ -1639,7 +1688,12 @@ cpu_freq_debug(char* label, char* noval_str, char* freq_str, int freq_len,
 			sprintf(bfmax, "CPU_max_freq=%u", max);
 		}
 	} else if (noval_str) {
-		strcpy(bfmax, noval_str);
+		if (strlen(noval_str) >= sizeof(bfmax)) {
+			error("%s: maximum CPU frequency string too large",
+			      __func__);
+		} else {
+			strlcpy(bfmax, noval_str, sizeof(bfmax));
+		}
 	} else {
 		sep3 = "";
 	}
@@ -1648,7 +1702,12 @@ cpu_freq_debug(char* label, char* noval_str, char* freq_str, int freq_len,
 		strcpy(bfgov, "Governor=");
 		cpu_freq_to_string(&bfgov[9], (sizeof(bfgov)-9), gov);
 	} else if (noval_str) {
-		strcpy(bfgov, noval_str);
+		if (strlen(noval_str) >= sizeof(bfgov)) {
+			error("%s: max CPU governor string too large",
+			      __func__);
+		} else {
+			strlcpy(bfgov, noval_str, sizeof(bfgov));
+		}
 	}
 	if (rc) {
 		if (freq_str) {

@@ -24,7 +24,7 @@
 # Written by Brian Christiansen <brian@schedmd.com>
 #
 # This file is part of SLURM, a resource management program.
-# For details, see <http://slurm.schedmd.com/>.
+# For details, see <https://slurm.schedmd.com/>.
 # Please also read the included file: DISCLAIMER.
 #
 # SLURM is free software; you can redistribute it and/or modify it under
@@ -124,7 +124,7 @@ proc test_fed_job_id { cname cid} {
 	set clust_id [expr $job_id >> 26]
 
 	send_user "Fed JobID:$job_id Local JobID:$local_id Cluster ID:$clust_id\n"
-	if {$clust_id != $cid} {
+	if {!$rc && ($clust_id != $cid)} {
 		send_user "\nFAILURE: jobid($job_id) from $cname didn't give\
 			correct partition id ($part_id != $cid)\n"
 		incr rc
@@ -178,10 +178,8 @@ if {[test_federation_setup]} {
 	exit 0
 }
 
-if {[test_cluster_up $fedc1] ||
-    [test_cluster_up $fedc2] ||
-    [test_cluster_up $fedc3]} {
-	end_it 1
+if {[test_all_up]} {
+	exit 0
 }
 
 # Remove existing setup

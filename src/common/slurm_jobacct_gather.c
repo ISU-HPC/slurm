@@ -10,7 +10,7 @@
  *  Copyright (C) 2005 Hewlett-Packard Development Company, L.P.
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://slurm.schedmd.com/>.
+ *  For details, see <https://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -141,7 +141,7 @@ static void _acct_kill_step(void)
 	notify_req.message     = "Exceeded job memory limit";
 	msg.msg_type    = REQUEST_JOB_NOTIFY;
 	msg.data        = &notify_req;
-	slurm_send_only_controller_msg(&msg);
+	slurm_send_only_controller_msg(&msg, working_cluster_rec);
 
 	/*
 	 * Request message:
@@ -154,7 +154,7 @@ static void _acct_kill_step(void)
 	msg.msg_type    = REQUEST_CANCEL_JOB_STEP;
 	msg.data        = &req;
 
-	slurm_send_only_controller_msg(&msg);
+	slurm_send_only_controller_msg(&msg, working_cluster_rec);
 }
 
 static void _pack_jobacct_id(jobacct_id_t *jobacct_id,
@@ -214,8 +214,6 @@ static bool _init_run_test(void)
 }
 
 /* _watch_tasks() -- monitor slurm jobs and track their memory usage
- *
- * IN, OUT:	Irrelevant; this is invoked by pthread_create()
  */
 
 static void *_watch_tasks(void *arg)
@@ -345,7 +343,6 @@ extern int jobacct_gather_fini(void)
 extern int jobacct_gather_startpoll(uint16_t frequency)
 {
 	int retval = SLURM_SUCCESS;
-	pthread_attr_t attr;
 
 	if (!plugin_polling)
 		return SLURM_SUCCESS;
@@ -370,14 +367,9 @@ extern int jobacct_gather_startpoll(uint16_t frequency)
 	}
 
 	/* create polling thread */
-	slurm_attr_init(&attr);
-	if  (pthread_create(&watch_tasks_thread_id, &attr,
-			    &_watch_tasks, NULL)) {
-		debug("jobacct_gather failed to create _watch_tasks "
-		      "thread: %m");
-	} else
-		debug3("jobacct_gather dynamic logging enabled");
-	slurm_attr_destroy(&attr);
+	slurm_thread_create(&watch_tasks_thread_id, _watch_tasks, NULL);
+
+	debug3("jobacct_gather dynamic logging enabled");
 
 	return retval;
 }
@@ -687,7 +679,7 @@ extern int jobacctinfo_setinfo(jobacctinfo_t *jobacct,
 	double *dub = (double *) data;
 	jobacct_id_t *jobacct_id = (jobacct_id_t *) data;
 	struct jobacctinfo *send = (struct jobacctinfo *) data;
-
+	Buf buffer = NULL;
 	if (!plugin_polling)
 		return SLURM_SUCCESS;
 
@@ -698,13 +690,13 @@ extern int jobacctinfo_setinfo(jobacctinfo_t *jobacct,
 	case JOBACCT_DATA_PIPE:
 		if (protocol_version >= SLURM_MIN_PROTOCOL_VERSION) {
 			int len;
-			Buf buffer = init_buf(0);
+			buffer = init_buf(0);
 			jobacctinfo_pack(jobacct, protocol_version,
 					 PROTOCOL_TYPE_SLURM, buffer);
 			len = get_buf_offset(buffer);
 			safe_write(*fd, &len, sizeof(int));
 			safe_write(*fd, get_buf_data(buffer), len);
-			free_buf(buffer);
+			FREE_NULL_BUFFER(buffer);
 		}
 
 		break;
@@ -781,7 +773,9 @@ extern int jobacctinfo_setinfo(jobacctinfo_t *jobacct,
 	}
 
 	return rc;
+
 rwfail:
+	FREE_NULL_BUFFER(buffer);
 	return SLURM_ERROR;
 }
 
@@ -797,6 +791,7 @@ extern int jobacctinfo_getinfo(
 	jobacct_id_t *jobacct_id = (jobacct_id_t *) data;
 	struct rusage *rusage = (struct rusage *)data;
 	struct jobacctinfo *send = (struct jobacctinfo *) data;
+	char *buf = NULL;
 
 	if (!plugin_polling)
 		return SLURM_SUCCESS;
@@ -810,7 +805,6 @@ extern int jobacctinfo_getinfo(
 		break;
 	case JOBACCT_DATA_PIPE:
 		if (protocol_version >= SLURM_MIN_PROTOCOL_VERSION) {
-			char* buf;
 			int len;
 			Buf buffer;
 
@@ -895,7 +889,9 @@ extern int jobacctinfo_getinfo(
 		debug("jobacct_g_set_getinfo data_type %d invalid", type);
 	}
 	return rc;
+
 rwfail:
+	xfree(buf);
 	return SLURM_ERROR;
 }
 
@@ -955,7 +951,8 @@ extern int jobacctinfo_unpack(jobacctinfo_t **jobacct,
 	uint32_t uint32_tmp;
 	uint8_t  uint8_tmp;
 
-	jobacct_gather_init();
+	if (jobacct_gather_init() < 0)
+		return SLURM_ERROR;
 
 	if (rpc_version >= SLURM_MIN_PROTOCOL_VERSION) {
 		safe_unpack8(&uint8_tmp, buffer);
@@ -1083,9 +1080,9 @@ extern void jobacctinfo_aggregate(jobacctinfo_t *dest, jobacctinfo_t *from)
 		dest->sys_cpu_usec -= 1E6;
 	}
 	dest->act_cpufreq 	+= from->act_cpufreq;
-	if (dest->energy.consumed_energy != NO_VAL) {
-		if (from->energy.consumed_energy == NO_VAL)
-			dest->energy.consumed_energy = NO_VAL;
+	if (dest->energy.consumed_energy != NO_VAL64) {
+		if (from->energy.consumed_energy == NO_VAL64)
+			dest->energy.consumed_energy = NO_VAL64;
 		else
 			dest->energy.consumed_energy +=
 					from->energy.consumed_energy;
@@ -1126,7 +1123,7 @@ extern void jobacctinfo_2_stats(slurmdb_stats_t *stats, jobacctinfo_t *jobacct)
 	stats->cpu_min_taskid = jobacct->min_cpu_id.taskid;
 	stats->cpu_ave = jobacct->tot_cpu;
 	stats->act_cpufreq = (double)jobacct->act_cpufreq;
-	if (jobacct->energy.consumed_energy == NO_VAL)
+	if (jobacct->energy.consumed_energy == NO_VAL64)
 		stats->consumed_energy = NO_VAL64;
 	else
 		stats->consumed_energy =

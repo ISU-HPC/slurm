@@ -96,6 +96,7 @@ sbin_PROGRAMS = slurmstepd$(EXEEXT)
 subdir = src/slurmd/slurmstepd
 ACLOCAL_M4 = $(top_srcdir)/aclocal.m4
 am__aclocal_m4_deps = $(top_srcdir)/auxdir/ax_check_zlib.m4 \
+	$(top_srcdir)/auxdir/ax_gcc_builtin.m4 \
 	$(top_srcdir)/auxdir/ax_lib_hdf5.m4 \
 	$(top_srcdir)/auxdir/ax_pthread.m4 \
 	$(top_srcdir)/auxdir/libtool.m4 \
@@ -136,6 +137,9 @@ am__aclocal_m4_deps = $(top_srcdir)/auxdir/ax_check_zlib.m4 \
 	$(top_srcdir)/auxdir/x_ac_setproctitle.m4 \
 	$(top_srcdir)/auxdir/x_ac_sgi_job.m4 \
 	$(top_srcdir)/auxdir/x_ac_slurm_ssl.m4 \
+	$(top_srcdir)/auxdir/x_ac_systemd.m4 \
+	$(top_srcdir)/auxdir/x_ac_ucx.m4 \
+	$(top_srcdir)/auxdir/x_ac_uid_gid_size.m4 \
 	$(top_srcdir)/configure.ac
 am__configure_deps = $(am__aclocal_m4_deps) $(CONFIGURE_DEPENDENCIES) \
 	$(ACLOCAL_M4)
@@ -148,16 +152,11 @@ am__installdirs = "$(DESTDIR)$(sbindir)"
 PROGRAMS = $(sbin_PROGRAMS)
 am_slurmstepd_OBJECTS = slurmstepd.$(OBJEXT) mgr.$(OBJEXT) \
 	task.$(OBJEXT) slurmstepd_job.$(OBJEXT) io.$(OBJEXT) \
-	fname.$(OBJEXT) ulimits.$(OBJEXT) pdebug.$(OBJEXT) \
-	pam_ses.$(OBJEXT) req.$(OBJEXT) multi_prog.$(OBJEXT) \
+	ulimits.$(OBJEXT) pdebug.$(OBJEXT) pam_ses.$(OBJEXT) \
+	req.$(OBJEXT) multi_prog.$(OBJEXT) \
 	step_terminate_monitor.$(OBJEXT)
 slurmstepd_OBJECTS = $(am_slurmstepd_OBJECTS)
 am__DEPENDENCIES_1 =
-slurmstepd_DEPENDENCIES = $(top_builddir)/src/common/libdaemonize.la \
-	../common/libslurmd_common.o $(am__DEPENDENCIES_1) \
-	$(am__DEPENDENCIES_1) $(top_builddir)/src/api/libslurm.o \
-	$(am__DEPENDENCIES_1) $(am__DEPENDENCIES_1) \
-	$(am__DEPENDENCIES_1)
 AM_V_lt = $(am__v_lt_@AM_V@)
 am__v_lt_ = $(am__v_lt_@AM_DEFAULT_V@)
 am__v_lt_0 = --silent
@@ -323,6 +322,10 @@ LIBCURL_CPPFLAGS = @LIBCURL_CPPFLAGS@
 LIBOBJS = @LIBOBJS@
 LIBS = @LIBS@
 LIBTOOL = @LIBTOOL@
+LIB_SLURM = @LIB_SLURM@
+LIB_SLURMDB = @LIB_SLURMDB@
+LIB_SLURMDB_BUILD = @LIB_SLURMDB_BUILD@
+LIB_SLURM_BUILD = @LIB_SLURM_BUILD@
 LIPO = @LIPO@
 LN_S = @LN_S@
 LTLIBOBJS = @LTLIBOBJS@
@@ -406,12 +409,15 @@ SLURM_MINOR = @SLURM_MINOR@
 SLURM_PREFIX = @SLURM_PREFIX@
 SLURM_VERSION_NUMBER = @SLURM_VERSION_NUMBER@
 SLURM_VERSION_STRING = @SLURM_VERSION_STRING@
-SO_LDFLAGS = @SO_LDFLAGS@
 SSL_CPPFLAGS = @SSL_CPPFLAGS@
 SSL_LDFLAGS = @SSL_LDFLAGS@
 SSL_LIBS = @SSL_LIBS@
 STRIP = @STRIP@
 SUCMD = @SUCMD@
+SYSTEMD_TASKSMAX_OPTION = @SYSTEMD_TASKSMAX_OPTION@
+UCX_CPPFLAGS = @UCX_CPPFLAGS@
+UCX_LDFLAGS = @UCX_LDFLAGS@
+UCX_LIBS = @UCX_LIBS@
 UTIL_LIBS = @UTIL_LIBS@
 VERSION = @VERSION@
 ZLIB_CPPFLAGS = @ZLIB_CPPFLAGS@
@@ -482,11 +488,13 @@ top_builddir = @top_builddir@
 top_srcdir = @top_srcdir@
 AUTOMAKE_OPTIONS = foreign
 AM_CPPFLAGS = -I$(top_srcdir)
-slurmstepd_LDADD = \
+depend_libs = \
 	$(top_builddir)/src/common/libdaemonize.la \
-	../common/libslurmd_common.o $(HWLOC_LDFLAGS) $(HWLOC_LIBS) \
-	$(top_builddir)/src/api/libslurm.o $(DL_LIBS) \
-	$(PAM_LIBS) $(UTIL_LIBS)
+	../common/libslurmd_common.o
+
+slurmstepd_LDADD = $(depend_libs) $(LIB_SLURM) \
+	$(HWLOC_LDFLAGS) $(HWLOC_LIBS) \
+	$(DL_LIBS) $(PAM_LIBS) $(UTIL_LIBS)
 
 slurmstepd_SOURCES = \
 	slurmstepd.c slurmstepd.h	\
@@ -494,7 +502,6 @@ slurmstepd_SOURCES = \
 	task.c task.h			\
 	slurmstepd_job.c slurmstepd_job.h \
 	io.c io.h			\
-	fname.c fname.h			\
 	ulimits.c ulimits.h     	\
 	pdebug.c pdebug.h		\
 	pam_ses.c pam_ses.h		\
@@ -503,6 +510,7 @@ slurmstepd_SOURCES = \
 	step_terminate_monitor.c step_terminate_monitor.h
 
 slurmstepd_LDFLAGS = -export-dynamic $(CMD_LDFLAGS)
+slurmstepd_DEPENDENCIES = $(depend_libs) $(LIB_SLURM_BUILD)
 all: all-am
 
 .SUFFIXES:
@@ -596,7 +604,6 @@ mostlyclean-compile:
 distclean-compile:
 	-rm -f *.tab.c
 
-@AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/fname.Po@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/io.Po@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/mgr.Po@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/multi_prog.Po@am__quote@
@@ -846,7 +853,7 @@ uninstall-am: uninstall-sbinPROGRAMS
 
 
 force:
-$(slurmstepd_LDADD) : force
+$(slurmstepd_DEPENDENCIES) : force
 	@cd `dirname $@` && $(MAKE) `basename $@`
 
 # Tell versions [3.59,3.63) of GNU make to not export all variables.

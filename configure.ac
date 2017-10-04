@@ -3,7 +3,7 @@
 dnl Prologue
 dnl
 
-AC_INIT(slurm, m4_esyscmd([perl -ne 'print,exit if s/^\s*VERSION:\s*(\d*.\d*).\S*/\1/i' ./META | sed 's/^v//' | tr '-' '_' | tr -d '\n']), [slurm-dev@schedmd.com], [], [http://slurm.schedmd.com])
+AC_INIT(slurm, m4_esyscmd([perl -ne 'print,exit if s/^\s*VERSION:\s*(\d*.\d*).\S*/\1/i' ./META | sed 's/^v//' | tr '-' '_' | tr -d '\n']), [slurm-dev@schedmd.com], [], [https://slurm.schedmd.com])
 AC_PREREQ(2.59)
 AC_CONFIG_SRCDIR([configure.ac])
 AC_CONFIG_AUX_DIR([auxdir])
@@ -28,11 +28,17 @@ AM_MAINTAINER_MODE
 AC_CONFIG_HEADERS([config.h])
 AC_CONFIG_HEADERS([slurm/slurm.h])
 
-dnl This needs to be close to the front to set CFLAGS=-m64
 X_AC_RPATH
+
+dnl This sets the first compiler to be C instead of C++ (which would happen
+dnl if X_AC_BGQ was the first thing called.
+X_AC_DATABASES
 
 X_AC_BG
 
+dnl This needs to be close to the front to set CFLAGS=-m64, but needs to
+dnl be after something that does a AC_LINK_IFELSE or the compiler configure
+dnl checks for will be C++ instead of C.
 X_AC_BGQ
 
 dnl We need to know if this is a Q system
@@ -60,23 +66,6 @@ case "$host" in
 	*)        AC_DEFINE(USE_ALIAS, 1,
 			[Define slurm_ prefix function aliases for plugins]) ;;
 esac
-
-ac_have_cygwin=no
-dnl
-dnl add some flags for Solaris and cygwin
-dnl
-case "$host" in
-     	*cygwin)   LDFLAGS="$LDFLAGS -no-undefined"
-		   SO_LDFLAGS="$SO_LDFLAGS \$(top_builddir)/src/api/libslurmhelper.la"
-		   AC_SUBST(SO_LDFLAGS)
-		   ac_have_cygwin=yes
-		   ;;
-	*solaris*) CC="/usr/sfw/bin/gcc"
-		   CFLAGS="$CFLAGS -D_POSIX_PTHREAD_SEMANTICS -I/usr/sfw/include"
-		   LDFLAGS="$LDFLAGS -L/usr/sfw/lib"
-		   ;;
-esac
-AM_CONDITIONAL(WITH_CYGWIN, test x"$ac_have_cygwin" = x"yes")
 
 dnl Checks for programs.
 dnl
@@ -118,7 +107,7 @@ AC_CHECK_HEADERS(mcheck.h values.h socket.h sys/socket.h  \
 AC_HEADER_SYS_WAIT
 AC_HEADER_TIME
 AC_HEADER_STDC
-
+AC_HEADER_MAJOR
 
 dnl Checks for structures.
 dnl
@@ -145,6 +134,10 @@ dnl Check for PAM module support
 X_AC_PAM
 
 dnl
+dnl Check to see how we link to libslurm
+X_AC_LIBSLURM
+
+dnl
 dnl Check for ISO compliance
 X_AC_ISO
 
@@ -156,6 +149,9 @@ dnl Checks for types.
 dnl
 X_AC_SLURM_BIGENDIAN
 
+dnl check for presumed size of uid_t and gid_t
+X_AC_UID_GID_SIZE_CHECK
+
 dnl Check for JSON parser
 X_AC_JSON
 
@@ -163,6 +159,9 @@ dnl Checks for compiler characteristics.
 dnl
 AC_PROG_GCC_TRADITIONAL([])
 
+AX_GCC_BUILTIN(__builtin_clzll)
+AX_GCC_BUILTIN(__builtin_ctzll)
+AX_GCC_BUILTIN(__builtin_popcountll)
 
 dnl checks for library functions.
 dnl
@@ -217,6 +216,7 @@ X_AC_PMIX
 X_AC_FREEIPMI
 X_AC_SLURM_SEMAPHORE
 X_AC_RRDTOOL
+X_AC_UCX
 
 X_AC_NCURSES
 AM_CONDITIONAL(HAVE_SOME_CURSES, test "x$ac_have_some_curses" = "xyes")
@@ -266,8 +266,6 @@ if test "x$ac_glib_test" != "xyes" -o "x$ac_gtk_test" != "xyes"; then
 fi
 
 AM_CONDITIONAL(BUILD_SVIEW, [test "x$ac_glib_test" = "xyes"] && [test "x$ac_gtk_test" = "xyes"])
-
-X_AC_DATABASES
 
 dnl Cray ALPS/Basil support depends on mySQL
 X_AC_CRAY
@@ -340,6 +338,11 @@ dnl
 X_AC_SLURM_WITH_SSL
 AM_CONDITIONAL(HAVE_OPENSSL, test "x$ac_have_openssl" = "xyes")
 AC_SUBST(HAVE_OPENSSL)
+
+dnl
+dnl Check for systemd presence, version and system unit dir
+dnl
+X_AC_SYSTEMD
 
 dnl
 dnl Check for compilation of SLURM auth modules:
@@ -442,12 +445,9 @@ AC_CONFIG_FILES([Makefile
 		 contribs/seff/Makefile
 		 contribs/torque/Makefile
 		 contribs/openlava/Makefile
-		 contribs/phpext/Makefile
-		 contribs/phpext/slurm_php/config.m4
 		 contribs/sgather/Makefile
 		 contribs/sgi/Makefile
 		 contribs/sjobexit/Makefile
-		 contribs/slurmdb-direct/Makefile
 		 contribs/pmi2/Makefile
 		 doc/Makefile
 		 doc/man/Makefile
@@ -510,16 +510,15 @@ AC_CONFIG_FILES([Makefile
 		 src/plugins/acct_gather_energy/ibmaem/Makefile
 		 src/plugins/acct_gather_energy/ipmi/Makefile
 		 src/plugins/acct_gather_energy/none/Makefile
-		 src/plugins/acct_gather_infiniband/Makefile
-		 src/plugins/acct_gather_infiniband/ofed/Makefile
-		 src/plugins/acct_gather_infiniband/none/Makefile
+		 src/plugins/acct_gather_interconnect/Makefile
+		 src/plugins/acct_gather_interconnect/ofed/Makefile
+		 src/plugins/acct_gather_interconnect/none/Makefile
 		 src/plugins/acct_gather_filesystem/Makefile
 		 src/plugins/acct_gather_filesystem/lustre/Makefile
 		 src/plugins/acct_gather_filesystem/none/Makefile
 		 src/plugins/acct_gather_profile/Makefile
 		 src/plugins/acct_gather_profile/hdf5/Makefile
 		 src/plugins/acct_gather_profile/hdf5/sh5util/Makefile
-		 src/plugins/acct_gather_profile/hdf5/sh5util/libsh5util_old/Makefile
 		 src/plugins/acct_gather_profile/none/Makefile
 		 src/plugins/auth/Makefile
 		 src/plugins/auth/munge/Makefile
@@ -547,7 +546,6 @@ AC_CONFIG_FILES([Makefile
 		 src/plugins/checkpoint/multicheckpoint/cr_common.sh
 		 src/plugins/checkpoint/none/Makefile
 		 src/plugins/checkpoint/ompi/Makefile
-		 src/plugins/checkpoint/poe/Makefile
 		 src/plugins/core_spec/Makefile
 		 src/plugins/core_spec/cray/Makefile
 		 src/plugins/core_spec/none/Makefile
@@ -591,11 +589,13 @@ AC_CONFIG_FILES([Makefile
 		 src/plugins/launch/runjob/Makefile
 		 src/plugins/launch/slurm/Makefile
 		 src/plugins/mcs/Makefile
-		 src/plugins/mcs/none/Makefile
+		 src/plugins/mcs/account/Makefile
 		 src/plugins/mcs/group/Makefile
+		 src/plugins/mcs/none/Makefile
 		 src/plugins/mcs/user/Makefile
 		 src/plugins/node_features/Makefile
 		 src/plugins/node_features/knl_cray/Makefile
+		 src/plugins/node_features/knl_generic/Makefile
 		 src/plugins/power/Makefile
 		 src/plugins/power/common/Makefile
 		 src/plugins/power/cray/Makefile
@@ -623,8 +623,6 @@ AC_CONFIG_FILES([Makefile
 		 src/plugins/sched/builtin/Makefile
 		 src/plugins/sched/hold/Makefile
 		 src/plugins/sched/migration/Makefile
-		 src/plugins/sched/wiki/Makefile
-		 src/plugins/sched/wiki2/Makefile
 		 src/plugins/select/Makefile
 		 src/plugins/select/alps/Makefile
 		 src/plugins/select/alps/libalps/Makefile
@@ -649,12 +647,6 @@ AC_CONFIG_FILES([Makefile
 		 src/plugins/switch/nrt/Makefile
 		 src/plugins/switch/nrt/libpermapi/Makefile
 		 src/plugins/mpi/Makefile
-		 src/plugins/mpi/mpich1_p4/Makefile
-		 src/plugins/mpi/mpich1_shmem/Makefile
-		 src/plugins/mpi/mpichgm/Makefile
-		 src/plugins/mpi/mpichmx/Makefile
-		 src/plugins/mpi/mvapich/Makefile
-		 src/plugins/mpi/lam/Makefile
 		 src/plugins/mpi/none/Makefile
 		 src/plugins/mpi/openmpi/Makefile
 		 src/plugins/mpi/pmi2/Makefile
@@ -676,6 +668,8 @@ AC_CONFIG_FILES([Makefile
 		 testsuite/slurm_unit/api/Makefile
 		 testsuite/slurm_unit/api/manual/Makefile
 		 testsuite/slurm_unit/common/Makefile
+		 testsuite/slurm_unit/common/slurm_protocol_pack/Makefile
+		 testsuite/slurm_unit/common/slurmdb_pack/Makefile
 		 ]
 )
 

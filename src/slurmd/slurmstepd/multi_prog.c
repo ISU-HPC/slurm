@@ -14,7 +14,7 @@
  *  CODE-OCEC-09-009. All rights reserved.
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://slurm.schedmd.com/>.
+ *  For details, see <https://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -51,6 +51,7 @@
 #include <sys/types.h>
 #include <unistd.h>
 #include "src/common/log.h"
+#include "src/common/strlcpy.h"
 #include "src/common/xassert.h"
 #include "src/common/xmalloc.h"
 #include "src/common/xstring.h"
@@ -127,11 +128,11 @@ _sub_expression(char *args_spec, int task_rank, int task_offset)
 	if (args_spec[0] == '%') {
 		if (args_spec[1] == 't') {
 			/* task rank */
-			strcpy(tmp, &args_spec[2]);
+			strlcpy(tmp, &args_spec[2], sizeof(tmp));
 			sprintf(args_spec, "%d%s", task_rank, tmp);
 		} else if (args_spec[1] == 'o') {
 			/* task offset */
-			strcpy(tmp, &args_spec[2]);
+			strlcpy(tmp, &args_spec[2], sizeof(tmp));
 			sprintf(args_spec, "%d%s", task_offset, tmp);
 		}
 	}
@@ -165,7 +166,6 @@ extern int multi_prog_get_argv(char *config_data, char **prog_env,
 	}
 
 	local_data = xstrdup(config_data);
-
 	line = strtok_r(local_data, "\n", &ptrptr);
 	while (line) {
 		if (line_num > 0)
@@ -174,16 +174,16 @@ extern int multi_prog_get_argv(char *config_data, char **prog_env,
 			error("No executable program specified for this task");
 			goto fail;
 		}
-		line_num ++;
-		if (strlen (line) >= (BUF_SIZE - 1)) {
+		line_num++;
+		if (strlen(line) >= (BUF_SIZE - 1)) {
 			error ("Line %d of configuration file too long",
 				line_num);
 			goto fail;
 		}
 
 		p = line;
-		while (*p != '\0' && isspace (*p)) /* remove leading spaces */
-			p ++;
+		while ((*p != '\0') && isspace (*p)) /* remove leading spaces */
+			p++;
 
 		if (*p == '#') /* only whole-line comments handled */
 			continue;
@@ -193,33 +193,34 @@ extern int multi_prog_get_argv(char *config_data, char **prog_env,
 
 		rank_spec = p;
 
-		while (*p != '\0' && !isspace (*p))
-			p ++;
+		while ((*p != '\0') && !isspace (*p))
+			p++;
 		if (*p == '\0') {
 			error("Invalid MPMD configuration line %d", line_num);
 			goto fail;
 		}
-		*p ++ = '\0';
+		*p++ = '\0';
 
-		if (!_in_range (task_rank, rank_spec, &task_offset))
+		if (!_in_range(task_rank, rank_spec, &task_offset))
 			continue;
 
 		/* skip all whitspace after the range spec */
-		while(*p != '\0' && isspace (*p))
+		while ((*p != '\0') && isspace (*p))
 			p++;
 
 		args_spec = p;
 		while (*args_spec != '\0') {
 			/* Only simple quote and escape supported */
-			prog_argv[prog_argc ++] = args_spec;
+			args_spec = xstrdup(args_spec);
+			prog_argv[prog_argc++] = args_spec;
 			if ((prog_argc + 1) >= MAX_ARGC) {
 				info("Exceeded multi-prog argc limit");
 				break;
 			}
-		CONT:	while (*args_spec != '\0' && *args_spec != '\\'
-			&&     *args_spec != '%'
-			&&     *args_spec != '\'' && !isspace (*args_spec)) {
-				args_spec ++;
+		CONT:	while ((*args_spec != '\0') && (*args_spec != '\\') &&
+			       (*args_spec != '%')  && (*args_spec != '\'') &&
+			       !isspace(*args_spec)) {
+				args_spec++;
 			}
 			if (*args_spec == '\0') {
 				/* the last argument */
@@ -227,47 +228,48 @@ extern int multi_prog_get_argv(char *config_data, char **prog_env,
 
 			} else if (*args_spec == '%') {
 				_sub_expression(args_spec, task_rank,
-					task_offset);
-				args_spec ++;
+						task_offset);
+				args_spec++;
 				goto CONT;
 
 			} else if (*args_spec == '\\') {
 				/* escape, just remove the backslash */
-				s = args_spec ++;
+				s = args_spec++;
 				p = args_spec;
 				do {
-					*s ++ = *p;
-				} while (*p ++ != '\0');
+					*s++ = *p;
+				} while (*p++ != '\0');
 				goto CONT;
 
 			} else if (*args_spec == '\'') {
 				/* single quote,
 				 * preserve all characters quoted. */
 				p = args_spec + 1;
-				while (*p != '\0' && *p != '\'') {
+				while ((*p != '\0') && (*p != '\'')) {
 					/* remove quote */
-					*args_spec ++ = *p ++;
+					*args_spec++ = *p++;
 				}
 				if (*p == '\0') {
 					/* closing quote not found */
 					error("Program arguments specification"
-						" format invalid: %s.",
-						prog_argv[prog_argc -1]);
+					      " format invalid: %s.",
+					      prog_argv[prog_argc -1]);
 					goto fail;
 				}
-				p ++; /* skip closing quote */
+				p++; /* skip closing quote */
 				s = args_spec;
 				do {
-					*s ++ = *p;
-				} while (*p ++ != '\0');
+					*s++ = *p;
+				} while (*p++ != '\0');
 				goto CONT;
 
 			} else {
 				/* space */
-				*args_spec ++ = '\0';
-				while (*args_spec != '\0'
-				&& isspace (*args_spec))
-					args_spec ++;
+				*args_spec++ = '\0';
+				while ((*args_spec != '\0') &&
+				       isspace(*args_spec)) {
+					args_spec++;
+				}
 			}
 
 		}
@@ -283,7 +285,7 @@ extern int multi_prog_get_argv(char *config_data, char **prog_env,
 
 		*argc = prog_argc;
 		*argv = prog_argv;
-		/* FIXME - local_data is leaked */
+		xfree(local_data);
 		return 0;
 	}
 

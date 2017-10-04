@@ -6,7 +6,7 @@
  *  Written by Danny Auble <da@schedmd.com>
  *
  *  This file is part of SLURM, a resource management program.
- *  For details, see <http://slurm.schedmd.com/>.
+ *  For details, see <https://slurm.schedmd.com/>.
  *  Please also read the included file: DISCLAIMER.
  *
  *  SLURM is free software; you can redistribute it and/or modify it under
@@ -117,7 +117,6 @@ typedef enum {
 } npc_type_t;
 
 #define NODEINFO_MAGIC 0x85ad
-#define MAX_PTHREAD_RETRIES  1
 
 #define GET_BLADE_X(_X) \
 	(int16_t)((_X & 0x0000ffff00000000) >> 32)
@@ -140,6 +139,7 @@ int node_record_count __attribute__((weak_import));
 time_t last_node_update __attribute__((weak_import));
 int slurmctld_primary __attribute__((weak_import));
 void *acct_db_conn  __attribute__((weak_import)) = NULL;
+bool  ignore_state_errors __attribute__((weak_import)) = true;
 #else
 slurmctld_config_t slurmctld_config;
 slurm_ctl_conf_t slurmctld_conf;
@@ -150,6 +150,7 @@ int node_record_count;
 time_t last_node_update;
 int slurmctld_primary;
 void *acct_db_conn = NULL;
+bool ignore_state_errors = true;
 #endif
 
 static blade_info_t *blade_array = NULL;
@@ -827,16 +828,8 @@ static void _start_aeld_thread(void)
 
 	// Spawn the aeld thread, only in slurmctld.
 	if (!aeld_running && run_in_daemon("slurmctld")) {
-		pthread_attr_t attr;
 		aeld_running = 1;
-		slurm_attr_init(&attr);
-		if (pthread_create(&aeld_thread, &attr, _aeld_event_loop,
-				   NULL)) {
-			error("pthread_create of message thread: %m");
-			aeld_running = 0;
-		}
-
-		slurm_attr_destroy(&attr);
+		slurm_thread_create(&aeld_thread, _aeld_event_loop, NULL);
 	}
 }
 
@@ -1022,7 +1015,6 @@ static void _wait_job_completed(uint32_t job_id, struct job_record *job_ptr)
 		NO_LOCK, READ_LOCK, NO_LOCK, NO_LOCK, NO_LOCK };
 
 	while (!fini) {
-		sleep(1);
 		lock_slurmctld(job_read_lock);
 		if ((job_ptr->magic  != JOB_MAGIC) ||
 		    (job_ptr->job_id != job_id)    ||
@@ -1030,6 +1022,8 @@ static void _wait_job_completed(uint32_t job_id, struct job_record *job_ptr)
 		     (bb_g_job_test_post_run(job_ptr) != 0)))
 			fini = true;
 		unlock_slurmctld(job_read_lock);
+		if (!fini)
+			sleep(1);
 	}
 }
 
@@ -1110,6 +1104,11 @@ static void *_step_fini(void *args)
 	if (IS_CLEANING_COMPLETE(jobinfo)) {
 		debug("%s: NHC previously run for step %u.%u",
 		      __func__, step_ptr->job_ptr->job_id, step_ptr->step_id);
+		unlock_slurmctld(job_read_lock);
+	} else if (step_ptr->step_id == SLURM_EXTERN_CONT) {
+		debug2("%s: Job %u external container complete, no NHC",
+		       __func__, step_ptr->job_ptr->job_id);
+		unlock_slurmctld(job_read_lock);
 	} else {
 		/* Run application NHC */
 		nhc_info.is_step = true;
@@ -1180,29 +1179,6 @@ static void *_step_fini(void *args)
 	_throttle_fini();
 
 	return NULL;
-}
-
-static void _spawn_cleanup_thread(
-	void *obj_ptr, void *(*start_routine) (void *))
-{
-	pthread_attr_t attr_agent;
-	pthread_t thread_agent;
-	int retries;
-
-	/* spawn an agent */
-	slurm_attr_init(&attr_agent);
-	if (pthread_attr_setdetachstate(&attr_agent, PTHREAD_CREATE_DETACHED))
-		error("pthread_attr_setdetachstate error %m");
-
-	retries = 0;
-	while (pthread_create(&thread_agent, &attr_agent,
-			      start_routine, obj_ptr)) {
-		error("pthread_create error %m");
-		if (++retries > MAX_PTHREAD_RETRIES)
-			fatal("Can't create pthread");
-		usleep(1000);	/* sleep and retry */
-	}
-	slurm_attr_destroy(&attr_agent);
 }
 
 static void _select_jobinfo_pack(select_jobinfo_t *jobinfo, Buf buffer,
@@ -1350,14 +1326,12 @@ extern int select_p_state_save(char *dir_name)
 	slurm_mutex_unlock(&blade_mutex);
 
 	/* write the buffer to file */
-	slurm_conf_lock();
-	old_file = xstrdup(slurmctld_conf.state_save_location);
+	old_file = xstrdup(dir_name);
 	xstrcat(old_file, "/blade_state.old");
-	reg_file = xstrdup(slurmctld_conf.state_save_location);
+	reg_file = xstrdup(dir_name);
 	xstrcat(reg_file, "/blade_state");
-	new_file = xstrdup(slurmctld_conf.state_save_location);
+	new_file = xstrdup(dir_name);
 	xstrcat(new_file, "/blade_state.new");
-	slurm_conf_unlock();
 
 	log_fd = creat(new_file, 0600);
 	if (log_fd < 0) {
@@ -1470,6 +1444,8 @@ extern int select_p_state_restore(char *dir_name)
 	debug3("Version in blade_state header is %u", protocol_version);
 
 	if (protocol_version == (uint16_t)NO_VAL) {
+		if (!ignore_state_errors)
+			fatal("Can not recover blade state, data version incompatible, start with '-i' to ignore this");
 		error("***********************************************");
 		error("Can not recover blade state, "
 		      "data version incompatible");
@@ -1563,6 +1539,8 @@ extern int select_p_state_restore(char *dir_name)
 unpack_error:
 	slurm_mutex_unlock(&blade_mutex);
 
+	if (!ignore_state_errors)
+		fatal("Incomplete blade data checkpoint file, you may get unexpected issues if jobs were running. Start with '-i' to ignore this");
 	error("Incomplete blade data checkpoint file, you may get "
 	      "unexpected issues if jobs were running.");
 	free_buf(buffer);
@@ -1624,8 +1602,9 @@ extern int select_p_job_init(List job_list)
 					    !IS_CLEANING_COMPLETE(jobinfo)) {
 						jobinfo->cleaning |=
 							CLEANING_STARTED;
-						_spawn_cleanup_thread(
-							step_ptr, _step_fini);
+						slurm_thread_create_detached(NULL,
+									     _step_fini,
+									     step_ptr);
 					}
 				}
 				list_iterator_destroy(itr_step);
@@ -1636,8 +1615,9 @@ extern int select_p_job_init(List job_list)
 				if (jobinfo &&
 				    IS_CLEANING_STARTED(jobinfo) &&
 				    !IS_CLEANING_COMPLETE(jobinfo)) {
-					_spawn_cleanup_thread(
-						job_ptr, _job_fini);
+					slurm_thread_create_detached(NULL,
+								     _job_fini,
+								     job_ptr);
 				}
 			}
 #if defined(HAVE_NATIVE_CRAY) && !defined(HAVE_CRAY_NETWORK)
@@ -1650,7 +1630,9 @@ extern int select_p_job_init(List job_list)
 					debug("CCM job %u recovery rerun "
 					      "prologue", job_ptr->job_id);
 					job_ptr->job_state |= JOB_CONFIGURING;
-					spawn_ccm_thread(job_ptr, ccm_begin);
+					slurm_thread_create_detached(NULL,
+								     ccm_begin,
+								     job_ptr);
 				}
 			}
 #endif
@@ -1763,7 +1745,11 @@ extern int select_p_node_init(struct node_record *node_ptr, int node_cnt)
 		}
 		if (end_nn != topology_num_nodes) {
 			/* already looped */
-			fatal("Node %s(%d) isn't found on the system",
+			for (nn = 0; nn < topology_num_nodes; nn++) {
+				info("ALPS topology, record:%d nid:%d",
+				     nn, topology[nn].nid);
+			}
+			fatal("Node %s(%d) isn't found in the ALPS system topoloogy table",
 			      node_ptr->name, nodeinfo->nid);
 		} else if (!found) {
 			end_nn = last_nn;
@@ -1880,9 +1866,7 @@ extern int select_p_job_test(struct job_record *job_ptr, bitstr_t *bitmap,
 					bit_nclear(bitmap, 0,
 						   bit_size(bitmap) - 1);
 			} else {
-				bit_not(blade_nodes_running_npc);
-				bit_and(bitmap, blade_nodes_running_npc);
-				bit_not(blade_nodes_running_npc);
+				bit_and_not(bitmap, blade_nodes_running_npc);
 			}
 		}
 	}
@@ -1952,7 +1936,8 @@ extern int select_p_job_begin(struct job_record *job_ptr)
 				debug("CCM job %u setting JOB_CONFIGURING",
 					job_ptr->job_id);
 				job_ptr->job_state |= JOB_CONFIGURING;
-				spawn_ccm_thread(job_ptr, ccm_begin);
+				slurm_thread_create_detached(NULL, ccm_begin,
+							     job_ptr);
 			}
 		}
 	}
@@ -2015,7 +2000,7 @@ extern int select_p_job_fini(struct job_record *job_ptr)
 	/* Create a thread to run the CCM epilog for a CCM partition */
 	if (ccm_config.ccm_enabled) {
 		if (ccm_check_partitions(job_ptr)) {
-			spawn_ccm_thread(job_ptr, ccm_fini);
+			slurm_thread_create_detached(NULL, ccm_fini, job_ptr);
 		}
 	}
 #endif
@@ -2033,7 +2018,7 @@ extern int select_p_job_fini(struct job_record *job_ptr)
 		      "this should never happen", __func__, job_ptr->job_id);
 	} else {
 		jobinfo->cleaning |= CLEANING_STARTED;
-		_spawn_cleanup_thread(job_ptr, _job_fini);
+		slurm_thread_create_detached(NULL, _job_fini, job_ptr);
 	}
 
 	return SLURM_SUCCESS;
@@ -2239,7 +2224,7 @@ extern int select_p_step_finish(struct step_record *step_ptr, bool killing_step)
 	} else {
 		jobinfo->killing = killing_step;
 		jobinfo->cleaning |= CLEANING_STARTED;
-		_spawn_cleanup_thread(step_ptr, _step_fini);
+		slurm_thread_create_detached(NULL, _step_fini, step_ptr);
 	}
 
 	END_TIMER;
