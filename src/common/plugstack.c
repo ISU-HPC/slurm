@@ -2289,41 +2289,41 @@ spank_err_t spank_set_item(spank_t spank, spank_item_t item, ...)
 		char** argv = *p2argv;
 		uint32_t argc = *p2int;
 
+		//This modifies both spank->job and spank->task.
+		if (spank->stack->type == S_TYPE_LOCAL) {
+			launcher_job->argc = argc;
+			launcher_job->argv = xmalloc (sizeof(char*) * (launcher_job->argc + 1));
+			for (count = 0; count < launcher_job->argc; count ++)
+				launcher_job->argv[count] = strdup(argv[count]);
 
-
-	    //This modifies both spank->job and spank->task.
-	    if (spank->stack->type == S_TYPE_LOCAL) {
-	      launcher_job->argc = argc;
-	      launcher_job->argv = xmalloc (sizeof(char*) * (launcher_job->argc + 1));
-	      for (count = 0; count < launcher_job->argc; count ++)
-		launcher_job->argv[count] = strdup(argv[count]);
-
-	    } else if (slurmd_job) {
-	      slurmd_job->argc = argc;
-	      slurmd_job->argv = xmalloc (sizeof(char*) * (slurmd_job->argc + 1));
-	      for (count = 0; count < slurmd_job->argc; count ++)
-		slurmd_job->argv[count] = strdup( argv[count]);
+		} else if (slurmd_job) {
+			slurmd_job->argc = argc;
+			slurmd_job->argv = xmalloc (sizeof(char*) * (slurmd_job->argc + 1));
+			for (count = 0; count < slurmd_job->argc; count ++)
+				slurmd_job->argv[count] = strdup( argv[count]);
 
 			} else {
 				rc=ESPANK_ERROR;
 			}
 
-	    task = spank->task;
-	    task->argc = argc;
-	    task->argv = xmalloc (sizeof(char*) * (task->argc + 1));
-	    for (count = 0; count < task->argc; count ++)
-	      task->argv[count] =strdup(argv[count]);
+		task = spank->task;
+		task->argc = argc;
+		task->argv = xmalloc (sizeof(char*) * (task->argc + 1));
+		for (count = 0; count < task->argc; count ++)
+			task->argv[count] =strdup(argv[count]);
 
 
-	    task->argv[task->argc] = NULL;
-	    break;
-      case S_JOB_CHECKPOINTABLE:
-            p2int = va_arg(vargs, int *);
-            if (p2int == 0)
-                    rc = slurm_checkpoint_enable(slurmd_job->jobid, slurmd_job->stepid);
-            else
-                    rc = slurm_checkpoint_disable(slurmd_job->jobid, slurmd_job->stepid);
-            break;
+		task->argv[task->argc] = NULL;
+		break;
+
+        case S_JOB_CHECKPOINTABLE:
+		p2int = va_arg(vargs, int *);
+		if (p2int == 0)
+                	rc = slurm_checkpoint_enable(slurmd_job->jobid, slurmd_job->stepid);
+		else
+			rc = slurm_checkpoint_disable(slurmd_job->jobid, slurmd_job->stepid);
+		break;
+
 
   default:
     rc = ESPANK_ERROR;
