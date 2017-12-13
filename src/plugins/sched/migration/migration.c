@@ -142,8 +142,9 @@ static void _add_reservation(uint32_t start_time, uint32_t end_reserve,
 			     node_space_map_t *node_space,
 			     int *node_space_recs);
 static void *_attempt_migration(void *dummyArg);
+static bool _any_pending_job();
+extern int _migrate_to_compact();
 extern List _build_running_job_queue();
-static bool _can_be_allocated(struct job_record *job_ptr);
 static bool _should_be_migrated(struct job_record *job_ptr);
 static int  _delta_tv(struct timeval *tv);
 static void _do_diag_stats(struct timeval *tv1, struct timeval *tv2);
@@ -151,11 +152,9 @@ static void _load_config(void);
 static bool _many_pending_rpcs(void);
 static bool _more_work(time_t last_migration_time);
 static uint32_t _my_sleep(int usec);
-static int  _num_feature_count(struct job_record *job_ptr, bool *has_xor);
-static int  _try_sched(struct job_record *job_ptr, bitstr_t **avail_bitmap,
-		       uint32_t min_nodes, uint32_t max_nodes,
-		       uint32_t req_nodes, bitstr_t *exc_core_bitmap);
 void _printBitStr(void *data, int size);
+
+
 
 static bool _many_pending_rpcs(void)
 {
@@ -687,12 +686,10 @@ extern void *migration_agent(void *args)
 
 //here we decide if a given job can be migrated or not
 static bool _should_be_migrated(struct job_record *job_ptr){
+	time_t start_time;
 	printf ("Deciding what to do with job %d\n", job_ptr->job_id);
 
-
-	time_t start_time;
 	//TODO esto tendría que ser algo como job_ptr->step_id (slurmctld.h)
-	uint32_t stepid = -1;
 	if (slurm_checkpoint_able(job_ptr->job_id, NO_VAL,&start_time) != 0) {
 		debug ("Job %u is not checkpointable, not migrating this job",job_ptr->job_id );
 		return false;
@@ -751,7 +748,7 @@ if (job_ptr->total_cpus > 1){
 
 
 
-//MANUEL this is called every minute. Here we decide whether to migrate each task or not.
+//MANUEL this is called every minute. Here we decide whether to migrate each job or not.
 //it is called by  *migration_agent(void *args)
 //this uses to be "int"
 static void *_attempt_migration(void *dummyArg)
@@ -762,16 +759,16 @@ static void *_attempt_migration(void *dummyArg)
 	struct job_record *job_ptr;
 	bitstr_t  *avail_bitmap = NULL; //*active_bitmap = NULL,
 	bitstr_t *exc_core_bitmap = NULL, *resv_bitmap = NULL;
-	time_t now, sched_start; // later_start, start_res, resv_end, window_end;
-	time_t orig_sched_start = (time_t) 0; //, orig_start_time
+	time_t now; // later_start, start_res, resv_end, window_end;
+	time_t sched_start, orig_sched_start = (time_t) 0; //, orig_start_time
 	struct timeval bf_time1, bf_time2;
-	int rc = 0;
 	int job_test_count = 0, test_time_count = 0; //, pend_time;
 	uint32_t *uid = NULL,  *bf_part_jobs = NULL; //nuser = 0, bf_parts = 0,
 	uint16_t *njobs = NULL;
 	time_t config_update = slurmctld_conf.last_update;
 	time_t part_update = last_part_update;
 	struct timeval start_tv;
+	int rc = 0;
 
 	bf_sleep_usec = 0;
 	#ifdef HAVE_ALPS_CRAY
@@ -797,6 +794,12 @@ static void *_attempt_migration(void *dummyArg)
 	gettimeofday(&start_tv, NULL);
 
 	//MANUEL
+	if (slurmctld_diag_stats.mg_active ==1){
+		debug ("Migration is already being executed, exiting.");
+		return 0;
+	}
+	slurmctld_diag_stats.mg_active = 1;
+
 	job_queue = _build_running_job_queue();
 	job_test_count = list_count(job_queue);
 	if (job_test_count == 0) {
@@ -805,104 +808,78 @@ static void *_attempt_migration(void *dummyArg)
 		else
 			debug("MANUEL migration: no running jobs");
 		FREE_NULL_LIST(job_queue);
-		return 0;
+		goto clean;
 	}
 
-	if (slurmctld_diag_stats.mg_active ==1){
-		debug ("Migration is already being executed, exiting.");
-		return 0;
-	}
-	slurmctld_diag_stats.mg_active = 1;
-	sort_job_queue(job_queue);
 
-	while (1) {
-		job_queue_rec = (job_queue_rec_t *) list_pop(job_queue);
-		if (!job_queue_rec) {
-			if (debug_flags & DEBUG_FLAG_MIGRATION)
-			info("migration: reached end of job queue");
-			break;
+	//MANUEL
+	if (_any_pending_job()) {
+		if (debug_flags & DEBUG_FLAG_MIGRATION)
+			info("MANUEL migration: there are jobs in queue, not migrating");
+		else
+			debug("MANUEL migration: there are jobs in queue, not migrating");
+		FREE_NULL_LIST(job_queue);
+		goto clean;
+	}
+
+	debug("MANUEL migration: OK  migrating");
+
+	int id_to_migrate;
+	id_to_migrate = _migrate_to_compact();
+
+	if (id_to_migrate == -1) goto clean;
+
+
+	if (slurmctld_config.shutdown_time ||
+		(difftime(time(NULL),orig_sched_start)>=migration_interval)){
+			xfree(job_queue_rec);
+			goto clean;
 		}
-		if (slurmctld_config.shutdown_time ||
-			(difftime(time(NULL),orig_sched_start)>=migration_interval)){
-				xfree(job_queue_rec);
-				break;
-			}
 
-		//Esto son cosas de la configuración que intuyo que es mejor no tocar
-		if (((defer_rpc_cnt > 0) &&
-		(slurmctld_config.server_thread_count >= defer_rpc_cnt)) ||
-		(_delta_tv(&start_tv) >= sched_timeout)) {
+	//Esto son cosas de la configuración que intuyo que es mejor no tocar
+	if (((defer_rpc_cnt > 0) &&
+	(slurmctld_config.server_thread_count >= defer_rpc_cnt)) ||
+	(_delta_tv(&start_tv) >= sched_timeout)) {
+		if (debug_flags & DEBUG_FLAG_MIGRATION) {
+			END_TIMER;
+			info("migration: yielding locks after testing "
+			"%u(%d) jobs, %s",
+			slurmctld_diag_stats.bf_last_depth,
+			job_test_count, TIME_STR);
+		}
+	if ((!migration_continue) ||
+		(slurmctld_conf.last_update != config_update) ||
+		(last_part_update != part_update)) {
 			if (debug_flags & DEBUG_FLAG_MIGRATION) {
-				END_TIMER;
-				info("migration: yielding locks after testing "
-				"%u(%d) jobs, %s",
+				info("migration: system state changed, "
+				"breaking out after testing "
+				"%u(%d) jobs",
 				slurmctld_diag_stats.bf_last_depth,
-				job_test_count, TIME_STR);
+				job_test_count);
 			}
-		if ((!migration_continue) ||
-			(slurmctld_conf.last_update != config_update) ||
-			(last_part_update != part_update)) {
-				if (debug_flags & DEBUG_FLAG_MIGRATION) {
-					info("migration: system state changed, "
-					"breaking out after testing "
-					"%u(%d) jobs",
-					slurmctld_diag_stats.bf_last_depth,
-					job_test_count);
-				}
-				rc = 1;
-				xfree(job_queue_rec);
-				break;
-			}
-			/* Reset migration scheduling timers, resume testing */
-			sched_start = time(NULL);
-			gettimeofday(&start_tv, NULL);
-			job_test_count = 0;
-			test_time_count = 0;
-			START_TIMER;
+			rc = 1;
+			goto clean;
 		}
-		//ESTE ES EL TRABAJO EN EJECUCION QUE PODEMOS MIGRAR
-		//vamos a ver que este todo bien
-
-		job_ptr  = job_queue_rec->job_ptr;
-		if (!job_ptr)	/* All task array elements started */
-			continue;
-		if (!IS_JOB_RUNNING(job_ptr))	/* Something happened while getting here */
-			continue;
-
-
-/*
-a different approach could be joining those two methods in something like
-"get_destination_node", which returns the node(s) where the job should be
-migrated to have a faster execution.
-
-This however depends on the final objective of this algorithm and is not relevant
-right here
-*/
-
-
-		if (!_should_be_migrated(job_ptr))
-			continue;
-
-	//debug ("migration for sched algorithm disabled");
-	//continue;
+		/* Reset migration scheduling timers, resume testing */
+		sched_start = time(NULL);
+		gettimeofday(&start_tv, NULL);
+		job_test_count = 0;
+		test_time_count = 0;
+		START_TIMER;
+	}
 
 		//debug ("MANUEL 8");
 	//slurm_checkpoint_migrate (uint32_t job_id, uint32_t step_id, char *destination_nodes, char *excluded_nodes, char *drain_node,  int shared, int spread, bool test_only)
-	if (slurm_checkpoint_migrate (job_ptr->job_id, NO_VAL, "", "acme12", "", NO_VAL, NO_VAL, true) != 0){
-		printf("Job %d cannot be migrated, continuing", job_ptr->job_id);
-		continue;
-	}
+//TODO migrarlo sin decir donde y que el sistema se apañe (es como lo hemos visto si se puede migrar)
 
-	if (slurm_checkpoint_migrate (job_ptr->job_id, NO_VAL, "", "acme12", "", NO_VAL, NO_VAL, false) != 0){
+	if (slurm_checkpoint_migrate (id_to_migrate, NO_VAL, "", "", "", NO_VAL, NO_VAL, false) != 0){
 		printf ("Errror when migrating job %d. What should I do?", job_ptr->job_id);
-		continue;
 	}
-	debug ("End of migration for job %u", job_ptr->job_id);
-	debug ("We only migrate a job per call. Exiting...");
-	break;
-	} //while recorrer todos los trabajos running
 
 	//DESDE AQUI, LIMPIEZA
+clean:
+	debug("MANUEL migration: end of migration, starting to clean");
+
 	xfree(bf_part_jobs);
 	xfree(uid);
 	xfree(njobs);
@@ -1042,6 +1019,134 @@ static void _job_queue_rec_del(void *x)
 {
 	xfree(x);
 }
+
+/* returns true if there are one or more jobs in queue, false if there are not */
+static bool _any_pending_job(){
+	ListIterator job_iterator;
+	struct job_record *job_ptr = NULL;
+
+	job_iterator = list_iterator_create(job_list);
+	while ((job_ptr = (struct job_record *) list_next(job_iterator))) {
+		printf ("Job %d has a status: %i\n", job_ptr->job_id, job_ptr->job_state);
+
+		if (IS_JOB_PENDING(job_ptr)) {
+			return true;
+		}
+	}
+	return false;
+}
+
+/*
+* returns job ID if migrating it would help compactation.
+* -1 means no job should be moved
+*
+*/
+extern int _migrate_to_compact(){
+	  static time_t update_time;
+	  node_info_msg_t *g_node_info_ptr= NULL;
+	  uint16_t show_flags = 0;
+	  int i;
+	  node_info_t *node_ptr = NULL;
+	  uint16_t err_cpus = 0, alloc_cpus = 0;
+	  int idle_cpus;
+	  int cpus_per_node = 1; //TODO hardcoded??
+	  int idle_cpus_on_mixed_nodes = 0;
+
+	  slurm_load_node(update_time, &g_node_info_ptr,show_flags);
+	  for (i = 0; i<g_node_info_ptr->record_count; i++) {
+	    node_ptr = &(g_node_info_ptr->node_array[i]);
+
+	    if (!node_ptr->name || (node_ptr->name[0] == '\0'))
+	      continue;	/* bad node */
+	    idle_cpus = node_ptr->cpus;
+	    slurm_get_select_nodeinfo(
+	      node_ptr->select_nodeinfo,
+	      SELECT_NODEDATA_SUBCNT,
+	      NODE_STATE_ALLOCATED,
+	      &alloc_cpus);
+	    if (!IS_NODE_ALLOCATED(node_ptr))
+	      continue;
+	    idle_cpus -= alloc_cpus;
+	    if (idle_cpus == 0)
+	      continue;
+	    printf ("CANDIDATE: %s. idle CPUs=%u, alloc_cpus=%u \n",node_ptr->name, idle_cpus, alloc_cpus);
+
+	    if (idle_cpus_on_mixed_nodes < alloc_cpus){
+	      idle_cpus_on_mixed_nodes += idle_cpus;
+	      continue;
+	      }
+	    printf ("  Los trabajos de este quizá se pueden repartir entre otros nodos\n");
+
+
+
+
+	      ////////////CHECK IF NODE CAN BE EMPTIED
+	      job_info_msg_t *job_ptr = NULL;
+	      node_info_msg_t *node_info;
+	      slurm_job_info_t job_info;
+	      update_node_msg_t node_msg;
+	      slurm_job_info_t *jobs_running_in_node;
+	      int i, cont = 0;
+	      hostlist_t hl;
+	      uint32_t old_node_state;
+
+	      if (slurm_load_node_single(&node_info, node_ptr->name, 0) != 0) {
+	    		slurm_perror (" Could not get info from node\n");
+	    		return (-1);
+	    	}
+
+	    	//load job info
+	    	if (slurm_load_jobs(0, &job_ptr, SHOW_DETAIL) != 0) {
+	    		 slurm_perror ("slurm_load_jobs error\n");
+	    		 return -1;
+	    	 }
+
+	    	//Get all jobs running on that node
+	    	jobs_running_in_node = malloc (sizeof(slurm_job_info_t) * job_ptr->record_count);
+
+	    	bool problem = false;
+	      int jobToMigrate=0;
+	    	for (i = 0; i < job_ptr->record_count; i++){
+	    		job_info = job_ptr->job_array[i];
+	    		printf ("Job %d is running on %s\n",job_ptr->job_array[i].job_id, job_ptr->job_array[i].nodes );
+	    		hl = hostlist_create(job_info.nodes);
+
+	        if (slurm_hostlist_find(hl,node_ptr->name) != 0 ){
+	          printf ("Job %d is NOT running on node  %s, skipping it.  \n", job_info.job_id, node_ptr->name);
+	          continue;
+	          }
+
+	    		if (hostlist_count(hl) > 1){
+	          printf ("   job is running on more than one node. Cannot empty node %s \n", node_ptr->name);
+	    			break;
+	          }
+
+	    		if (slurm_checkpoint_migrate(job_info.job_id, NO_VAL, "", "", "",  (uint16_t)NO_VAL, false, true) !=0){
+	    			printf ("  Job %d cannot be migrated. Cannot empty node %s.\n",job_info.job_id, node_ptr->name);
+	          problem = true;
+	    			break;
+	    			}
+	    		printf (  "We need to migrate job %d\n ",job_info.job_id);
+	    		jobToMigrate=job_info.job_id;
+	    		cont +=1;
+	    	}
+	      if (problem ){
+	        printf ("  los trabajos del nodo %s NO se pueden repartrir entre otros nodos\n",node_ptr->name );
+	        continue;
+	      }
+	//////////WE CAN MIGRATE TO CONCENTRATE
+	//Get all jobs running on that node
+	      printf ("migrating job %u", jobToMigrate);
+	      return (jobToMigrate);
+
+
+	    }
+
+	  return (-1);
+}
+
+
+
 /*
  * _build_running_job_queue - build (non-priority ordered) list of running jobs
  * RET the job queue
