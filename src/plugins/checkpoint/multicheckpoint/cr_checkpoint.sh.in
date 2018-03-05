@@ -1,20 +1,13 @@
 #!/bin/sh
 
+#### PROBLEM WITH SOME MERGE. WILL FAIL FOR SURE.
+
 source /etc/profile
 DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 source $DIR/cr_common.sh
 
-<<<<<<< HEAD
-#echo "CHECKPOINT"
-#set -x
-
-#input parameters:
-#$1: SLURM_JOB_ID
-=======
-
 #input parameters:
 #$1: slurm_job_id
->>>>>>> migration
 #$2: jobPID
 #$3: contextFile
 #$5: full job name
@@ -25,11 +18,7 @@ source $DIR/cr_common.sh
 
 #Auxiliary functions. Each one creates a checkpoint with a certain lib
 checkpointBLCRJob(){
-<<<<<<< HEAD
-  cd $checkpoint_folder
-=======
   cd $checkpointDir
->>>>>>> migration
   cr_checkpoint -T $jobPID -f $contextFile
   return 0
 }

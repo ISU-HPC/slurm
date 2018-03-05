@@ -617,7 +617,8 @@ AC_CONFIG_FILES([Makefile
 		 src/plugins/sched/backfill/Makefile
 		 src/plugins/sched/builtin/Makefile
 		 src/plugins/sched/hold/Makefile
-		 src/plugins/sched/migration/Makefile
+		 src/plugins/sched/migration_compact/Makefile
+		 src/plugins/sched/migration_prio/Makefile
 		 src/plugins/select/Makefile
 		 src/plugins/select/alps/Makefile
 		 src/plugins/select/alps/libalps/Makefile

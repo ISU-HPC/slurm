@@ -895,7 +895,8 @@ rm -rf $RPM_BUILD_ROOT
 %{_libdir}/slurm/sched_backfill.so
 %{_libdir}/slurm/sched_builtin.so
 %{_libdir}/slurm/sched_hold.so
-%{_libdir}/slurm/sched_migration.so
+%{_libdir}/slurm/sched_migration_compact.so
+%{_libdir}/slurm/sched_migration_prio.so
 %{_libdir}/slurm/select_alps.so
 %{_libdir}/slurm/select_cray.so
 %{_libdir}/slurm/select_cons_res.so
