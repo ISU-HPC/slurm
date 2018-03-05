@@ -144,6 +144,7 @@ static void _add_reservation(uint32_t start_time, uint32_t end_reserve,
 static void *_attempt_migration(void *dummyArg);
 static bool _any_pending_job();
 extern int _migrate_to_compact();
+extern int  _migrate_for_priorities(int *jobToMigrateID, char *partition);
 extern List _build_running_job_queue();
 static bool _should_be_migrated(struct job_record *job_ptr);
 static int  _delta_tv(struct timeval *tv);
@@ -153,7 +154,9 @@ static bool _many_pending_rpcs(void);
 static bool _more_work(time_t last_migration_time);
 static uint32_t _my_sleep(int usec);
 void _printBitStr(void *data, int size);
-
+int _comparePartitions( const void* a, const void* b);
+int _idle_cpus_on_partition(partition_info_t partition_info);
+int _find_suitable_job_in_partititon(char *partition, int size);
 
 
 static bool _many_pending_rpcs(void)
@@ -684,70 +687,6 @@ extern void *migration_agent(void *args)
 	return NULL;
 }
 
-//here we decide if a given job can be migrated or not
-static bool _should_be_migrated(struct job_record *job_ptr){
-	time_t start_time;
-	printf ("Deciding what to do with job %d\n", job_ptr->job_id);
-
-	//TODO esto tendría que ser algo como job_ptr->step_id (slurmctld.h)
-	if (slurm_checkpoint_able(job_ptr->job_id, NO_VAL,&start_time) != 0) {
-		debug ("Job %u is not checkpointable, not migrating this job",job_ptr->job_id );
-		return false;
-	}
-
-
-	///job_ptr is declared in /slurm/src/slurmctld/slurmctld.h
-	if (job_ptr->details->req_nodes != NULL ) {
-		debug ("User has specified required nodes for job %u, not migrating this job", job_ptr->job_id);
-		return false;
-	}
-
-	//it makes no sense to migrate a job employing a whole node
-	//note that this is called "exclusive" in some other places
-	if (job_ptr->details->whole_node == 1 ) {
-		debug ("User has specified whole node for job %u, not migrating this job", job_ptr->job_id);
-		return false;
-	}
-
-
-	/*
-	The following examples serve as proof of concept and to show how to
-	access the different resources and fields available to the developer
-	*/
-
-	//Migrate serial jobs from nodes 1X to 3X
-	if (job_ptr->total_cpus == 1){
-
-		printf ("penultima cifra: %c\n", job_ptr->nodes[strlen(job_ptr->nodes)-2]);
-	 	int one = '1';
-		if (job_ptr->nodes[strlen(job_ptr->nodes)-2] !=  one)
-			return false;
-}
-	// We are migrating parallel jobs NOT using the minnimum posible number of nodes
-if (job_ptr->total_cpus > 1){
-	printf ("JOB %d IS A PARALLEL JOB WITH %d CPUs\n", job_ptr->job_id, job_ptr->total_cpus);
-	int avg_node_size = cluster_cpus / bit_size(avail_node_bitmap); //problem: clusters heterogéneos con CPUs de distintos tamaños
-
-	//home-made CEIL implementation for positive integers
-	int number_of_nodes = bit_set_count(job_ptr->job_resrcs->node_bitmap);
-	int minimal_number_of_nodes = (int)(job_ptr->cpu_cnt / avg_node_size);
-	if (minimal_number_of_nodes * avg_node_size < job_ptr->cpu_cnt)
-			minimal_number_of_nodes += 1;
-
-	if (number_of_nodes <= minimal_number_of_nodes)
-		return false;
-	else
-		debug ("job %u is NOT running in the minnimum posible number of nodes, we should migrate", job_ptr->job_id);
-
-}
-
-	debug ("We are migratig job with id %u and node %s", job_ptr->job_id, job_ptr->nodes);
-		return true;
-}
-
-
-
-
 //MANUEL this is called every minute. Here we decide whether to migrate each job or not.
 //it is called by  *migration_agent(void *args)
 //this uses to be "int"
@@ -824,10 +763,14 @@ static void *_attempt_migration(void *dummyArg)
 
 	debug("MANUEL migration: OK  migrating");
 
-	int id_to_migrate;
-	id_to_migrate = _migrate_to_compact();
+	int id_to_migrate,result;
+	char partition[99];
 
-	if (id_to_migrate == -1) goto clean;
+	result = _migrate_for_priorities(&id_to_migrate,partition);
+	if (result == -1) goto clean;
+
+	debug ("_attempt_migration: migrating job %u to partition %s", id_to_migrate, partition);
+
 
 
 	if (slurmctld_config.shutdown_time ||
@@ -868,11 +811,7 @@ static void *_attempt_migration(void *dummyArg)
 		START_TIMER;
 	}
 
-		//debug ("MANUEL 8");
-	//slurm_checkpoint_migrate (uint32_t job_id, uint32_t step_id, char *destination_nodes, char *excluded_nodes, char *drain_node,  int shared, int spread, bool test_only)
-//TODO migrarlo sin decir donde y que el sistema se apañe (es como lo hemos visto si se puede migrar)
-
-	if (slurm_checkpoint_migrate (id_to_migrate, NO_VAL, "", "", "", NO_VAL, NO_VAL, false) != 0){
+	if (slurm_checkpoint_migrate (id_to_migrate, NO_VAL, "", "", "", partition, NO_VAL, NO_VAL, false) != 0){
 		printf ("Errror when migrating job %d. What should I do?", job_ptr->job_id);
 	}
 
@@ -1045,12 +984,16 @@ extern int _migrate_to_compact(){
 	  static time_t update_time;
 	  node_info_msg_t *g_node_info_ptr= NULL;
 	  uint16_t show_flags = 0;
-	  int i;
 	  node_info_t *node_ptr = NULL;
-	  uint16_t err_cpus = 0, alloc_cpus = 0;
+	  uint16_t alloc_cpus = 0;
 	  int idle_cpus;
-	  int cpus_per_node = 1; //TODO hardcoded??
 	  int idle_cpus_on_mixed_nodes = 0;
+		job_info_msg_t *job_ptr = NULL;
+		slurm_job_info_t job_info;
+		slurm_job_info_t *jobs_running_in_node;
+		int i, cont = 0;
+		hostlist_t hl;
+
 
 	  slurm_load_node(update_time, &g_node_info_ptr,show_flags);
 	  for (i = 0; i<g_node_info_ptr->record_count; i++) {
@@ -1077,73 +1020,154 @@ extern int _migrate_to_compact(){
 	      }
 	    printf ("  Los trabajos de este quizá se pueden repartir entre otros nodos\n");
 
+    	////////////CHECK IF NODE CAN BE EMPTIED
+    	//load job info
+    	if (slurm_load_jobs(0, &job_ptr, SHOW_DETAIL) != 0) {
+				//slurm_free_node_info_msg(node_info);
+    		 slurm_perror ("slurm_load_jobs error\n");
+    		 return -1;
+    	 }
 
+    	//Get all jobs running on that node
+    	jobs_running_in_node = malloc (sizeof(slurm_job_info_t) * job_ptr->record_count);
 
+    	bool problem = false;
+      int jobToMigrate=0;
+    	for (i = 0; i < job_ptr->record_count; i++){
+    		job_info = job_ptr->job_array[i];
+    		printf ("Job %d is running on %s\n",job_ptr->job_array[i].job_id, job_ptr->job_array[i].nodes );
+    		hl = hostlist_create(job_info.nodes);
 
-	      ////////////CHECK IF NODE CAN BE EMPTIED
-	      job_info_msg_t *job_ptr = NULL;
-	      node_info_msg_t *node_info;
-	      slurm_job_info_t job_info;
-	      update_node_msg_t node_msg;
-	      slurm_job_info_t *jobs_running_in_node;
-	      int i, cont = 0;
-	      hostlist_t hl;
-	      uint32_t old_node_state;
+        if (slurm_hostlist_find(hl,node_ptr->name) != 0 ){
+          printf ("Job %d is NOT running on node  %s, skipping it.  \n", job_info.job_id, node_ptr->name);
+          continue;
+          }
 
-	      if (slurm_load_node_single(&node_info, node_ptr->name, 0) != 0) {
-	    		slurm_perror (" Could not get info from node\n");
-	    		return (-1);
-	    	}
+    		if (hostlist_count(hl) > 1){
+          printf ("   job is running on more than one node. Cannot empty node %s \n", node_ptr->name);
+    			break;
+          }
 
-	    	//load job info
-	    	if (slurm_load_jobs(0, &job_ptr, SHOW_DETAIL) != 0) {
-	    		 slurm_perror ("slurm_load_jobs error\n");
-	    		 return -1;
-	    	 }
-
-	    	//Get all jobs running on that node
-	    	jobs_running_in_node = malloc (sizeof(slurm_job_info_t) * job_ptr->record_count);
-
-	    	bool problem = false;
-	      int jobToMigrate=0;
-	    	for (i = 0; i < job_ptr->record_count; i++){
-	    		job_info = job_ptr->job_array[i];
-	    		printf ("Job %d is running on %s\n",job_ptr->job_array[i].job_id, job_ptr->job_array[i].nodes );
-	    		hl = hostlist_create(job_info.nodes);
-
-	        if (slurm_hostlist_find(hl,node_ptr->name) != 0 ){
-	          printf ("Job %d is NOT running on node  %s, skipping it.  \n", job_info.job_id, node_ptr->name);
-	          continue;
-	          }
-
-	    		if (hostlist_count(hl) > 1){
-	          printf ("   job is running on more than one node. Cannot empty node %s \n", node_ptr->name);
-	    			break;
-	          }
-
-	    		if (slurm_checkpoint_migrate(job_info.job_id, NO_VAL, "", "", "",  (uint16_t)NO_VAL, false, true) !=0){
-	    			printf ("  Job %d cannot be migrated. Cannot empty node %s.\n",job_info.job_id, node_ptr->name);
-	          problem = true;
-	    			break;
-	    			}
-	    		printf (  "We need to migrate job %d\n ",job_info.job_id);
-	    		jobToMigrate=job_info.job_id;
-	    		cont +=1;
-	    	}
-	      if (problem ){
-	        printf ("  los trabajos del nodo %s NO se pueden repartrir entre otros nodos\n",node_ptr->name );
-	        continue;
-	      }
-	//////////WE CAN MIGRATE TO CONCENTRATE
-	//Get all jobs running on that node
-	      printf ("migrating job %u", jobToMigrate);
-	      return (jobToMigrate);
+    		if (slurm_checkpoint_migrate(job_info.job_id, NO_VAL, "", "", "", "", (uint16_t)NO_VAL, false, true) !=0){
+    			printf ("  Job %d cannot be migrated. Cannot empty node %s.\n",job_info.job_id, node_ptr->name);
+          problem = true;
+    			break;
+    			}
+    		printf (  "We need to migrate job %d\n ",job_info.job_id);
+    		jobToMigrate=job_info.job_id;
+    		cont +=1;
+    	}
+			//slurm_free_node_info_msg(node_info);
+      if (problem ){
+        printf ("  los trabajos del nodo %s NO se pueden repartrir entre otros nodos\n",node_ptr->name );
+        continue;
+      }
+//////////WE CAN MIGRATE TO CONCENTRATE
+//Get all jobs running on that node
+      printf ("migrating job %u", jobToMigrate);
+			//TODO FREE job_ptr
+      return (jobToMigrate);
 
 
 	    }
 
 	  return (-1);
 }
+
+int _comparePartitions( const void* a, const void* b)
+{
+     partition_info_t part_a = * ( (partition_info_t*) a );
+     partition_info_t part_b = * ( (partition_info_t*) b );
+
+     if ( part_a.priority_job_factor == part_b.priority_job_factor ) return 0;
+     else if ( part_a.priority_job_factor < part_b.priority_job_factor ) return -1;
+     else return 1;
+}
+
+
+/*
+* returns job ID if migrating it would help priorities.
+* -1 means no job should be moved
+*
+*/
+extern int _migrate_for_priorities(int *jobToMigrateID, char *partition){
+	  static time_t update_time;
+	  int i,j;
+	  int idle_cpus_on_partition;
+		partition_info_msg_t *part_buffer_ptr;
+		partition_info_t partition_info;
+		int jobToMigrate = -1;
+
+		if (slurm_load_partitions(update_time, &part_buffer_ptr, 0) !=0){
+			debug ("Could not get partition info, not migrating anything");
+			return -1;
+		}
+
+		//partition info storage
+		int empty_slots[part_buffer_ptr->record_count];
+
+		qsort( part_buffer_ptr->partition_array, part_buffer_ptr->record_count, sizeof(partition_info_t), _comparePartitions );
+		debug ("PRINT PARTITION INFO, SORTED BY PRIORITY");
+
+		for (i = part_buffer_ptr->record_count-1; i >=0 ; i--){
+				partition_info = part_buffer_ptr->partition_array[i];
+				idle_cpus_on_partition=	_idle_cpus_on_partition(partition_info);
+				empty_slots[i] = idle_cpus_on_partition;
+
+		} //para cada partición
+
+		//RECORREMOS LAS PARTICIONES EN SENTIDO CONTRARIO, VIENDO SI HAY ALGUN TRABAJO QUE PODAMOS MOVER.
+		//para cada particion, miramos las de menor prioridad
+//		debug ("**********");
+		for (i = part_buffer_ptr->record_count-1; i >=0 ; i--){
+//			debug ("****** high priority: %s",part_buffer_ptr->partition_array[i].name );
+			for (j = 0; j < i ; j++){
+
+			debug ("---- partition %s: %u free slots; partition %s: %u free slots",
+				part_buffer_ptr->partition_array[i].name,empty_slots[i],
+				part_buffer_ptr->partition_array[j].name,empty_slots[j]);
+
+				//several partitions can have the same priority
+				if (part_buffer_ptr->partition_array[j].priority_job_factor >= part_buffer_ptr->partition_array[i].priority_job_factor){
+					debug ("partition %s has greater or equal priority than partition %s",
+				part_buffer_ptr->partition_array[i].name,part_buffer_ptr->partition_array[j].name);
+					continue;
+					}
+					debug ("priorities OK, continue migration process");
+
+				jobToMigrate = _find_suitable_job_in_partititon(part_buffer_ptr->partition_array[j].name, empty_slots[i]);
+
+				if (jobToMigrate <0){
+					debug ("partition has no suitable job to migrate");
+					continue;
+					}
+				debug ("There is room in partititon %s for job %u", part_buffer_ptr->partition_array[i].name, jobToMigrate);
+
+				if (slurm_checkpoint_migrate(jobToMigrate, NO_VAL, "", "", "",
+					part_buffer_ptr->partition_array[i].name, (uint16_t)NO_VAL, false, true) !=0){
+						slurm_perror("ERROR TESTING MIGRATION:");
+						jobToMigrate =-1;
+					}
+
+					else{
+						debug ("we have found a suitable job to migrate with ID %u, ending process.", jobToMigrate);
+					  strcpy(partition,part_buffer_ptr->partition_array[i].name);
+						break;
+					}
+			} //para las particiones con menos prioridad
+			//we are starting in the lowest priority, so as soon as we find one, job to migrate we stop
+			if (jobToMigrate != -1)
+				break;
+		} //para todas las particiones
+		slurm_free_partition_info_msg(part_buffer_ptr);
+		*jobToMigrateID = jobToMigrate;
+
+		if (jobToMigrate > 0)
+	  	return (0);
+		else
+			return (-1);
+}
+
 
 
 
@@ -1179,4 +1203,98 @@ extern List _build_running_job_queue()
 	}
 	list_iterator_destroy(job_iterator);
 	return job_queue;
+}
+
+int _idle_cpus_on_partition(partition_info_t partition_info){
+	hostlist_t hl;
+	int hostlistSize;
+	int i;
+	node_info_msg_t *node_info;
+	node_info_t *node_ptr = NULL;
+	int idle_cpus_on_partition=0, idle_cpus_on_node=0, alloc_cpus = 0;
+	char *hostname;
+
+///DEBUG
+	static time_t update_time;
+	node_info_msg_t *g_node_info_ptr= NULL;
+	slurm_load_node(update_time, &g_node_info_ptr,0);
+
+
+	if ( partition_info.state_up!= PARTITION_UP)
+		return 0;
+//	slurm_print_partition_info(stdout, &partition_info, 0);
+
+	hl = hostlist_create(partition_info.nodes);
+	hostlistSize=hostlist_count(hl);
+
+	for (i = 0; i < hostlistSize; i++ ){
+		hostname = slurm_hostlist_shift(hl);
+		if (slurm_load_node_single(&node_info, hostname, 0) != 0)
+			return (0);
+
+		node_ptr = &node_info->node_array[0];
+
+		idle_cpus_on_node = node_ptr->cpus;
+		slurm_get_select_nodeinfo(
+			node_ptr->select_nodeinfo,
+			SELECT_NODEDATA_SUBCNT,
+			NODE_STATE_ALLOCATED,
+			&alloc_cpus);
+
+		if (!(IS_NODE_ALLOCATED(node_ptr) ||
+			IS_NODE_IDLE(node_ptr) || IS_NODE_MIXED(node_ptr)))
+			continue;
+//		slurm_print_node_table(stdout, node_ptr,1,false);
+
+		idle_cpus_on_node -= alloc_cpus;
+		idle_cpus_on_partition += idle_cpus_on_node;
+//		debug ("El host  %s tiene %u CPUs libres y %u ocupadas",
+//			hostname, idle_cpus_on_node, alloc_cpus);
+	}
+//	debug ("La particion %s tiene %u CPUs libres", partition_info.name, idle_cpus_on_partition);
+	return idle_cpus_on_partition;
+
+}
+
+int _find_suitable_job_in_partititon(char *partition, int size){
+	slurm_job_info_t job_info;
+	job_info_msg_t *job_ptr = NULL;
+	int i;
+	int jobToMigrate = -1;
+	int closest_job_size=0;
+
+	debug ("trying to find a job in partition %s with max size of %u", partition, size);
+	//load job info
+	if (slurm_load_jobs(0, &job_ptr, SHOW_DETAIL) != 0) {
+		//slurm_free_node_info_msg(node_info);
+		 slurm_perror ("slurm_load_jobs error\n");
+		 return -1;
+	 }
+
+	 for (i = 0; i < job_ptr->record_count; i++){
+		 job_info = job_ptr->job_array[i];
+		 debug ("checking job %u", job_info.job_id);
+
+		 if (strcmp(partition,job_info.partition) != 0)
+			 //es distinta particion
+			 //debug ("_find_suitable_job_in_partititon: partition is different");
+			 continue;
+
+		 if (job_info.req_nodes != NULL)
+		 //running on specific nodes
+		// debug ("_find_suitable_job_in_partititon: job is running on specific nodes, cannot be changed");
+			 continue;
+
+		 if ((job_info.num_tasks <= size) && (job_info.num_tasks > closest_job_size)){
+			 jobToMigrate = job_info.job_id;
+			 closest_job_size = job_info.num_tasks;
+			 debug ("Job with id: %u has size %u, closest to %u in this partition",
+			 	jobToMigrate, closest_job_size, size);
+			}
+				//debug("_find_suitable_job_in_partititon: number of tasks is too big or not close enough to the job size");
+
+		}
+
+		return jobToMigrate;
+
 }

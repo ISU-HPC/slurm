@@ -66,6 +66,7 @@ typedef struct smigrate_options {
 	bool hold;		/* --hold, -H			*/
 	unsigned int jobid;     /* --jobid=jobid                */
 	char* nodes; /* comma-separated list of nodes to allocate the job in */
+	char* partition; /* destination partition */
 	unsigned int  priority;	/* --priority                   */
 	int  quiet;
 	uint16_t shared; /* --exclusive, -e */

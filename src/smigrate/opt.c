@@ -192,6 +192,7 @@ static void _opt_default()
   opt.hold	    = false;
 	opt.jobid    = NO_VAL;
 	opt.nodes = "";
+  opt.partition = "";
 	opt.priority = 0;
   opt.quiet = 0;
   opt.shared = (uint16_t)NO_VAL;
@@ -215,6 +216,7 @@ static struct option long_options[] = {
 	{"help",          no_argument,       0, 'h'},
 	{"hold",          no_argument,       0, 'H'}, /* undocumented */
 	{"nodelist",      required_argument, 0, 'w'},
+  {"partition",     required_argument, 0, 'p'},
 	{"priority",      required_argument, 0, LONG_OPT_PRIORITY},
 	{"quiet",         no_argument,       0, 'Q'},
   {"spread-job",    no_argument,       0, LONG_OPT_SPREAD_JOB},
@@ -368,6 +370,9 @@ static void _set_options(int argc, char **argv)
 		case 'H':
 			opt.hold = true;
 			break;
+    case 'p':
+        opt.partition = optarg;
+        break;
 		case 'w':
 			opt.nodes = optarg;
 			break;
@@ -457,11 +462,12 @@ static void _opt_list(void)
 
 	info("defined options for program `%i'", opt.jobid);
 	info("----------------- ---------------------");
-  info("drain-node  : %s", opt.drain_node);
-  info("excluded-nodes  : %s", opt.excluded_nodes);
+  info("drain-node     : %s", opt.drain_node);
+  info("excluded-nodes : %s", opt.excluded_nodes);
   info("exclusive      : %s", opt.shared ? "True" : "False" );
 	info("hold           : %s", opt.hold ? "True" : "False" );
 	info("nodelist       : %s", opt.nodes);
+  info("partition      : %s", opt.partition);
 	info("priority       : %u", opt.priority);
 	info("quiet          : %s", opt.quiet ? "True" : "False" );
 	info("stepid         : %u", opt.stepid);
@@ -482,6 +488,7 @@ static void _help(void)
 "  -e, --exclusive             exclusive usage of the nodes\n"
 "  -w, --nodelist=hosts...     request a specific list of hosts\n"
 "  -x, --exclude=hosts...      exclude a specific list of hosts\n"
+"  -p, --partition=partition   migrate to an specific partition\n"
 "  -Q, --quiet                 quiet mode (suppress informational messages)\n"
 "  -v, --verbose               verbose mode (multiple -v's increase verbosity)\n"
 "  -H, --hold                  submit job in held state\n"

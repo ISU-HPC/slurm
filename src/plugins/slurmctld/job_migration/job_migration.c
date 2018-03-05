@@ -18,22 +18,22 @@
 char** _str_split(char* a_str, const char a_delim);
 static int _print_existing_jobs (void);
 static int _job_info_to_job_desc (job_info_t job_info, job_desc_msg_t *job_desc_msg);
-extern int _migrate_job(uint32_t job_id, uint32_t step_id, char *destination_nodes, char *excluded_nodes, int shared, int spread, bool test_only);
-extern int _drain_node( char *destination_nodes, char *excluded_nodes, char *drain_node, int shared, int spread, bool test_only);
+extern int _migrate_job(uint32_t job_id, uint32_t step_id, char *destination_nodes, char *excluded_nodes, char *partition, int shared, int spread, bool test_only);
+extern int _drain_node( char *destination_nodes, char *excluded_nodes, char *drain_node, char *partition, int shared, int spread, bool test_only);
 
-extern int slurm_checkpoint_migrate (uint32_t job_id, uint32_t step_id, char *destination_nodes, char *excluded_nodes, char *drain_node,  int shared, int spread, bool test_only)
+extern int slurm_checkpoint_migrate (uint32_t job_id, uint32_t step_id, char *destination_nodes, char *excluded_nodes, char *drain_node,  char *partition, int shared, int spread, bool test_only)
 {
 
 	//printf("\n\n\njob_id=%u,\nstep_id=%u,\ndestination_nodes=%s,\nexcluded_nodes=%s, \ndrain_node=%s,\nshared=%u,\nspread=%u\n\n\n",job_id, step_id, destination_nodes, excluded_nodes, drain_node, shared, spread);
 	if (drain_node[0] == '\0' )
-		return _migrate_job(job_id, step_id, destination_nodes, excluded_nodes, shared, spread, test_only);
+		return _migrate_job(job_id, step_id, destination_nodes, excluded_nodes, partition, shared, spread, test_only);
 
 	else if ((drain_node[0] == '\0' ) && (job_id != 0)){
 		slurm_perror ("drain-node and a job id are incompatible");
 		return (EMIGRATION_JOB_ERROR);
 	}
 	else if (drain_node[0] != '\0' )
-		return _drain_node(destination_nodes, excluded_nodes, drain_node, shared, spread, test_only);
+		return _drain_node(destination_nodes, excluded_nodes, drain_node, partition, shared, spread, test_only);
 
 	else {
 		slurm_perror ("No Job ID and no node to drain specified, exiting");
@@ -44,7 +44,7 @@ extern int slurm_checkpoint_migrate (uint32_t job_id, uint32_t step_id, char *de
 }
 
 
-extern int _migrate_job(uint32_t job_id, uint32_t step_id, char *destination_nodes, char *excluded_nodes, int shared, int spread, bool test_only){
+extern int _migrate_job(uint32_t job_id, uint32_t step_id, char *destination_nodes, char *excluded_nodes, char *partition, int shared, int spread, bool test_only){
 	//	printf("\n\n\njob_id=%u,\nstep_id=%u,\ndestination_nodes=%s,\nexcluded_nodes=%s, \nshared=%u,\nspread=%u\n\n\n",job_id, step_id, destination_nodes, excluded_nodes, shared, spread);
 
 		int error = 0;
@@ -94,6 +94,8 @@ extern int _migrate_job(uint32_t job_id, uint32_t step_id, char *destination_nod
 			if (destination_nodes[0] != '\0' )
 				job_desc_msg_test.req_nodes = destination_nodes;
 
+				if (partition[0] != '\0' )
+					job_desc_msg_test.partition = partition;
 
 			if (excluded_nodes[0] != '\0' ){
 				int bufsize=999;
@@ -121,12 +123,12 @@ extern int _migrate_job(uint32_t job_id, uint32_t step_id, char *destination_nod
 				slurm_perror("Error: job will not run");
 				return(EMIGRATION_ERROR);
 				}
-				debug ("BEFORE TEST_ONLY");
+//				debug ("BEFORE TEST_ONLY");
 
 			if (test_only)
 				return (EMIGRATION_SUCCESS);
 
-		debug ("ABOUT TO CHECKPOINT");
+//		debug ("ABOUT TO CHECKPOINT");
 	/*checkpoint*/
 		char* checkpoint_directory = slurm_get_checkpoint_dir();
 
@@ -149,7 +151,9 @@ extern int _migrate_job(uint32_t job_id, uint32_t step_id, char *destination_nod
 
 		if (job_info.job_state != JOB_COMPLETE){
 			slurm_perror("Job is a wrong status for checkpoint, aborting\n");
-			return(EMIGRATION_ERROR);
+			//TODO MANUEL: comentado esto porque quiza cascaba aqui
+//			return(EMIGRATION_ERROR);
+		return (-1);
 			}
 
 			printf("Job is finally finallized. Now we'll wait for it to be deleted from the system (this might take a while)\n");
@@ -175,12 +179,6 @@ extern int _migrate_job(uint32_t job_id, uint32_t step_id, char *destination_nod
 
 		job_desc_msg.job_id = job_info.job_id;
 
-		//we know this DOES work, but it is not so elegant
-		//job_desc_msg.priority = NO_VAL - 1;
-		printf("See what happens with priority. Did it go first?");
-		char job_id_str[15];
-		sprintf(job_id_str, "%d", job_info.job_id);
-		slurm_top_job(job_id_str);
 
 		if (destination_nodes[0] != '\0' )
 			job_desc_msg.req_nodes = destination_nodes;
@@ -188,11 +186,19 @@ extern int _migrate_job(uint32_t job_id, uint32_t step_id, char *destination_nod
 		if (excluded_nodes[0] != '\0' )
 			job_desc_msg.exc_nodes = excluded_nodes;
 
+		if (partition[0] != '\0' )
+			job_desc_msg.partition = partition;
+
+
 		if (shared != (uint16_t)NO_VAL)
 			job_desc_msg.shared = shared;
 
 			if (spread)
 				job_desc_msg.bitflags |= SPREAD_JOB;
+
+		char job_id_str[15];
+		sprintf(job_id_str, "%d", job_info.job_id);
+		slurm_top_job(job_id_str);
 
 		if (slurm_update_job(&job_desc_msg) != 0) {
 			slurm_perror("Error setting migration requirements for job");
@@ -209,7 +215,7 @@ extern int _migrate_job(uint32_t job_id, uint32_t step_id, char *destination_nod
 }
 
 
-extern int _drain_node(char *destination_nodes, char *excluded_nodes, char *drain_node, int shared, int spread, bool test_only){
+extern int _drain_node(char *destination_nodes, char *excluded_nodes, char *drain_node, char* partition, int shared, int spread, bool test_only){
 
 	job_info_msg_t *job_ptr = NULL;
 	node_info_msg_t *node_info;
@@ -264,7 +270,7 @@ extern int _drain_node(char *destination_nodes, char *excluded_nodes, char *drai
 		if (hostlist_find(hl, drain_node) == -1)
 			continue;
 
-		if (_migrate_job(job_info.job_id, NO_VAL, destination_nodes, drain_node, shared, spread, true) !=0){
+		if (_migrate_job(job_info.job_id, NO_VAL, destination_nodes, partition, drain_node, shared, spread, true) !=0){
 			printf ("Job %d cannot be migrated, aborting.\n",job_info.job_id);
 			return SLURM_ERROR;
 			}
@@ -290,7 +296,7 @@ extern int _drain_node(char *destination_nodes, char *excluded_nodes, char *drai
 			continue;
 
 		//after all verifications, migrate
-		if (_migrate_job(job_info.job_id, NO_VAL, destination_nodes, drain_node, shared, spread, false) !=0){
+		if (_migrate_job(job_info.job_id, NO_VAL, destination_nodes, partition, drain_node, shared, spread, false) !=0){
 		        printf ("Job %d could not be migrated, aborting node draining. Cancel it manually and try again.\n", job_info.job_id);
 						node_msg.node_state = old_node_state;
 						if (slurm_update_node(&node_msg)) {

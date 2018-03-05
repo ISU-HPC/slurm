@@ -109,7 +109,8 @@ int main(int argc, char *argv[])
 		exit(error_exit);
 	}
 
-  err = slurm_checkpoint_migrate ( opt.jobid, opt.stepid, opt.nodes, opt.excluded_nodes, opt.drain_node, opt.shared, opt.spread, opt.test_only);
+  err = slurm_checkpoint_migrate ( opt.jobid, opt.stepid, opt.nodes,
+    opt.excluded_nodes, opt.drain_node, opt.partition, opt.shared, opt.spread, opt.test_only);
   if (err != 0) {
     error("Could not migrate task. Error code is %d", err);
     return err;

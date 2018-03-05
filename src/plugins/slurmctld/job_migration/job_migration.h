@@ -41,7 +41,9 @@ enum migration_err {
 typedef enum migration_err migration_err_t;
 
 /* migrates a job after it has been checkpointed. */
-extern int slurm_checkpoint_migrate (uint32_t job_id, uint32_t step_id, char *destination_nodes, char *excluded_nodes, char *drain_node,  int shared, int spread, bool test_only);
+extern int slurm_checkpoint_migrate (uint32_t job_id, uint32_t step_id,
+	char *destination_nodes, char *excluded_nodes, char *drain_node,
+	char *partition, int shared, int spread, bool test_only);
 
 END_C_DECLS
 #endif
