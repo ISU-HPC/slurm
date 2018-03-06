@@ -4721,11 +4721,16 @@ extern char * debug_flags2str(uint64_t debug_flags)
 			xstrcat(rc, ",");
 		xstrcat(rc, "License");
 	}
- 	if (debug_flags & DEBUG_FLAG_MIGRATION) {
+ 	if (debug_flags & DEBUG_FLAG_MIGRATION_COMP) {
 		if (rc)
  			xstrcat(rc, ",");
- 		xstrcat(rc, "Migration");
+ 		xstrcat(rc, "Migration_comp");
  	}
+	if (debug_flags & DEBUG_FLAG_MIGRATION_PRIO) {
+		if (rc)
+			xstrcat(rc, ",");
+		xstrcat(rc, "Migration_prio");
+	}
 	if (debug_flags & DEBUG_FLAG_NO_CONF_HASH) {
 		if (rc)
 			xstrcat(rc, ",");
@@ -5146,4 +5151,3 @@ extern int add_remote_nodes_to_conf_tbls(char *node_list,
 
 	return SLURM_SUCCESS;
 }
-

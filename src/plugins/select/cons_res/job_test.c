@@ -588,13 +588,20 @@ uint16_t _can_job_run_on_node(struct job_record *job_ptr, bitstr_t *core_map,
 	}
 
 	/* MANUEL: ESTO NO TENGO NI IDEA, LO HE COPIADO DE ARRIBA */
-  if (((job_ptr->bit_flags & MIGRATION_TEST) == 0) &&
+  if (((job_ptr->bit_flags & MIGRATION_TEST_COMP) == 0) &&
   		!test_only && IS_NODE_COMPLETING(node_ptr)) {
   	/* Do not allocate more jobs to nodes with completing jobs,
   	* migration scheduler independently handles completing nodes */
   	cpus = 0;
   	return cpus;
    }
+ if (((job_ptr->bit_flags & MIGRATION_TEST_PRIO) == 0) &&
+		!test_only && IS_NODE_COMPLETING(node_ptr)) {
+	/* Do not allocate more jobs to nodes with completing jobs,
+	* migration scheduler independently handles completing nodes */
+	cpus = 0;
+	return cpus;
+	}
 	core_start_bit = cr_get_coremap_offset(node_i);
 	core_end_bit   = cr_get_coremap_offset(node_i+1) - 1;
 	cpus_per_core  = select_node_record[node_i].cpus /
