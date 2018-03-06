@@ -2643,8 +2643,10 @@ typedef struct reservation_name_msg {
 #define DEBUG_FLAG_NODE_FEATURES 0x0000800000000000 /* Node Features debug */
 #define DEBUG_FLAG_FEDR         0x0001000000000000 /* Federation debug */
 #define DEBUG_FLAG_HETERO_JOBS  0x0002000000000000 /* Heterogeneous job debug */
-#define DEBUG_FLAG_MIGRATION         0x0004000000000000 /* Migration debug */
-#define DEBUG_FLAG_MIGRATION_MAP     0x0008000000000000 /* Migration debug */
+#define DEBUG_FLAG_MIGRATION_COMP         0x0004000000000000 /* Migration debug */
+#define DEBUG_FLAG_MIGRATION_PRIO         0x0008000000000000 /* Migration debug */
+#define DEBUG_FLAG_MIGRATION_COMP_MAP     0x0010000000000000 /* Migration debug */
+#define DEBUG_FLAG_MIGRATION_PRIO_MAP     0x0020000000000000 /* Migration debug */
 
 #define PREEMPT_MODE_OFF	0x0000	/* disable job preemption */
 #define PREEMPT_MODE_SUSPEND	0x0001	/* suspend jobs to preempt */
