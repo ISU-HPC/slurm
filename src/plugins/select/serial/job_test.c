@@ -108,14 +108,14 @@ uint16_t _can_job_run_on_node(struct job_record *job_ptr, bitstr_t *core_map,
 	}
 
 	/* MANUEL esto no tengo ni idea, lo he copiado de arriba */
-	if (((job_ptr->bit_flags & MIGRATION_TEST_COMP) == 0) &&
+	if (((job_ptr->bit_flags & MIGRATION_COMP_TEST) == 0) &&
 			!test_only && IS_NODE_COMPLETING(node_ptr)) {
 		/* Do not allocate more jobs to nodes with completing jobs,
 		 * migration scheduler independently handles completing nodes */
 		cpus = 0;
 		return cpus;
 	}
-	if (((job_ptr->bit_flags & MIGRATION_TEST_PRIO) == 0) &&
+	if (((job_ptr->bit_flags & MIGRATION_PRIO_TEST) == 0) &&
 			!test_only && IS_NODE_COMPLETING(node_ptr)) {
 		/* Do not allocate more jobs to nodes with completing jobs,
 		 * migration scheduler independently handles completing nodes */

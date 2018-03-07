@@ -718,14 +718,14 @@ static void *_attempt_migration(void *dummyArg)
 			return SLURM_SUCCESS;
 		}
 		END_TIMER;
-		if (debug_flags & DEBUG_FLAG_MIGRATION)
+		if (debug_flags & DEBUG_FLAG_MIGRATION_PRIO)
 			info("migration: ALPS inventory completed, %s", TIME_STR);
 	#endif
 
 	(void) bb_g_load_state(false);
 
 	START_TIMER;
-	if (debug_flags & DEBUG_FLAG_MIGRATION)
+	if (debug_flags & DEBUG_FLAG_MIGRATION_PRIO)
 		info("\n\n\n\n\nmigration: beginning");
 	else
 		debug("\n\n\n\n\nmigration: beginning");
@@ -742,7 +742,7 @@ static void *_attempt_migration(void *dummyArg)
 	job_queue = _build_running_job_queue();
 	job_test_count = list_count(job_queue);
 	if (job_test_count == 0) {
-		if (debug_flags & DEBUG_FLAG_MIGRATION)
+		if (debug_flags & DEBUG_FLAG_MIGRATION_PRIO)
 			info("MANUEL migration: no running jobs");
 		else
 			debug("MANUEL migration: no running jobs");
@@ -753,7 +753,7 @@ static void *_attempt_migration(void *dummyArg)
 
 	//MANUEL
 	if (_any_pending_job()) {
-		if (debug_flags & DEBUG_FLAG_MIGRATION)
+		if (debug_flags & DEBUG_FLAG_MIGRATION_PRIO)
 			info("MANUEL migration: there are jobs in queue, not migrating");
 		else
 			debug("MANUEL migration: there are jobs in queue, not migrating");
@@ -783,7 +783,7 @@ static void *_attempt_migration(void *dummyArg)
 	if (((defer_rpc_cnt > 0) &&
 	(slurmctld_config.server_thread_count >= defer_rpc_cnt)) ||
 	(_delta_tv(&start_tv) >= sched_timeout)) {
-		if (debug_flags & DEBUG_FLAG_MIGRATION) {
+		if (debug_flags & DEBUG_FLAG_MIGRATION_PRIO) {
 			END_TIMER;
 			info("migration: yielding locks after testing "
 			"%u(%d) jobs, %s",
@@ -793,7 +793,7 @@ static void *_attempt_migration(void *dummyArg)
 	if ((!migration_continue) ||
 		(slurmctld_conf.last_update != config_update) ||
 		(last_part_update != part_update)) {
-			if (debug_flags & DEBUG_FLAG_MIGRATION) {
+			if (debug_flags & DEBUG_FLAG_MIGRATION_PRIO) {
 				info("migration: system state changed, "
 				"breaking out after testing "
 				"%u(%d) jobs",
@@ -839,7 +839,7 @@ clean:
 	gettimeofday(&bf_time2, NULL);
 	_do_diag_stats(&bf_time1, &bf_time2);
 
-	if (debug_flags & DEBUG_FLAG_MIGRATION) {
+	if (debug_flags & DEBUG_FLAG_MIGRATION_PRIO) {
 		END_TIMER;
 		info("migration: completed testing %u(%d) jobs, %s",
 		slurmctld_diag_stats.bf_last_depth,
