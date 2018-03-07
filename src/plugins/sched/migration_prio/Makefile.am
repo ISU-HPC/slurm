@@ -8,7 +8,7 @@ PLUGIN_FLAGS = -module -avoid-version --export-dynamic
 
 sched_migration_prio_la_LIBADD = $(top_builddir)/src/plugins/slurmctld/job_migration/libjob_migration.la $(DL_LIBS)
 
-pkglib_LTLIBRARIES = sched_migration_prio_prio.la
+pkglib_LTLIBRARIES = sched_migration_prio.la
 
 sched_migration_prio_la_SOURCES = migration_wrapper.c	\
 			migration.c	\
