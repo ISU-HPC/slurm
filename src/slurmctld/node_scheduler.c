@@ -2111,6 +2111,7 @@ static void _preempt_jobs(List preemptee_job_list, bool kill_pending,
 	uint16_t mode;
 	int job_cnt = 0, rc;
 	struct ckptParams *params;
+	checkpoint_msg_t ckpt_msg;
 
 	iter = list_iterator_create(preemptee_job_list);
 	while ((job_ptr = (struct job_record *) list_next(iter))) {
