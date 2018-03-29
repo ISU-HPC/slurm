@@ -45,6 +45,9 @@ Source:		%{slurm_source_dir}.tar.bz2
 %bcond_with lua
 %bcond_with numa
 
+%bcond_with dmtcp
+%bcond_with pmix
+
 # Build with OpenSSL by default on all platforms (disable using --without openssl)
 %bcond_without openssl
 
@@ -294,6 +297,8 @@ according to the Slurm
 	%{?_with_freeipmi} \
 	%{?_with_hdf5} \
 	%{?_with_shared_libslurm} \
+	%{?_with_dmtcp:--with-dmtcp} \
+	%{?_with_pmix:--with-pmix} \
 	%{?_with_cflags}
 
 make %{?_smp_mflags}
@@ -389,6 +394,10 @@ test -f %{buildroot}/%{_libexecdir}/slurm/cr_checkpoint.sh   &&
   echo %{_libexecdir}/slurm/cr_checkpoint.sh	        >> $LIST
 test -f %{buildroot}/%{_libexecdir}/slurm/cr_restart.sh      &&
   echo %{_libexecdir}/slurm/cr_restart.sh	        >> $LIST
+test -f %{buildroot}/%{_libexecdir}/slurm/cr_common.sh   &&
+  echo %{_libexecdir}/slurm/cr_common.sh                >> $LIST
+test -f %{buildroot}/%{_libexecdir}/slurm/cr_start.sh      &&
+  echo %{_libexecdir}/slurm/cr_start.sh                 >> $LIST
 test -f %{buildroot}/%{_sbindir}/capmc_suspend		&&
   echo %{_sbindir}/capmc_suspend			>> $LIST
 test -f %{buildroot}/%{_sbindir}/capmc_resume		&&
@@ -565,6 +574,14 @@ rm -rf %{buildroot}
 %{_bindir}/bkill
 %{_bindir}/bsub
 %{_bindir}/lsid
+
+#############################################################################
+
+%if %{with dmtcp}
+%files dmtcp
+%defattr(-,root,root)
+%{_libdir}/slurm/checkpoint_dmtcp.so
+%endif
 
 #############################################################################
 
