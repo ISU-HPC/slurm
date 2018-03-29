@@ -232,6 +232,8 @@ static int _close_controller_conn(slurmdb_cluster_rec_t *cluster)
 	cluster->fed.recv = NULL;
 	slurm_persist_conn_destroy(cluster->fed.send);
 	cluster->fed.send = NULL;
+	xfree(cluster->control_host);
+	cluster->control_port = 0;
 
 	if (slurmctld_conf.debug_flags & DEBUG_FLAG_FEDR)
 		info("closed sibling conn to %s", cluster->name);
@@ -330,6 +332,7 @@ static int _open_controller_conn(slurmdb_cluster_rec_t *cluster, bool locked)
 
 		/* Since this connection is coming from us, make it so ;) */
 		persist_conn->cluster_name = xstrdup(slurmctld_conf.cluster_name);
+		persist_conn->persist_type = PERSIST_TYPE_FED;
 		persist_conn->my_port = slurmctld_conf.slurmctld_port;
 		persist_conn->rem_host = xstrdup(cluster->control_host);
 		persist_conn->rem_port = cluster->control_port;
@@ -851,6 +854,8 @@ static void _persist_callback_fini(void *arg)
 			     cluster->name);
 		slurm_persist_conn_destroy(persist_conn);
 		cluster->fed.send = NULL;
+		xfree(cluster->control_host);
+		cluster->control_port = 0;
 	}
 	cluster->fed.sync_recvd = false;
 	cluster->fed.sync_sent  = false;
@@ -1229,7 +1234,10 @@ extern void add_fed_job_info(struct job_record *job_ptr)
 	job_info->siblings_active = job_ptr->fed_details->siblings_active;
 	job_info->siblings_viable = job_ptr->fed_details->siblings_viable;
 
-	list_append(fed_job_list, job_info);
+	slurm_mutex_lock(&fed_job_list_mutex);
+	if (fed_job_list)
+		list_append(fed_job_list, job_info);
+	slurm_mutex_unlock(&fed_job_list_mutex);
 }
 
 static int _delete_fed_job_info_by_id(void *object, void *arg)
@@ -1265,8 +1273,11 @@ static int _list_find_fed_job_info_by_jobid(void *x, void *key)
 	return 0;
 }
 
+/* Must have fed_job_mutex before entering */
 static fed_job_info_t *_find_fed_job_info(uint32_t job_id)
 {
+	if (!fed_job_list)
+		return NULL;
 	return list_find_first(fed_job_list, _list_find_fed_job_info_by_jobid,
 			       &job_id);
 }
@@ -1637,6 +1648,7 @@ static int _fed_mgr_job_allocate_sib(char *sib_name, job_desc_msg_t *job_desc,
 	}
 
 	/* Create new job allocation */
+	job_desc->pack_job_offset = NO_VAL;
 	error_code = job_allocate(job_desc, job_desc->immediate, false, NULL,
 				  interactive_job, uid, &job_ptr, &err_msg,
 				  sibling->rpc_version);
@@ -2372,8 +2384,16 @@ extern int fed_mgr_init(void *db_conn)
 	if (!association_based_accounting)
 		goto end_it;
 
+	slurm_mutex_lock(&fed_job_list_mutex);
 	if (!fed_job_list)
 		fed_job_list = list_create(_destroy_fed_job_info);
+	slurm_mutex_unlock(&fed_job_list_mutex);
+
+	/*
+	 * fed_job_update_list should only be appended to and popped from.
+	 * So rely on the list's lock. If there are ever changes to iterate the
+	 * list, then a lock will be needed around the list.
+	 */
 	if (!fed_job_update_list)
 		fed_job_update_list = list_create(_destroy_fed_job_update_info);
 
@@ -2486,7 +2506,16 @@ extern int fed_mgr_fini(void)
 	if (agent_thread_id)
 		pthread_join(agent_thread_id, NULL);
 
+	if (fed_job_update_thread_id)
+		pthread_join(fed_job_update_thread_id, NULL);
+
 	_remove_job_watch_thread();
+
+	slurm_mutex_lock(&fed_job_list_mutex);
+	FREE_NULL_LIST(fed_job_list);
+	slurm_mutex_unlock(&fed_job_list_mutex);
+
+	FREE_NULL_LIST(fed_job_update_list);
 
 	return SLURM_SUCCESS;
 }
@@ -2612,7 +2641,12 @@ static void _dump_fed_job_list(Buf buffer, uint16_t protocol_version)
 	uint32_t count = NO_VAL;
 	fed_job_info_t *fed_job_info;
 
-	if (protocol_version <= SLURM_17_11_PROTOCOL_VERSION) {
+	if (protocol_version >= SLURM_17_11_PROTOCOL_VERSION) {
+		/*
+		 * Need to be in the lock to prevent the window between getting
+		 * the count and actually looping on the list.
+		 */
+		slurm_mutex_lock(&fed_job_list_mutex);
 		if (fed_job_list)
 			count = list_count(fed_job_list);
 		else
@@ -2627,6 +2661,7 @@ static void _dump_fed_job_list(Buf buffer, uint16_t protocol_version)
 			}
 			list_iterator_destroy(itr);
 		}
+		slurm_mutex_unlock(&fed_job_list_mutex);
 	} else {
 		error("%s: protocol_version %hu not supported.",
 		      __func__, protocol_version);
@@ -2640,11 +2675,11 @@ static List _load_fed_job_list(Buf buffer, uint16_t protocol_version)
 	fed_job_info_t *tmp_job_info = NULL;
 	List tmp_list = NULL;
 
-	if (protocol_version <= SLURM_17_11_PROTOCOL_VERSION) {
+	if (protocol_version >= SLURM_17_11_PROTOCOL_VERSION) {
 		safe_unpack32(&count, buffer);
-		if (count > NO_VAL32)
+		if (count > NO_VAL)
 			goto unpack_error;
-		if (count != NO_VAL32) {
+		if (count != NO_VAL) {
 			tmp_list = list_create(_destroy_fed_job_info);
 
 			for (i = 0; i < count; i++) {
@@ -2834,11 +2869,13 @@ static slurmdb_federation_rec_t *_state_load(char *state_save_location)
 		fed_job_info_t *tmp_info;
 
 		slurm_mutex_lock(&fed_job_list_mutex);
-		while ((tmp_info = list_pop(tmp_list))) {
-			if (find_job_record(tmp_info->job_id))
-				list_append(fed_job_list, tmp_info);
-			else
-				_destroy_fed_job_info(tmp_info);
+		if (fed_job_list) {
+			while ((tmp_info = list_pop(tmp_list))) {
+				if (find_job_record(tmp_info->job_id))
+					list_append(fed_job_list, tmp_info);
+				else
+					_destroy_fed_job_info(tmp_info);
+			}
 		}
 		slurm_mutex_unlock(&fed_job_list_mutex);
 
@@ -2952,10 +2989,10 @@ extern int fed_mgr_add_sibling_conn(slurm_persist_conn_t *persist_conn,
 	 * timeout and resolved itself. */
 	cluster->fed.recv = persist_conn;
 
-	unlock_slurmctld(fed_read_lock);
-
 	slurm_persist_conn_recv_thread_init(persist_conn, -1, persist_conn);
 	_q_send_job_sync(cluster->name);
+
+	unlock_slurmctld(fed_read_lock);
 
 	return SLURM_SUCCESS;
 }
@@ -3019,8 +3056,10 @@ extern int fed_mgr_update_job(uint32_t job_id, job_desc_msg_t *job_specs,
 	slurmdb_cluster_rec_t *sibling;
 	fed_job_info_t *job_info;
 
+	slurm_mutex_lock(&fed_job_list_mutex);
 	if (!(job_info = _find_fed_job_info(job_id))) {
 		error("Didn't find job %d in fed_job_list", job_id);
+		slurm_mutex_unlock(&fed_job_list_mutex);
 		return SLURM_ERROR;
 	}
 
@@ -3043,6 +3082,7 @@ extern int fed_mgr_update_job(uint32_t job_id, job_desc_msg_t *job_specs,
 		job_info->updating_time[sibling->fed.id] = time(NULL);
 	}
 	list_iterator_destroy(sib_itr);
+	slurm_mutex_unlock(&fed_job_list_mutex);
 
 	return SLURM_SUCCESS;
 }
@@ -3505,8 +3545,11 @@ extern int fed_mgr_job_allocate(slurm_msg_t *msg, job_desc_msg_t *job_desc,
 	/* ensure that fed_siblings_active is clear since this is a new job */
 	job_desc->fed_siblings_active = 0;
 
-	/* Submit local job first. Then submit to all siblings. If the local job
-	 * fails, then don't worry about sending to the siblings. */
+	/*
+	 * Submit local job first. Then submit to all siblings. If the local job
+	 * fails, then don't worry about sending to the siblings.
+	 */
+	job_desc->pack_job_offset = NO_VAL;
 	*alloc_code = job_allocate(job_desc, job_desc->immediate, false, NULL,
 				   alloc_only, uid, &job_ptr, err_msg,
 				   protocol_version);
@@ -4075,6 +4118,9 @@ extern int fed_mgr_job_revoke_sibs(struct job_record *job_ptr)
 	uint32_t origin_id;
 	time_t now = time(NULL);
 
+	xassert(verify_lock(JOB_LOCK, READ_LOCK));
+	xassert(verify_lock(FED_LOCK, READ_LOCK));
+
 	if (!_is_fed_job(job_ptr, &origin_id))
 		return SLURM_SUCCESS;
 
@@ -4132,6 +4178,22 @@ extern int fed_mgr_job_revoke(struct job_record *job_ptr, bool job_complete,
 	job_ptr->end_time   = start_time;
 	job_ptr->state_reason = WAIT_NO_REASON;
 	xfree(job_ptr->state_desc);
+
+	/*
+	 * Since the job is purged/revoked quickly on the non-origin side it's
+	 * possible that the job_start message has not been sent yet. Send it
+	 * now so that the db record gets the uid set -- which the complete
+	 * message doesn't send.
+	 */
+	if (!job_ptr->db_index && (origin_id != fed_mgr_cluster_rec->fed.id)) {
+		if (IS_JOB_FINISHED(job_ptr))
+			jobacct_storage_g_job_start(acct_db_conn, job_ptr);
+		else
+			info("%s: job (%u) isn't finished and isn't an origin job (%u != %u) and doesn't have a db_index yet.  We aren't sending a start message to the database.",
+			     __func__, job_ptr->job_id, origin_id,
+			     fed_mgr_cluster_rec->fed.id);
+	}
+
 	job_completion_logger(job_ptr, false);
 
 	/* Don't remove the origin job */
@@ -4660,6 +4722,12 @@ static int _reconcile_fed_job(struct job_record *job_ptr,
 		if (job_ptr->fed_details->cluster_lock == sibling_id) {
 			if (IS_JOB_COMPLETE(remote_job)) {
 				info("%s: job %d on sibling %s is already completed, completing the origin job",
+				     __func__, job_ptr->job_id, sibling_name);
+				fed_mgr_job_revoke(job_ptr, true,
+						   remote_job->exit_code,
+						   job_ptr->start_time);
+			} else if (IS_JOB_CANCELLED(remote_job)) {
+				info("%s: job %d on sibling %s is already cancelled, completing the origin job",
 				     __func__, job_ptr->job_id, sibling_name);
 				fed_mgr_job_revoke(job_ptr, true,
 						   remote_job->exit_code,

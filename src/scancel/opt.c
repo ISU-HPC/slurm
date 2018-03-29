@@ -67,29 +67,6 @@
 #define OPT_LONG_WCKEY   0x103
 #define OPT_LONG_SIBLING 0x104
 
-#define SIZE(a) (sizeof(a)/sizeof(a[0]))
-
-struct signv {
-	char *name;
-	uint16_t val;
-} sig_name_num[ ] = {
-	{ "HUP",	SIGHUP  },
-	{ "INT",	SIGINT  },
-	{ "QUIT",	SIGQUIT },
-	{ "ABRT",	SIGABRT },
-	{ "KILL",	SIGKILL },
-	{ "ALRM",	SIGALRM },
-	{ "TERM",	SIGTERM },
-	{ "USR1",	SIGUSR1 },
-	{ "USR2",	SIGUSR2 },
-	{ "URG",	SIGURG  },
-	{ "CONT",	SIGCONT },
-	{ "STOP",	SIGSTOP },
-	{ "TSTP",	SIGTSTP },
-	{ "TTIN",	SIGTTIN },
-	{ "TTOU",	SIGTTOU }
-};
-
 /* forward declarations of static functions
  *
  */
@@ -112,9 +89,6 @@ static char **_xlate_job_step_ids(char **rest);
 
 /* translate job state name to number */
 static uint32_t _xlate_state_name(const char *state_name, bool env_var);
-
-/* translate name name to number */
-static uint16_t _xlate_signal_name(const char *signal_name);
 
 /* list known options and their settings */
 static void _opt_list(void);
@@ -154,7 +128,7 @@ extern bool has_default_opt(void)
 	    && opt.partition == NULL
 	    && opt.qos == NULL
 	    && opt.reservation == NULL
-	    && opt.signal == (uint16_t) NO_VAL
+	    && opt.signal == NO_VAL16
 	    && opt.state == JOB_END
 	    && opt.user_id == 0
 	    && opt.user_name == NULL
@@ -197,35 +171,6 @@ _xlate_state_name(const char *state_name, bool env_var)
 	exit (1);
 }
 
-
-static uint16_t _xlate_signal_name(const char *signal_name)
-{
-	uint16_t sig_num;
-	char *end_ptr, *sig_names = NULL;
-	int i;
-
-	sig_num = (uint16_t) strtol(signal_name, &end_ptr, 10);
-	if ((*end_ptr == '\0') || (sig_num != 0))
-		return sig_num;
-
-	for (i = 0; i < SIZE(sig_name_num); i++) {
-		if (xstrcasecmp(sig_name_num[i].name, signal_name) == 0) {
-			xfree(sig_names);
-			return sig_name_num[i].val;
-		}
-		if (i == 0)
-			sig_names = xstrdup(sig_name_num[i].name);
-		else {
-			xstrcat(sig_names, ",");
-			xstrcat(sig_names, sig_name_num[i].name);
-		}
-	}
-	fprintf (stderr, "Invalid job signal: %s\n", signal_name);
-	fprintf (stderr, "Valid signals include: %s\n", sig_names);
-	xfree(sig_names);
-	exit(1);
-}
-
 /*
  * opt_default(): used by initialize_and_process_args to set defaults
  */
@@ -258,7 +203,7 @@ static void _opt_default(void)
 	opt.qos		= NULL;
 	opt.reservation	= NULL;
 	opt.sibling     = NULL;
-	opt.signal	= (uint16_t) NO_VAL;
+	opt.signal	= NO_VAL16;
 	opt.state	= JOB_END;
 	opt.user_id	= 0;
 	opt.user_name	= NULL;
@@ -452,7 +397,12 @@ static void _opt_args(int argc, char **argv)
 			opt.reservation = xstrdup(optarg);
 			break;
 		case (int)'s':
-			opt.signal = _xlate_signal_name(optarg);
+			opt.signal = sig_name2num(optarg);
+			if (!opt.signal) {
+				fprintf(stderr, "Unknown job signal: %s\n",
+					optarg);
+				exit(1);
+			}
 			break;
 		case (int)'t':
 			opt.state = _xlate_state_name(optarg, false);
@@ -667,7 +617,7 @@ static void _opt_list(void)
 	info("qos            : %s", opt.qos);
 	info("reservation    : %s", opt.reservation);
 	info("sibling        : %s", opt.sibling);
-	if (opt.signal != (uint16_t) NO_VAL)
+	if (opt.signal != NO_VAL16)
 		info("signal         : %u", opt.signal);
 	info("state          : %s", job_state_string(opt.state));
 	info("user_id        : %u", opt.user_id);

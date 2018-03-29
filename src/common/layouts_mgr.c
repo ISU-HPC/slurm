@@ -193,6 +193,7 @@ static const char* layouts_keydef_idfunc(void* item)
  */
 typedef struct layouts_mgr_st {
 	pthread_mutex_t lock;
+	bool	init_done;	/* Set if memory allocated for arrays/List */
 	layout_plugin_t *plugins;
 	uint32_t plugins_count;
 	List    layouts_desc;  /* list of the layouts requested in conf */
@@ -206,7 +207,7 @@ typedef struct layouts_mgr_st {
 \*****************************************************************************/
 
 /** global structure holding layouts and entities */
-static layouts_mgr_t layouts_mgr = {PTHREAD_MUTEX_INITIALIZER};
+static layouts_mgr_t layouts_mgr = {PTHREAD_MUTEX_INITIALIZER, false};
 static layouts_mgr_t* mgr = &layouts_mgr;
 
 /*****************************************************************************\
@@ -616,8 +617,6 @@ int _layouts_entity_get_kv(layout_t* l, entity_t* e, char* key, void* value,
 	}
 
 	switch(real_type) {
-	case L_T_ERROR:
-		return SLURM_ERROR;
 	case L_T_STRING:
 		pstr = (char**) value;
 		*pstr = xstrdup(data);
@@ -648,6 +647,9 @@ int _layouts_entity_get_kv(layout_t* l, entity_t* e, char* key, void* value,
 	case L_T_LONG_DOUBLE:
 		size = sizeof(long double);
 		break;
+	case L_T_ERROR:
+	default:
+		return SLURM_ERROR;
 	}
 	memcpy(value, data, size);
 	return SLURM_SUCCESS;
@@ -917,29 +919,32 @@ static void _layouts_mgr_parse_global_conf(layouts_mgr_t* mgr)
 	xfree(layouts);
 }
 
-static void layouts_mgr_init(layouts_mgr_t* mgr)
+static void _layouts_mgr_free(layouts_mgr_t* mgr)
 {
-	_layouts_mgr_parse_global_conf(mgr);
+	/* free the configuration details */
+	FREE_NULL_LIST(mgr->layouts_desc);
 
+	/* FIXME: can we do a faster free here? since each node removal will
+	 * modify either the entities or layouts for back (or forward)
+	 * references. */
+	xhash_free(mgr->layouts);
+	xhash_free(mgr->entities);
+	xhash_free(mgr->keydefs);
+	mgr->init_done = false;
+}
+
+static void _layouts_mgr_init(layouts_mgr_t* mgr)
+{
+	if (mgr->init_done)
+		_layouts_mgr_free(mgr);
+	mgr->init_done = true;
+	_layouts_mgr_parse_global_conf(mgr);
 	mgr->layouts = xhash_init(layout_hashable_identify_by_type,
 				  (xhash_freefunc_t)_layout_free, NULL, 0);
 	mgr->entities = xhash_init(entity_hashable_identify,
 				   (xhash_freefunc_t)_entity_free, NULL, 0);
 	mgr->keydefs = xhash_init(layouts_keydef_idfunc,
 				  _layouts_keydef_free, NULL, 0);
-}
-
-static void layouts_mgr_free(layouts_mgr_t* mgr)
-{
-	/* free the configuration details */
-	FREE_NULL_LIST(mgr->layouts_desc);
-
-	/* FIXME: can we do a faster free here ? since each node removal will
-	 * modify either the entities or layouts for back (or forward)
-	 * references. */
-	xhash_free(mgr->layouts);
-	xhash_free(mgr->entities);
-	xhash_free(mgr->keydefs);
 }
 
 /*****************************************************************************\
@@ -1083,7 +1088,12 @@ static void _layouts_load_automerge(layout_plugin_t* plugin, entity_t* e,
 		} else if (_layouts_merge_check(S_P_UINT32, L_T_UINT32)) {
 			_layouts_load_merge(uint32_t, s_p_get_uint32);
 		} else if (_layouts_merge_check(S_P_BOOLEAN, L_T_BOOLEAN)) {
-			_layouts_load_merge(bool, s_p_get_boolean);
+			bool newvalue;
+			if (s_p_get_boolean(&newvalue, option_key, etbl)) {
+				bool *newalloc = xmalloc(sizeof(bool));
+				*newalloc = newvalue;
+				_entity_add_data(e, key_keydef, newalloc);
+			}
 		} else if (_layouts_merge_check(S_P_LONG, L_T_LONG)) {
 			_layouts_load_merge(long, s_p_get_long);
 		} else if (_layouts_merge_check(S_P_FLOAT, L_T_FLOAT)) {
@@ -2275,7 +2285,7 @@ int layouts_init(void)
 
 	slurm_mutex_lock(&layouts_mgr.lock);
 
-	layouts_mgr_init(&layouts_mgr);
+	_layouts_mgr_init(&layouts_mgr);
 	layouts_count = list_count(layouts_mgr.layouts_desc);
 	if (layouts_count == 0)
 		info("layouts: no layout to initialize");
@@ -2318,10 +2328,12 @@ int layouts_fini(void)
 
 	slurm_mutex_lock(&mgr->lock);
 
-	/* free the layouts before destroying the plugins,
+	/*
+	 * free the layouts before destroying the plugins,
 	 * otherwise we will get trouble xfreeing the layouts whose
-	 * memory is owned by the plugins structs */
-	layouts_mgr_free(mgr);
+	 * memory is owned by the plugins structs
+	 */
+	_layouts_mgr_free(mgr);
 
 	for (i = 0; i < mgr->plugins_count; i++) {
 		_layout_plugins_destroy(&mgr->plugins[i]);

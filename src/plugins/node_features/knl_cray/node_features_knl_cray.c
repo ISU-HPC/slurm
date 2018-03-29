@@ -166,7 +166,7 @@ List active_feature_list __attribute__((weak_import));
 List active_feature_list;
 #endif
 
-/* Configuration Paramters */
+/* Configuration Parameters */
 static uint16_t allow_mcdram = KNL_MCDRAM_FLAG;
 static uint16_t allow_numa = KNL_NUMA_FLAG;
 static uid_t *allowed_uid = NULL;
@@ -1290,14 +1290,19 @@ next_tok:	tok1 = strtok_r(NULL, ",", &save_ptr1);
 	xfree(tmp_str1);
 }
 
-/* Remove all KNL MCDRAM and NUMA type GRES from this node (it isn't KNL),
- * returns count of KNL features found. */
+/*
+ * Remove all KNL MCDRAM and NUMA type GRES from this node (it isn't KNL),
+ * returns count of KNL features found.
+ */
 static int _strip_knl_features(char **node_feature)
 {
 	char *tmp_str1, *tok1, *save_ptr1 = NULL;
 	char *tmp_str2 = NULL, *sep = "";
 	int cnt = 0;
 
+	xassert(node_feature);
+	if (*node_feature == NULL)
+		return cnt;
 	tmp_str1 = xstrdup(*node_feature);
 	tok1 = strtok_r(tmp_str1, ",", &save_ptr1);
 	while (tok1) {
@@ -1675,12 +1680,15 @@ extern int init(void)
 	xfree(capmc_path);
 	capmc_poll_freq = 45;
 	capmc_timeout = DEFAULT_CAPMC_TIMEOUT;
+	xfree(cnselect_path);
 	debug_flag = false;
 	default_mcdram = KNL_CACHE;
 	default_numa = KNL_ALL2ALL;
 	for (i = 0; i < KNL_MCDRAM_CNT; i++)
 		mcdram_pct[i] = -1;
 	mcdram_set = 0;
+	xfree(mc_path);
+	xfree(syscfg_path);
 
 	knl_conf_file = get_extra_conf_path("knl_cray.conf");
 	if ((stat(knl_conf_file, &stat_buf) == 0) &&
@@ -1986,6 +1994,7 @@ extern void *_queue_agent(void *args)
 			node_time_queue = (time_t) 0;
 			slurm_mutex_unlock(&queue_mutex);
 			(void) _update_node_state(node_list, true);
+			xfree(node_list);
 		}
 	}
 
@@ -2492,6 +2501,13 @@ extern char *node_features_p_job_xlate(char *job_features)
 	}
 	xfree(tmp);
 
+	/*
+	 * No MCDRAM or NUMA features specified. This might be a non-KNL node.
+	 * In that case, do not set the default any MCDRAM or NUMA features.
+	 */
+	if (!has_mcdram && !has_numa)
+		return xstrdup(job_features);
+
 	/* Add default options */
 	if (!has_mcdram) {
 		tmp = _knl_mcdram_str(default_mcdram);
@@ -2525,11 +2541,13 @@ extern int node_features_p_node_set(char *active_features)
 	return SLURM_SUCCESS;
 }
 
-/* Note the active features associated with a set of nodes have been updated.
+/*
+ * Note the active features associated with a set of nodes have been updated.
  * Specifically update the node's "hbm" GRES value as needed.
  * IN active_features - New active features
  * IN node_bitmap - bitmap of nodes changed
- * RET error code */
+ * RET error code
+ */
 extern int node_features_p_node_update(char *active_features,
 				       bitstr_t *node_bitmap)
 {
@@ -2580,13 +2598,115 @@ extern int node_features_p_node_update(char *active_features,
 	return rc;
 }
 
-/* Translate a node's feature specification by replacing any features associated
+/*
+ * Return TRUE if the specified node update request is valid with respect
+ * to features changes (i.e. don't permit a non-KNL node to set KNL features).
+ *
+ * arg IN - Pointer to struct node_record record
+ * update_node_msg IN - Pointer to update request
+ */
+extern bool node_features_p_node_update_valid(void *arg,
+					update_node_msg_t *update_node_msg)
+{
+	struct node_record *node_ptr = (struct node_record *) arg;
+	char *tmp, *save_ptr = NULL, *tok;
+	bool is_knl = false, invalid_feature = false;
+
+	/* No feature changes */
+	if (!update_node_msg->features && !update_node_msg->features_act)
+		return true;
+
+	/* Determine if this is KNL node based upon current features */
+	if (node_ptr->features && node_ptr->features[0]) {
+		tmp = xstrdup(node_ptr->features);
+		tok = strtok_r(tmp, ",", &save_ptr);
+		while (tok) {
+			if (_knl_mcdram_token(tok) || _knl_numa_token(tok)) {
+				is_knl = true;
+				break;
+			}
+			tok = strtok_r(NULL, ",", &save_ptr);
+		}
+		xfree(tmp);
+	}
+	if (is_knl)
+		return true;
+
+	/* Validate that AvailableFeatures update request has no KNL modes */
+	if (update_node_msg->features) {
+		tmp = xstrdup(update_node_msg->features);
+		tok = strtok_r(tmp, ",", &save_ptr);
+		while (tok) {
+			if (_knl_mcdram_token(tok) || _knl_numa_token(tok)) {
+				invalid_feature = true;
+				break;
+			}
+			tok = strtok_r(NULL, ",", &save_ptr);
+		}
+		xfree(tmp);
+		if (invalid_feature) {
+			info("Invalid AvailableFeatures update request (%s) for non-KNL node %s",
+			     update_node_msg->features, node_ptr->name);
+			return false;
+		}
+	}
+
+	/* Validate that ActiveFeatures update request has no KNL modes */
+	if (update_node_msg->features_act) {
+		tmp = xstrdup(update_node_msg->features_act);
+		tok = strtok_r(tmp, ",", &save_ptr);
+		while (tok) {
+			if (_knl_mcdram_token(tok) || _knl_numa_token(tok)) {
+				invalid_feature = true;
+				break;
+			}
+			tok = strtok_r(NULL, ",", &save_ptr);
+		}
+		xfree(tmp);
+		if (invalid_feature) {
+			info("Invalid ActiveFeatures update request (%s) for non-KNL node %s",
+			     update_node_msg->features_act, node_ptr->name);
+			return false;
+		}
+	}
+
+	/*
+	 * For non-KNL node, active and available features must match
+	 */
+	if (!update_node_msg->features) {
+		update_node_msg->features =
+			xstrdup(update_node_msg->features_act);
+	} else if (!update_node_msg->features_act) {
+		update_node_msg->features_act =
+			xstrdup(update_node_msg->features);
+	} else if (xstrcmp(update_node_msg->features,
+			   update_node_msg->features_act)) {
+		info("Invalid ActiveFeatures != AvailableFeatures (%s != %s) for non-KNL node %s",
+		     update_node_msg->features, update_node_msg->features_act,
+		     node_ptr->name);
+		return false;
+	}
+
+	return true;
+}
+
+/* Return TRUE if this (one) feature name is under this plugin's control */
+extern bool node_features_p_changible_feature(char *feature)
+{
+	if (_knl_mcdram_token(feature) || _knl_numa_token(feature))
+		return true;
+	return false;
+}
+
+/*
+ * Translate a node's feature specification by replacing any features associated
  *	with this plugin in the original value with the new values, preserving
- *	andy features that are not associated with this plugin
+ *	any features that are not associated with this plugin
  * IN new_features - newly active features
  * IN orig_features - original active features
  * IN avail_features - original available features
- * RET node's new merged features, must be xfreed */
+ * RET node's new merged features, must be xfreed
+ */
 extern char *node_features_p_node_xlate(char *new_features, char *orig_features,
 					char *avail_features)
 {
@@ -2594,20 +2714,43 @@ extern char *node_features_p_node_xlate(char *new_features, char *orig_features,
 	char *tmp, *save_ptr = NULL, *sep = "", *tok;
 	uint16_t new_mcdram = 0, new_numa = 0;
 	uint16_t tmp_mcdram, tmp_numa;
+	bool is_knl = false;
 
-	if (new_features) {
-		/* Copy non-KNL features */
+	if (avail_features) {
 		tmp = xstrdup(avail_features);
 		tok = strtok_r(tmp, ",", &save_ptr);
 		while (tok) {
-			if ((_knl_mcdram_token(tok) == 0) &&
-			    (_knl_numa_token(tok)   == 0)) {
+			if (_knl_mcdram_token(tok) || _knl_numa_token(tok)) {
+				is_knl = true;
+			} else {
 				xstrfmtcat(node_features, "%s%s", sep, tok);
 				sep = ",";
 			}
 			tok = strtok_r(NULL, ",", &save_ptr);
 		}
 		xfree(tmp);
+		if (!is_knl) {
+			xfree(node_features);
+			sep = "";
+		}
+	}
+
+	if (new_features) {
+		/* Copy non-KNL features */
+		if (!is_knl && new_features) {
+			tmp = xstrdup(new_features);
+			tok = strtok_r(tmp, ",", &save_ptr);
+			while (tok) {
+				if ((_knl_mcdram_token(tok) == 0) &&
+				    (_knl_numa_token(tok)   == 0)) {
+					xstrfmtcat(node_features, "%s%s", sep,
+						   tok);
+					sep = ",";
+				}
+				tok = strtok_r(NULL, ",", &save_ptr);
+			}
+			xfree(tmp);
+		}
 
 		/* Copy new KNL features in MCDRAM/NUMA order */
 		tmp = xstrdup(new_features);
@@ -2621,9 +2764,11 @@ extern char *node_features_p_node_xlate(char *new_features, char *orig_features,
 		}
 		xfree(tmp);
 
-		if (((new_mcdram == 0) || (new_numa == 0)) && orig_features) {
-			/* New active features lacks current MCDRAM or NUMA,
-			 * copy value from original */
+		if (is_knl && ((new_mcdram == 0) || (new_numa == 0))) {
+			/*
+			 * New active features lacks current MCDRAM or NUMA,
+			 * copy values from original
+			 */
 			tmp = xstrdup(orig_features);
 			tok = strtok_r(tmp, ",", &save_ptr);
 			while (tok) {
@@ -2701,11 +2846,18 @@ extern void node_features_p_step_config(bool mem_sort, bitstr_t *numa_bitmap)
 #ifdef HAVE_NUMA
 	if (mem_sort && (numa_available() != -1)) {
 		struct stat sb;
-		int buf_len, fd, i, len;
-		char buf[8];
+		int buf_len, fd, i, len, rc;
+		char buf[12];
 
-		if (stat(ZONE_SORT_PATH, &sb) == -1)
-			(void) system(MODPROBE_PATH " zonesort_module");
+		if (stat(ZONE_SORT_PATH, &sb) == -1) {
+			rc = system(MODPROBE_PATH " zonesort_module");
+			if (rc != -1)
+				rc = WEXITSTATUS(rc);
+			if (rc) {
+				verbose("%s: zonesort execution failure. Return code: %d",
+					__func__, rc);
+			}
+		}
 		if ((fd = open(ZONE_SORT_PATH, O_WRONLY | O_SYNC)) == -1) {
 			error("%s: Could not open file %s: %m",
 			      __func__, ZONE_SORT_PATH);

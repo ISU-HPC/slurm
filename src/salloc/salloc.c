@@ -191,7 +191,6 @@ int main(int argc, char **argv)
 	bool pack_fini = false;
 	int pack_argc, pack_inx, pack_argc_off;
 	char **pack_argv;
-	char *line = NULL, *buf = NULL, *ptrptr = NULL;
 	static char *msg = "Slurm job queue full, sleeping and retrying.";
 	slurm_allocation_callbacks_t callbacks;
 	ListIterator iter_req, iter_resp;
@@ -319,13 +318,13 @@ int main(int argc, char **argv)
 #ifdef HAVE_ALPS_CRAY
 		verbose("no controlling terminal");
 #else
-		if (!opt.no_shell) {
+		if (!saopt.no_shell) {
 			error("no controlling terminal: please set --no-shell");
 			exit(error_exit);
 		}
 #endif
 #ifdef SALLOC_RUN_FOREGROUND
-	} else if ((!opt.no_shell) && (pid == getpgrp())) {
+	} else if ((!saopt.no_shell) && (pid == getpgrp())) {
 		if (tpgid == pid)
 			is_interactive = true;
 		while (tcgetpgrp(STDIN_FILENO) != pid) {
@@ -338,7 +337,7 @@ int main(int argc, char **argv)
 		}
 	}
 #else
-	} else if ((!opt.no_shell) && (getpgrp() == tcgetpgrp(STDIN_FILENO))) {
+	} else if ((!saopt.no_shell) && (getpgrp() == tcgetpgrp(STDIN_FILENO))) {
 		is_interactive = true;
 	}
 #endif
@@ -471,16 +470,9 @@ int main(int argc, char **argv)
 		/* Allocation granted to regular job */
 		my_job_id = alloc->job_id;
 
-		if (alloc && alloc->job_submit_user_msg) {
-			buf = xstrdup(alloc->job_submit_user_msg);
-			line = strtok_r(buf, "\n", &ptrptr);
-			while (line) {
-				info("%s", line);
-				line = strtok_r(NULL, "\n", &ptrptr);
-			}
-			xfree(buf);
-		}
-
+		if (alloc)
+			print_multi_line_string(
+				alloc->job_submit_user_msg, -1);
 		info("Granted job allocation %u", my_job_id);
 
 		if (_proc_alloc(alloc) != SLURM_SUCCESS)
@@ -488,12 +480,12 @@ int main(int argc, char **argv)
 	}
 
 	after = time(NULL);
-	if ((opt.bell == BELL_ALWAYS) ||
-	     ((opt.bell == BELL_AFTER_DELAY) &&
+	if ((saopt.bell == BELL_ALWAYS) ||
+	     ((saopt.bell == BELL_AFTER_DELAY) &&
 	      ((after - before) > DEFAULT_BELL_DELAY))) {
 		_ring_terminal_bell();
 	}
-	if (opt.no_shell)
+	if (saopt.no_shell)
 		exit(0);
 	if (allocation_interrupted) {
 		/* salloc process received a signal after
@@ -801,12 +793,13 @@ static int _fill_job_desc_from_opts(job_desc_msg_t *desc)
 	desc->contiguous = opt.contiguous ? 1 : 0;
 	if (opt.core_spec != NO_VAL16)
 		desc->core_spec = opt.core_spec;
+	desc->extra = xstrdup(opt.extra);
 	desc->features = xstrdup(opt.constraints);
 	desc->cluster_features = xstrdup(opt.c_constraints);
 	desc->gres = xstrdup(opt.gres);
 	if (opt.immediate == 1)
 		desc->immediate = 1;
-	if (opt.default_job_name)
+	if (saopt.default_job_name)
 		desc->bitflags |= JOB_SALLOC_FLAG;
 	desc->name = xstrdup(opt.job_name);
 	desc->reservation = xstrdup(opt.reservation);
@@ -867,8 +860,8 @@ static int _fill_job_desc_from_opts(job_desc_msg_t *desc)
 		desc->begin_time = opt.begin;
 	if (opt.deadline)
 		desc->deadline = opt.deadline;
-	if (opt.burst_buffer)
-		desc->burst_buffer = opt.burst_buffer;
+	if (saopt.burst_buffer)
+		desc->burst_buffer = saopt.burst_buffer;
 	if (opt.account)
 		desc->account = xstrdup(opt.account);
 	if (opt.acctg_freq)
@@ -908,14 +901,14 @@ static int _fill_job_desc_from_opts(job_desc_msg_t *desc)
 		desc->ramdiskimage = xstrdup(opt.ramdiskimage);
 
 	/* job constraints */
-	if (opt.mincpus > -1)
-		desc->pn_min_cpus = opt.mincpus;
-	if (opt.realmem > -1)
-		desc->pn_min_memory = opt.realmem;
+	if (opt.pn_min_cpus > -1)
+		desc->pn_min_cpus = opt.pn_min_cpus;
+	if (opt.pn_min_memory > -1)
+		desc->pn_min_memory = opt.pn_min_memory;
 	else if (opt.mem_per_cpu > -1)
 		desc->pn_min_memory = opt.mem_per_cpu | MEM_PER_CPU;
-	if (opt.tmpdisk > -1)
-		desc->pn_min_tmp_disk = opt.tmpdisk;
+	if (opt.pn_min_tmp_disk > -1)
+		desc->pn_min_tmp_disk = opt.pn_min_tmp_disk;
 	if (opt.overcommit) {
 		desc->min_cpus = opt.min_nodes;
 		desc->overcommit = opt.overcommit;
@@ -953,7 +946,7 @@ static int _fill_job_desc_from_opts(job_desc_msg_t *desc)
 	desc->shared = opt.shared;
 	desc->job_id = opt.jobid;
 
-	desc->wait_all_nodes = opt.wait_all_nodes;
+	desc->wait_all_nodes = saopt.wait_all_nodes;
 	if (opt.warn_signal)
 		desc->warn_signal = opt.warn_signal;
 	if (opt.warn_time)
@@ -1100,8 +1093,8 @@ static void _job_complete_handler(srun_job_complete_msg_t *comp)
 					killpg(tpgid, SIGHUP);
 			}
 
-			if (opt.kill_command_signal_set)
-				signal = opt.kill_command_signal;
+			if (saopt.kill_command_signal_set)
+				signal = saopt.kill_command_signal;
 #ifdef SALLOC_KILL_CMD
 			else if (is_interactive)
 				signal = SIGHUP;
@@ -1156,8 +1149,7 @@ static void _user_msg_handler(srun_user_msg_t *msg)
 
 static void _ping_handler(srun_ping_msg_t *msg)
 {
-	/* the api will respond so there really isn't anything to do
-	   here */
+	/* the api will respond so there really is nothing to do here */
 }
 
 static void _node_fail_handler(srun_node_fail_msg_t *msg)
@@ -1168,16 +1160,20 @@ static void _node_fail_handler(srun_node_fail_msg_t *msg)
 static void _set_rlimits(char **env)
 {
 	slurm_rlimits_info_t *rli;
-	char env_name[25] = "SLURM_RLIMIT_";
+	char env_name[32] = "SLURM_RLIMIT_";
 	char *env_value, *p;
 	struct rlimit r;
-	//unsigned long env_num;
 	rlim_t env_num;
+	int header_len = sizeof("SLURM_RLIMIT_");
 
 	for (rli = get_slurm_rlimits_info(); rli->name; rli++) {
 		if (rli->propagate_flag != PROPAGATE_RLIMITS)
 			continue;
-		strcpy(&env_name[sizeof("SLURM_RLIMIT_")-1], rli->name);
+		if ((header_len + strlen(rli->name)) >= sizeof(env_name)) {
+			error("%s: env_name(%s) too long", __func__, env_name);
+			continue;
+		}
+		strcpy(&env_name[header_len - 1], rli->name);
 		env_value = getenvp(env, env_name);
 		if (env_value == NULL)
 			continue;
@@ -1314,9 +1310,9 @@ static int _wait_nodes_ready(resource_allocation_response_msg_t *alloc)
 	}
 
 	if (alloc->alias_list && !xstrcmp(alloc->alias_list, "TBD"))
-		opt.wait_all_nodes = 1;	/* Wait for boot & addresses */
-	if (opt.wait_all_nodes == (uint16_t) NO_VAL)
-		opt.wait_all_nodes = 0;
+		saopt.wait_all_nodes = 1;	/* Wait for boot & addresses */
+	if (saopt.wait_all_nodes == NO_VAL16)
+		saopt.wait_all_nodes = 0;
 
 	for (i = 0; (cur_delay < max_delay); i++) {
 		if (i) {
@@ -1338,7 +1334,7 @@ static int _wait_nodes_ready(resource_allocation_response_msg_t *alloc)
 			break;
 		}
 		if ((rc & READY_JOB_STATE) && 
-		    ((rc & READY_NODE_STATE) || !opt.wait_all_nodes)) {
+		    ((rc & READY_NODE_STATE) || !saopt.wait_all_nodes)) {
 			is_ready = 1;
 			break;
 		}

@@ -1087,7 +1087,7 @@ extern void print_fields(type_t type, void *object)
 					break;
 				}
 			}
-			if (tmp_uint32 == (uint32_t)NO_VAL)
+			if (tmp_uint32 == NO_VAL)
 				tmp_uint32 = NO_VAL;
 			field->print_routine(field,
 					     tmp_uint32,
@@ -1161,7 +1161,7 @@ extern void print_fields(type_t type, void *object)
 					tmp_uint32 = NO_VAL;
 					break;
 				}
-				if (tmp_uint32 == (uint32_t)NO_VAL)
+				if (tmp_uint32 == NO_VAL)
 					tmp_uint32 = NO_VAL;
 			}
 			field->print_routine(field,
@@ -1183,7 +1183,7 @@ extern void print_fields(type_t type, void *object)
 				default:
 					break;
 				}
-				if (tmp_uint64 != (uint64_t)NO_VAL64)
+				if (tmp_uint64 != NO_VAL64)
 					convert_num_unit(
 						(double)tmp_uint64,
 						outbuf, sizeof(outbuf),
@@ -1239,7 +1239,7 @@ extern void print_fields(type_t type, void *object)
 					tmp_uint32 = NO_VAL;
 					break;
 				}
-				if (tmp_uint32 == (uint32_t)NO_VAL)
+				if (tmp_uint32 == NO_VAL)
 					tmp_uint32 = NO_VAL;
 			}
 
@@ -1261,7 +1261,7 @@ extern void print_fields(type_t type, void *object)
 				default:
 					break;
 				}
-				if (tmp_uint64 != (uint64_t)NO_VAL64)
+				if (tmp_uint64 != NO_VAL64)
 					convert_num_unit(
 						(double)tmp_uint64,
 						outbuf, sizeof(outbuf),
@@ -1337,11 +1337,11 @@ extern void print_fields(type_t type, void *object)
 					break;
 				case JOBCOMP:
 				default:
-					tmp_uint64 = (uint64_t)NO_VAL64;
+					tmp_uint64 = NO_VAL64;
 					break;
 				}
 
-				if (tmp_uint64 != (uint64_t)NO_VAL64)
+				if (tmp_uint64 != NO_VAL64)
 					convert_num_unit(
 						(double)tmp_uint64,
 						outbuf, sizeof(outbuf),
@@ -1398,12 +1398,30 @@ extern void print_fields(type_t type, void *object)
 					tmp_uint32 = NO_VAL;
 					break;
 				}
-				if (tmp_uint32 == (uint32_t)NO_VAL)
+				if (tmp_uint32 == NO_VAL)
 					tmp_uint32 = NO_VAL;
 			}
 
 			field->print_routine(field,
 					     tmp_uint32,
+					     (curr_inx == field_count));
+			break;
+		case PRINT_MCS_LABEL:
+			switch(type) {
+			case JOB:
+				if (job->mcs_label)
+					tmp_char = job->mcs_label;
+				break;
+			case JOBSTEP:
+				break;
+			case JOBCOMP:
+				break;
+			default:
+				tmp_char = "n/a";
+				break;
+			}
+			field->print_routine(field,
+					     tmp_char,
 					     (curr_inx == field_count));
 			break;
 		case PRINT_MINCPU:
@@ -1473,7 +1491,7 @@ extern void print_fields(type_t type, void *object)
 					tmp_uint32 = NO_VAL;
 					break;
 				}
-				if (tmp_uint32 == (uint32_t)NO_VAL)
+				if (tmp_uint32 == NO_VAL)
 					tmp_uint32 = NO_VAL;
 			}
 
@@ -1526,11 +1544,8 @@ extern void print_fields(type_t type, void *object)
 				    != INFINITE64)
 					tmp_int = tmp_uint64;
 			}
-			convert_num_unit((double)tmp_int, outbuf,
-					 sizeof(outbuf), UNIT_NONE,
-					 params.units, params.convert_flags);
 			field->print_routine(field,
-					     outbuf,
+					     tmp_int,
 					     (curr_inx == field_count));
 			break;
 		case PRINT_NTASKS:
@@ -1747,7 +1762,7 @@ extern void print_fields(type_t type, void *object)
 				break;
 			}
 
-			if (tmp_uint64 != (uint64_t)NO_VAL64) {
+			if (tmp_uint64 != NO_VAL64) {
 				bool per_cpu = false;
 				if (tmp_uint64 & MEM_PER_CPU) {
 					tmp_uint64 &= (~MEM_PER_CPU);
@@ -1840,7 +1855,7 @@ extern void print_fields(type_t type, void *object)
 				tmp_uint32 = NO_VAL;
 				break;
 			}
-			if (tmp_uint32 == (uint32_t)NO_VAL)
+			if (tmp_uint32 == NO_VAL)
 				tmp_uint32 = NO_VAL;
 			field->print_routine(field,
 					     tmp_uint32,

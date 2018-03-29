@@ -51,7 +51,7 @@
 #define BUF_MAGIC 0x42554545
 #define BUF_SIZE (16 * 1024)
 #define MAX_BUF_SIZE ((uint32_t) 0xffff0000)	/* avoid going over 32-bits */
-#define REASONABLE_BUF_SIZE ((uint32_t) 0xbfff000) /* three-quarters of max */
+#define REASONABLE_BUF_SIZE ((uint32_t) 0xbfff4000) /* three-quarters of max */
 #define FLOAT_MULT 1000000
 
 /* If we unpack a buffer that contains bad data, we want to avoid a memory
@@ -125,6 +125,9 @@ int	unpackmem(char *valp, uint32_t *size_valp, Buf buffer);
 int	unpackmem_ptr(char **valp, uint32_t *size_valp, Buf buffer);
 int	unpackmem_xmalloc(char **valp, uint32_t *size_valp, Buf buffer);
 int	unpackmem_malloc(char **valp, uint32_t *size_valp, Buf buffer);
+
+int	unpackstr_xmalloc_escaped(char **valp, uint32_t *size_valp, Buf buffer);
+int	unpackstr_xmalloc_chooser(char **valp, uint32_t *size_valp, Buf buffer);
 
 void	packstr_array(char **valp, uint32_t size_val, Buf buffer);
 int	unpackstr_array(char ***valp, uint32_t* size_val, Buf buffer);
@@ -334,8 +337,12 @@ int	unpackmem_array(char *valp, uint32_t size_valp, Buf buffer);
 #define safe_unpackstr_malloc	                        \
         safe_unpackmem_malloc
 
-#define safe_unpackstr_xmalloc	                        \
-        safe_unpackmem_xmalloc
+#define safe_unpackstr_xmalloc(valp, size_valp, buf) do {	\
+	assert(sizeof(*size_valp) == sizeof(uint32_t));        	\
+	assert(buf->magic == BUF_MAGIC);		        \
+	if (unpackstr_xmalloc_chooser(valp, size_valp, buf))    \
+		goto unpack_error;		       		\
+} while (0)
 
 #define safe_unpackstr_array(valp,size_valp,buf) do {	\
 	assert(sizeof(*size_valp) == sizeof(uint32_t)); \

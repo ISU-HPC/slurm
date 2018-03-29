@@ -363,8 +363,10 @@ static void _normalize_assoc_shares_traditional(
 			       assoc->id, assoc->acct, assoc->user,
 			       assoc->shares_raw,
 			       assoc->usage->level_shares,
+			       assoc->usage->level_shares ?
 			       (double)assoc->shares_raw /
-			       (double)assoc->usage->level_shares);
+			       (double)assoc->usage->level_shares :
+			       0);
 		}
 
 		assoc = assoc->usage->parent_assoc_ptr;
@@ -441,8 +443,6 @@ static void _clear_qos_used_limit_list(List used_limit_list, uint32_t tres_cnt)
 
 	return;
 }
-
-
 
 static void _clear_qos_acct_limit_info(slurmdb_qos_rec_t *qos_ptr)
 {
@@ -726,7 +726,7 @@ static slurmdb_assoc_rec_t* _find_assoc_parent(
 }
 
 /* locks should be put in place before calling this function
- * ASSOC_WRITE, USER_WRITE, TRES_READ */
+ * ASSOC_WRITE, USER_WRITE, QOS_READ, TRES_READ */
 static int _set_assoc_parent_and_user(slurmdb_assoc_rec_t *assoc,
 				      int reset)
 {
@@ -906,7 +906,7 @@ static void _set_children_level_shares(slurmdb_assoc_rec_t *assoc,
 
 /* transfer slurmdb assoc list to be assoc_mgr assoc list */
 /* locks should be put in place before calling this function
- * ASSOC_WRITE, USER_WRITE, TRES_READ */
+ * ASSOC_WRITE, USER_WRITE, QOS_READ, TRES_READ */
 static int _post_assoc_list(void)
 {
 	slurmdb_assoc_rec_t *assoc = NULL;
@@ -1387,7 +1387,7 @@ static int _get_assoc_mgr_tres_list(void *db_conn, int enforce)
 
 	assoc_mgr_unlock(&locks);
 
-	if (changed && init_setup.update_cluster_tres) {
+	if (!running_cache && changed && init_setup.update_cluster_tres) {
 		/* update jobs here, this needs to be outside of the
 		 * assoc_mgr locks */
 		init_setup.update_cluster_tres();
@@ -1400,7 +1400,7 @@ static int _get_assoc_mgr_assoc_list(void *db_conn, int enforce)
 {
 	slurmdb_assoc_cond_t assoc_q;
 	uid_t uid = getuid();
-	assoc_mgr_lock_t locks = { WRITE_LOCK, NO_LOCK, NO_LOCK, NO_LOCK,
+	assoc_mgr_lock_t locks = { WRITE_LOCK, NO_LOCK, READ_LOCK, NO_LOCK,
 				   READ_LOCK, WRITE_LOCK, NO_LOCK };
 
 //	DEF_TIMERS;
@@ -1623,7 +1623,7 @@ static int _refresh_assoc_mgr_assoc_list(void *db_conn, int enforce)
 	ListIterator curr_itr = NULL;
 	ListIterator assoc_mgr_itr = NULL;
 	slurmdb_assoc_rec_t *curr_assoc = NULL, *assoc = NULL;
-	assoc_mgr_lock_t locks = { WRITE_LOCK, NO_LOCK, NO_LOCK, NO_LOCK,
+	assoc_mgr_lock_t locks = { WRITE_LOCK, NO_LOCK, READ_LOCK, NO_LOCK,
 				   READ_LOCK, WRITE_LOCK, NO_LOCK };
 //	DEF_TIMERS;
 
@@ -1747,7 +1747,9 @@ static int _refresh_assoc_mgr_res_list(void *db_conn, int enforce)
 static int _refresh_assoc_mgr_qos_list(void *db_conn, int enforce)
 {
 	List current_qos = NULL;
+	ListIterator itr;
 	uid_t uid = getuid();
+	slurmdb_qos_rec_t *curr_qos = NULL, *qos_rec = NULL;
 	assoc_mgr_lock_t locks = { NO_LOCK, NO_LOCK, WRITE_LOCK, NO_LOCK,
 				   NO_LOCK, NO_LOCK, NO_LOCK };
 
@@ -1761,6 +1763,19 @@ static int _refresh_assoc_mgr_qos_list(void *db_conn, int enforce)
 	_post_qos_list(current_qos);
 
 	assoc_mgr_lock(&locks);
+
+	/* move usage from old list over to the new one */
+	itr = list_iterator_create(current_qos);
+	while ((curr_qos = list_next(itr))) {
+		if (!(qos_rec = list_find_first(assoc_mgr_qos_list,
+						slurmdb_find_qos_in_list,
+						&curr_qos->id)))
+			continue;
+		slurmdb_destroy_qos_usage(curr_qos->usage);
+		curr_qos->usage = qos_rec->usage;
+		qos_rec->usage = NULL;
+	}
+	list_iterator_destroy(itr);
 
 	FREE_NULL_LIST(assoc_mgr_qos_list);
 
@@ -2209,8 +2224,8 @@ extern int assoc_mgr_fill_in_tres(void *db_conn,
 
 	if (!tres->id) {
 		if (!tres->type ||
-		    ((!strncasecmp(tres->type, "gres:", 5) ||
-		      !strncasecmp(tres->type, "license:", 8))
+		    ((!xstrncasecmp(tres->type, "gres:", 5) ||
+		      !xstrncasecmp(tres->type, "license:", 8))
 		     && !tres->name)) {
 			if (enforce & ACCOUNTING_ENFORCE_TRES) {
 				error("get_assoc_id: "
@@ -3384,7 +3399,7 @@ extern int assoc_mgr_info_unpack_msg(
 			     buffer);
 
 	safe_unpack32(&count, buffer);
-	if (count > NO_VAL32)
+	if (count > NO_VAL)
 		goto unpack_error;
 	if (count) {
 		object_ptr->assoc_list =
@@ -3400,7 +3415,7 @@ extern int assoc_mgr_info_unpack_msg(
 	}
 
 	safe_unpack32(&count, buffer);
-	if (count > NO_VAL32)
+	if (count > NO_VAL)
 		goto unpack_error;
 	if (count) {
 		object_ptr->qos_list =
@@ -3415,7 +3430,7 @@ extern int assoc_mgr_info_unpack_msg(
 	}
 
 	safe_unpack32(&count, buffer);
-	if (count > NO_VAL32)
+	if (count > NO_VAL)
 		goto unpack_error;
 	if (count) {
 		object_ptr->user_list =
@@ -3740,7 +3755,7 @@ extern int assoc_mgr_update_assocs(slurmdb_update_object_t *update, bool locked)
 				rec->def_qos_id = 0;
 			}
 
-			if (object->is_def != (uint16_t)NO_VAL) {
+			if (object->is_def != NO_VAL16) {
 				rec->is_def = object->is_def;
 				/* parents_changed will set this later
 				   so try to avoid doing it twice.
@@ -4034,7 +4049,7 @@ extern int assoc_mgr_update_wckeys(slurmdb_update_object_t *update, bool locked)
 				break;
 			}
 
-			if (object->is_def != (uint16_t)NO_VAL) {
+			if (object->is_def != NO_VAL16) {
 				rec->is_def = object->is_def;
 				if (rec->is_def)
 					_set_user_default_wckey(rec);
@@ -4479,7 +4494,7 @@ extern int assoc_mgr_update_qos(slurmdb_update_object_t *update, bool locked)
 /* 				xfree(tmp); */
 			}
 
-			if (object->preempt_mode != (uint16_t)NO_VAL)
+			if (object->preempt_mode != NO_VAL16)
 				rec->preempt_mode = object->preempt_mode;
 
 			if (object->priority != NO_VAL) {
@@ -4736,8 +4751,7 @@ extern int assoc_mgr_update_res(slurmdb_update_object_t *update, bool locked)
 			if (object->type != SLURMDB_RESOURCE_NOTSET)
 				rec->type = object->type;
 
-			if (object->clus_res_rec->percent_allowed !=
-			    (uint16_t)NO_VAL)
+			if (object->clus_res_rec->percent_allowed != NO_VAL16)
 				rec->clus_res_rec->percent_allowed =
 					object->clus_res_rec->percent_allowed;
 
@@ -4847,6 +4861,8 @@ extern int assoc_mgr_update_tres(slurmdb_update_object_t *update, bool locked)
 		_post_tres_list(tmp_list, list_count(tmp_list));
 	} else if (freeit)
 		FREE_NULL_LIST(tmp_list);
+	else
+		assoc_mgr_tres_list = tmp_list;
 
 	if (!locked)
 		assoc_mgr_unlock(&locks);
@@ -5832,7 +5848,6 @@ extern int assoc_mgr_refresh_lists(void *db_conn, uint16_t cache_level)
 		if (_refresh_assoc_wckey_list(
 			    db_conn, init_setup.enforce) == SLURM_ERROR)
 			return SLURM_ERROR;
-
 	if (cache_level & ASSOC_MGR_CACHE_RES)
 		if (_refresh_assoc_mgr_res_list(
 			    db_conn, init_setup.enforce) == SLURM_ERROR)
@@ -6204,6 +6219,9 @@ extern double assoc_mgr_tres_weighted(uint64_t *tres_cnt, double *weights,
 		double tres_weight = weights[i];
 		char  *tres_type   = assoc_mgr_tres_array[i]->type;
 		double tres_value  = tres_cnt[i];
+
+		if (i == TRES_ARRAY_BILLING)
+			continue;
 
 		debug("TRES Weight: %s = %f * %f = %f",
 		      assoc_mgr_tres_name_array[i], tres_value, tres_weight,

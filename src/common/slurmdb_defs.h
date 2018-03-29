@@ -62,6 +62,7 @@ typedef enum {
 	TRES_MEM,
 	TRES_ENERGY,
 	TRES_NODE,
+	TRES_BILLING,
 	TRES_STATIC_CNT
 } tres_types_t;
 
@@ -244,6 +245,7 @@ extern slurmdb_tres_rec_t *slurmdb_find_tres_in_string(
 	char *tres_str_in, int id);
 extern uint64_t slurmdb_find_tres_count_in_string(char *tres_str_in, int id);
 extern int slurmdb_find_qos_in_list_by_name(void *x, void *key);
+extern int slurmdb_find_qos_in_list(void *x, void *key);
 extern int slurmdb_find_selected_step_in_list(void *x, void *key);
 extern int slurmdb_find_assoc_in_list(void *x, void *key);
 extern int slurmdb_find_update_object_in_list(void *x, void *key);

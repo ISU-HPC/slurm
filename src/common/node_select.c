@@ -303,7 +303,7 @@ extern int slurm_select_init(bool only_default)
 	if (select_context_default == -1)
 		fatal("Can't find plugin for %s", select_type);
 
-	/* Insure that plugin_id is valid and unique */
+	/* Ensure that plugin_id is valid and unique */
 	for (i=0; i<select_context_cnt; i++) {
 		for (j=i+1; j<select_context_cnt; j++) {
 			if (*(ops[i].plugin_id) !=
@@ -330,7 +330,7 @@ done:
 			uint16_t cr_type = slurm_get_select_type_param();
 			if (cr_type & (CR_CPU | CR_CORE | CR_SOCKET)) {
 				fatal("Invalid SelectTypeParameters for "
-				      "%s: %s (%u), it's can't contain "
+				      "%s: %s (%u), it can't contain "
 				      "CR_(CPU|CORE|SOCKET).",
 				      select_type,
 				      select_type_param_string(cr_type),
@@ -371,16 +371,62 @@ fini:	slurm_mutex_unlock(&select_context_lock);
 extern int select_get_plugin_id_pos(uint32_t plugin_id)
 {
 	int i;
+	static bool cray_other_cons_res = false;
 
 	if (slurm_select_init(0) < 0)
 		return SLURM_ERROR;
-
+again:
 	for (i=0; i<select_context_cnt; i++) {
 		if (*(ops[i].plugin_id) == plugin_id)
 			break;
 	}
-	if (i >= select_context_cnt)
+	if (i >= select_context_cnt) {
+		/*
+		 * Put on the extra cray plugin that doesn't get generated
+		 * automatically.
+		 */
+		if (!cray_other_cons_res &&
+		    ((plugin_id == SELECT_PLUGIN_CRAY_CONS_RES) ||
+		     (plugin_id == SELECT_PLUGIN_CRAY_LINEAR))) {
+			char *type = "select", *name = "select/cray";
+			uint16_t save_params = slurm_get_select_type_param();
+			uint16_t params;
+			int cray_plugin_id;
+
+			cray_other_cons_res = true;
+
+			if (plugin_id == SELECT_PLUGIN_CRAY_LINEAR) {
+				params = save_params & ~CR_OTHER_CONS_RES;
+				cray_plugin_id = SELECT_PLUGIN_CRAY_CONS_RES;
+			} else {
+				params = save_params | CR_OTHER_CONS_RES;
+				cray_plugin_id = SELECT_PLUGIN_CRAY_LINEAR;
+			}
+
+			for (i=0; i<select_context_cnt; i++) {
+				if (*(ops[i].plugin_id) == cray_plugin_id)
+					break;
+			}
+
+			if (i >= select_context_cnt)
+				goto end_it;
+
+			slurm_mutex_lock(&select_context_lock);
+			slurm_set_select_type_param(params);
+			plugin_context_destroy(select_context[i]);
+			select_context[i] =
+				plugin_context_create(type, name,
+						      (void **)&ops[i],
+						      node_select_syms,
+						      sizeof(node_select_syms));
+			slurm_set_select_type_param(save_params);
+			slurm_mutex_unlock(&select_context_lock);
+			goto again;
+		}
+
+	end_it:
 		return SLURM_ERROR;
+	}
 	return i;
 }
 

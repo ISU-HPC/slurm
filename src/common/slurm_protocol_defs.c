@@ -82,7 +82,7 @@ strong_alias(node_use_string, slurm_node_use_string);
 strong_alias(bg_block_state_string, slurm_bg_block_state_string);
 strong_alias(cray_nodelist2nids, slurm_cray_nodelist2nids);
 strong_alias(reservation_flags_string, slurm_reservation_flags_string);
-
+strong_alias(print_multi_line_string, slurm_print_multi_line_string);
 
 static void _free_all_front_end_info(front_end_info_msg_t *msg);
 
@@ -105,8 +105,8 @@ extern void slurm_msg_t_init(slurm_msg_t *msg)
 	memset(msg, 0, sizeof(slurm_msg_t));
 
 	msg->conn_fd = -1;
-	msg->msg_type = (uint16_t)NO_VAL;
-	msg->protocol_version = (uint16_t)NO_VAL;
+	msg->msg_type = NO_VAL16;
+	msg->protocol_version = NO_VAL16;
 
 #ifndef NDEBUG
 	msg->flags = drop_priv_flag;
@@ -710,6 +710,11 @@ extern void slurm_free_reroute_msg(reroute_msg_t *msg)
 	}
 }
 
+extern void slurm_free_batch_script_msg(char *msg)
+{
+	xfree(msg);
+}
+
 extern void slurm_free_job_id_msg(job_id_msg_t * msg)
 {
 	xfree(msg);
@@ -818,6 +823,7 @@ extern void slurm_free_job_desc_msg(job_desc_msg_t * msg)
 				xfree(msg->environment[i]);
 			xfree(msg->environment);
 		}
+		xfree(msg->extra);
 		xfree(msg->std_err);
 		xfree(msg->exc_nodes);
 		xfree(msg->features);
@@ -884,7 +890,6 @@ extern void slurm_free_prolog_launch_msg(prolog_launch_msg_t * msg)
 
 	if (msg) {
 		xfree(msg->alias_list);
-		xfree(msg->gids);
 		xfree(msg->nodes);
 		xfree(msg->partition);
 		xfree(msg->std_err);
@@ -935,6 +940,7 @@ extern void slurm_free_job_launch_msg(batch_job_launch_msg_t * msg)
 				xfree(msg->environment[i]);
 			xfree(msg->environment);
 		}
+		xfree(msg->gids);
 		xfree(msg->nodes);
 		xfree(msg->partition);
 		xfree(msg->qos);
@@ -1015,6 +1021,7 @@ extern void slurm_free_job_info_members(job_info_t * job)
 		xfree(job->std_out);
 		xfree(job->tres_alloc_str);
 		xfree(job->tres_req_str);
+		xfree(job->user_name);
 		xfree(job->wckey);
 		xfree(job->work_dir);
 	}
@@ -1275,6 +1282,7 @@ extern void slurm_free_launch_tasks_request_msg(launch_tasks_request_msg_t * msg
 		}
 		xfree(msg->global_task_ids);
 	}
+	xfree(msg->gids);
 	xfree(msg->pack_node_list);
 	xfree(msg->pack_task_cnts);
 	xfree(msg->tasks_to_launch);
@@ -1901,6 +1909,38 @@ extern char *job_reason_string(enum job_state_reason inx)
 		return "OutOfMemory";
 	case WAIT_PN_MEM_LIMIT:
 		return "MaxMemPerLimit";
+	case WAIT_ASSOC_GRP_BILLING:
+		return "AssocGrpBilling";
+	case WAIT_ASSOC_GRP_BILLING_MIN:
+		return "AssocGrpBillingMinutes";
+	case WAIT_ASSOC_GRP_BILLING_RUN_MIN:
+		return "AssocGrpBillingRunMinutes";
+	case WAIT_ASSOC_MAX_BILLING_PER_JOB:
+		return "AssocMaxBillingPerJob";
+	case WAIT_ASSOC_MAX_BILLING_PER_NODE:
+		return "AssocMaxBillingPerNode";
+	case WAIT_ASSOC_MAX_BILLING_MINS_PER_JOB:
+		return "AssocMaxBillingMinutesPerJob";
+	case WAIT_QOS_GRP_BILLING:
+		return "QOSGrpBilling";
+	case WAIT_QOS_GRP_BILLING_MIN:
+		return "QOSGrpBillingMinutes";
+	case WAIT_QOS_GRP_BILLING_RUN_MIN:
+		return "QOSGrpBillingRunMinutes";
+	case WAIT_QOS_MAX_BILLING_PER_JOB:
+		return "QOSMaxBillingPerJob";
+	case WAIT_QOS_MAX_BILLING_PER_NODE:
+		return "QOSMaxBillingPerNode";
+	case WAIT_QOS_MAX_BILLING_PER_USER:
+		return "QOSMaxBillingPerUser";
+	case WAIT_QOS_MAX_BILLING_MINS_PER_JOB:
+		return "QOSMaxBillingMinutesPerJob";
+	case WAIT_QOS_MAX_BILLING_PER_ACCT:
+		return "MaxBillingPerAccount";
+	case WAIT_QOS_MIN_BILLING:
+		return "QOSMinBilling";
+	case WAIT_RESV_DELETED:
+		return "ReservationDeleted";
 	default:
 		snprintf(val, sizeof(val), "%d", inx);
 		return val;
@@ -1923,7 +1963,9 @@ extern bool job_state_qos_grp_limit(enum job_state_reason state_reason)
 	    (state_reason >= WAIT_QOS_GRP_LIC &&
 	     state_reason <= WAIT_QOS_GRP_LIC_RUN_MIN) ||
 	    (state_reason >= WAIT_QOS_GRP_BB &&
-	     state_reason <= WAIT_QOS_GRP_BB_RUN_MIN))
+	     state_reason <= WAIT_QOS_GRP_BB_RUN_MIN) ||
+	    (state_reason >= WAIT_QOS_GRP_BILLING &&
+	     state_reason <= WAIT_QOS_GRP_BILLING_RUN_MIN))
 		return true;
 	return false;
 }
@@ -1972,6 +2014,7 @@ extern void slurm_free_will_run_response_msg(will_run_response_msg_t *msg)
 {
 	if (msg) {
 		xfree(msg->node_list);
+		xfree(msg->job_submit_user_msg);
 		FREE_NULL_LIST(msg->preemptee_job_id);
 		xfree(msg);
 	}
@@ -2060,14 +2103,14 @@ extern uint16_t preempt_mode_num(const char *preempt_mode)
 			preempt_modes++;
 		} else {
 			preempt_modes = 0;
-			mode_num = (uint16_t) NO_VAL;
+			mode_num = NO_VAL16;
 			break;
 		}
 		tok = strtok_r(NULL, ",", &last);
 	}
 	xfree(tmp_str);
 	if (preempt_modes > 1) {
-		mode_num = (uint16_t) NO_VAL;
+		mode_num = NO_VAL16;
 	}
 
 	return mode_num;
@@ -2106,7 +2149,7 @@ extern char *log_num2string(uint16_t inx)
 extern uint16_t log_string2num(char *name)
 {
 	if (name == NULL)
-		return (uint16_t) NO_VAL;
+		return NO_VAL16;
 
 	if ((name[0] >= '0') && (name[0] <= '9'))
 		return (uint16_t) atoi(name);
@@ -2132,7 +2175,7 @@ extern uint16_t log_string2num(char *name)
 	if (!xstrcasecmp(name, "debug5"))
 		return (uint16_t) 9;
 
-	return (uint16_t) NO_VAL;
+	return NO_VAL16;
 }
 
 extern char *job_share_string(uint16_t shared)
@@ -2170,6 +2213,8 @@ extern char *job_state_string(uint32_t inx)
 		return "STOPPED";
 	if (inx & JOB_REVOKED)
 		return "REVOKED";
+	if (inx & JOB_RESV_DEL_HOLD)
+		return "RESV_DEL_HOLD";
 
 
 	/* Process JOB_STATE_BASE */
@@ -2224,6 +2269,8 @@ extern char *job_state_string_compact(uint32_t inx)
 		return "ST";
 	if (inx & JOB_REVOKED)
 		return "RV";
+	if (inx & JOB_RESV_DEL_HOLD)
+		return "RD";
 
 	/* Process JOB_STATE_BASE */
 	switch (inx & JOB_STATE_BASE) {
@@ -2280,10 +2327,18 @@ extern uint32_t job_state_num(const char *state_name)
 		return JOB_CONFIGURING;
 	if (_job_name_test(JOB_RESIZING, state_name))
 		return JOB_RESIZING;
-	if (_job_name_test(JOB_REVOKED, state_name))
-		return JOB_REVOKED;
+	if (_job_name_test(JOB_REQUEUE, state_name))
+		return JOB_REQUEUE;
+	if (_job_name_test(JOB_REQUEUE_FED, state_name))
+		return JOB_REQUEUE_FED;
+	if (_job_name_test(JOB_REQUEUE_HOLD, state_name))
+		return JOB_REQUEUE_HOLD;
 	if (_job_name_test(JOB_SPECIAL_EXIT, state_name))
 		return JOB_SPECIAL_EXIT;
+	if (_job_name_test(JOB_STOPPED, state_name))
+		return JOB_STOPPED;
+	if (_job_name_test(JOB_REVOKED, state_name))
+		return JOB_REVOKED;
 
 	return NO_VAL;
 }
@@ -2504,10 +2559,20 @@ extern char *reservation_flags_string(uint32_t flags)
 			xstrcat(flag_str, ",");
 		xstrcat(flag_str, "REPLACE");
 	}
+	if (flags & RESERVE_FLAG_REPLACE_DOWN) {
+		if (flag_str[0])
+			xstrcat(flag_str, ",");
+		xstrcat(flag_str, "REPLACE_DOWN");
+	}
 	if (flags & RESERVE_FLAG_PURGE_COMP) {
 		if (flag_str[0])
 			xstrcat(flag_str, ",");
 		xstrcat(flag_str, "PURGE_COMP");
+	}
+	if (flags & RESERVE_FLAG_NO_HOLD_JOBS) {
+		if (flag_str[0])
+			xstrcat(flag_str, ",");
+		xstrcat(flag_str, "NO_HOLD_JOBS_AFTER_END");
 	}
 	return flag_str;
 }
@@ -2680,6 +2745,14 @@ extern char *node_state_string(uint32_t inx)
 	if (inx == NODE_STATE_POWER_UP)
 		return "POWER_UP";
 	if (base == NODE_STATE_DOWN) {
+		if (maint_flag)
+			return "DOWN$";
+		if (reboot_flag)
+			return "DOWN@";
+		if (power_up_flag)
+			return "DOWN#";
+		if (power_down_flag)
+			return "DOWN~";
 		if (no_resp_flag)
 			return "DOWN*";
 		return "DOWN";
@@ -2701,6 +2774,14 @@ extern char *node_state_string(uint32_t inx)
 		return "ALLOCATED";
 	}
 	if (comp_flag) {
+		if (maint_flag)
+			return "COMPLETING$";
+		if (reboot_flag)
+			return "COMPLETING@";
+		if (power_up_flag)
+			return "COMPLETING#";
+		if (power_down_flag)
+			return "COMPLETING~";
 		if (no_resp_flag)
 			return "COMPLETING*";
 		return "COMPLETING";
@@ -2749,6 +2830,14 @@ extern char *node_state_string(uint32_t inx)
 		return "MIXED";
 	}
 	if (base == NODE_STATE_FUTURE) {
+		if (maint_flag)
+			return "FUTURE$";
+		if (reboot_flag)
+			return "FUTURE@";
+		if (power_up_flag)
+			return "FUTURE#";
+		if (power_down_flag)
+			return "FUTURE~";
 		if (no_resp_flag)
 			return "FUTURE*";
 		return "FUTURE";
@@ -2831,6 +2920,14 @@ extern char *node_state_string_compact(uint32_t inx)
 	if (inx == NODE_STATE_POWER_UP)
 		return "POW_UP";
 	if (inx == NODE_STATE_DOWN) {
+		if (maint_flag)
+			return "DOWN$";
+		if (reboot_flag)
+			return "DOWN@";
+		if (power_up_flag)
+			return "DOWN#";
+		if (power_down_flag)
+			return "DOWN~";
 		if (no_resp_flag)
 			return "DOWN*";
 		return "DOWN";
@@ -2852,6 +2949,14 @@ extern char *node_state_string_compact(uint32_t inx)
 		return "ALLOC";
 	}
 	if (comp_flag) {
+		if (maint_flag)
+			return "COMP$";
+		if (reboot_flag)
+			return "COMP@";
+		if (power_up_flag)
+			return "COMP#";
+		if (power_down_flag)
+			return "COMP~";
 		if (no_resp_flag)
 			return "COMP*";
 		return "COMP";
@@ -2900,6 +3005,14 @@ extern char *node_state_string_compact(uint32_t inx)
 		return "MIX";
 	}
 	if (inx == NODE_STATE_FUTURE) {
+		if (maint_flag)
+			return "FUTR$";
+		if (reboot_flag)
+			return "FUTR@";
+		if (power_up_flag)
+			return "FUTR#";
+		if (power_down_flag)
+			return "FUTR~";
 		if (no_resp_flag)
 			return "FUTR*";
 		return "FUTR";
@@ -3989,7 +4102,7 @@ extern void slurm_free_set_fs_dampening_factor_msg(
 extern int slurm_free_msg_data(slurm_msg_type_t type, void *data)
 {
 	/* this message was never loaded */
-	if ((uint16_t)type == (uint16_t)NO_VAL)
+	if ((uint16_t)type == NO_VAL16)
 		return SLURM_SUCCESS;
 
 	switch (type) {
@@ -4069,6 +4182,7 @@ extern int slurm_free_msg_data(slurm_msg_type_t type, void *data)
 		slurm_free_node_registration_status_msg(data);
 		break;
 	case REQUEST_JOB_ALLOCATION_INFO:
+	case DEFUNCT_REQUEST_JOB_ALLOCATION_INFO_LITE:
 	case REQUEST_JOB_END_TIME:
 	case REQUEST_JOB_PACK_ALLOC_INFO:
 		slurm_free_job_alloc_info_msg(data);
@@ -4143,7 +4257,8 @@ extern int slurm_free_msg_data(slurm_msg_type_t type, void *data)
 		slurm_free_job_id_msg(data);
 		break;
 	case RESPONSE_BATCH_SCRIPT:
-		xfree(data);
+		slurm_free_batch_script_msg(data);
+		break;
 	case REQUEST_JOB_USER_INFO:
 		slurm_free_job_user_id_msg(data);
 		break;
@@ -4233,6 +4348,8 @@ extern int slurm_free_msg_data(slurm_msg_type_t type, void *data)
 	case REQUEST_HEALTH_CHECK:
 	case REQUEST_ACCT_GATHER_UPDATE:
 	case ACCOUNTING_FIRST_REG:
+	case ACCOUNTING_TRES_CHANGE_DB:
+	case ACCOUNTING_NODES_CHANGE_DB:
 	case REQUEST_TOPO_INFO:
 	case REQUEST_BURST_BUFFER_INFO:
 	case REQUEST_POWERCAP_INFO:
@@ -4693,6 +4810,10 @@ rpc_num2string(uint16_t opcode)
 		return "REQUEST_JOB_ALLOCATION_INFO";
 	case RESPONSE_JOB_ALLOCATION_INFO:
 		return "RESPONSE_JOB_ALLOCATION_INFO";
+	case DEFUNCT_REQUEST_JOB_ALLOCATION_INFO_LITE:
+		return "REQUEST_JOB_ALLOCATION_INFO_LITE";
+	case DEFUNCT_RESPONSE_JOB_ALLOCATION_INFO_LITE:
+		return "RESPONSE_JOB_ALLOCATION_INFO_LITE";
 	case REQUEST_JOB_PACK_ALLOCATION:
 		return "REQUEST_JOB_PACK_ALLOCATION";
 	case RESPONSE_JOB_PACK_ALLOCATION:
@@ -4821,7 +4942,7 @@ rpc_num2string(uint16_t opcode)
 		return "RESPONSE_REATTACH_TASKS";
 	case REQUEST_KILL_TIMELIMIT:
 		return "REQUEST_KILL_TIMELIMIT";
-	case REQUEST_SIGNAL_JOB_DEFUNCT:			/* 6010 */
+	case DEFUNCT_REQUEST_SIGNAL_JOB:			/* 6010 */
 		return "REQUEST_SIGNAL_JOB";
 	case REQUEST_TERMINATE_JOB:
 		return "REQUEST_TERMINATE_JOB";
@@ -4886,6 +5007,10 @@ rpc_num2string(uint16_t opcode)
 		return "ACCOUNTING_FIRST_REG";
 	case ACCOUNTING_REGISTER_CTLD:
 		return "ACCOUNTING_REGISTER_CTLD";
+	case ACCOUNTING_TRES_CHANGE_DB:
+		return "ACCOUNTING_TRES_CHANGE_DB";
+	case ACCOUNTING_NODES_CHANGE_DB:
+		return "ACCOUNTING_NODES_CHANGE_DB";
 
 	case MESSAGE_COMPOSITE:					/* 110001 */
 		return "MESSAGE_COMPOSITE";
@@ -5074,5 +5199,24 @@ extern int get_cluster_node_offset(char *cluster_name,
 			return offset;
 
 	return 0;
+}
+
+extern void print_multi_line_string(char *user_msg, int inx)
+{
+	char *line, *buf, *ptrptr = NULL;
+
+	if (!user_msg)
+		return;
+
+	buf = xstrdup(user_msg);
+	line = strtok_r(buf, "\n", &ptrptr);
+	while (line) {
+		if (inx == -1)
+			info("%s", line);
+		else
+			info("%d: %s", inx, line);
+		line = strtok_r(NULL, "\n", &ptrptr);
+	}
+	xfree(buf);
 }
 

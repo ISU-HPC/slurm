@@ -336,7 +336,7 @@ static const char *_set_resv_msg(resv_desc_msg_t *resv_msg,
 	case SORTID_FLAGS:
 		f = parse_resv_flags(new_text, __func__);
 		type = "flags";
-		if (f == (uint32_t)NO_VAL)
+		if (f == NO_VAL)
 			goto return_error;
 		resv_msg->flags = f;
 		break;
@@ -1614,6 +1614,9 @@ static void _admin_resv(GtkTreeModel *model, GtkTreeIter *iter, char *type)
 		GTK_WINDOW(main_window),
 		GTK_DIALOG_MODAL | GTK_DIALOG_DESTROY_WITH_PARENT,
 		NULL);
+	gtk_window_set_type_hint(GTK_WINDOW(popup),
+				 GDK_WINDOW_TYPE_HINT_NORMAL);
+
 	gtk_window_set_transient_for(GTK_WINDOW(popup), NULL);
 
 	gtk_tree_model_get(model, iter, SORTID_NAME, &resvid, -1);

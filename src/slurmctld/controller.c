@@ -127,6 +127,7 @@
 #define MIN_CHECKIN_TIME  3	/* Nodes have this number of seconds to
 				 * check-in before we ping them */
 #define SHUTDOWN_WAIT     2	/* Time to wait for backup server shutdown */
+#define JOB_COUNT_INTERVAL 30   /* Time to update running job count */
 
 /**************************************************************************\
  * To test for memory leaks, set MEMORY_LEAK_DEBUG to 1 using
@@ -178,6 +179,8 @@ int	slurmctld_primary = 1;
 bool	want_nodes_reboot = true;
 int   slurmctld_tres_cnt = 0;
 slurmdb_cluster_rec_t *response_cluster_rec = NULL;
+int     slurmctld_running_job_count    = 0;
+time_t  slurmctld_running_job_count_ts = 0;
 
 /* Local variables */
 static pthread_t assoc_cache_thread = (pthread_t) 0;
@@ -227,6 +230,7 @@ static int          _init_tres(void);
 static void         _update_cluster_tres(void);
 
 inline static int   _report_locks_set(void);
+static int          _running_jobs_count();
 static void *       _service_connection(void *arg);
 static void         _set_work_dir(void);
 static int          _shutdown_backup_controller(int wait_time);
@@ -252,6 +256,10 @@ int main(int argc, char **argv)
 	/* Locks: Write configuration, job, node, and partition */
 	slurmctld_lock_t config_write_lock = {
 		WRITE_LOCK, WRITE_LOCK, WRITE_LOCK, WRITE_LOCK, NO_LOCK };
+	/* Locks: Write node and partition */
+	slurmctld_lock_t node_part_write_lock = {
+		NO_LOCK, NO_LOCK, WRITE_LOCK, WRITE_LOCK, NO_LOCK };
+
 	slurm_trigger_callbacks_t callbacks;
 	bool create_clustername_file;
 	/*
@@ -338,6 +346,9 @@ int main(int argc, char **argv)
 			     "but details not gathered");
 	}
 
+	if (slurmctld_conf.chos_loc)
+		error("Support for the ChosLoc configuration parameter will end in Slurm version 18.08");
+
 	if (license_init(slurmctld_conf.licenses) != SLURM_SUCCESS)
 		fatal("Invalid Licenses value: %s", slurmctld_conf.licenses);
 
@@ -402,23 +413,27 @@ int main(int argc, char **argv)
 			slurmctld_conf.job_credential_private_key);
 	}
 
+	/*
+	 * Avoid constant xstrcasestr calls as part of step launch.
+	 * This could live elsewhere if someone finds a better home for it.
+	 */
+	if (xstrcasestr(slurmctld_conf.launch_params, "send_gids"))
+		slurmctld_config.send_groups_in_cred = true;
+	else
+		slurmctld_config.send_groups_in_cred = false;
+
 	/* Must set before plugins are loaded. */
 	if (slurmctld_conf.backup_controller &&
 	    ((xstrcmp(node_name_short,slurmctld_conf.backup_controller) == 0) ||
 	     (xstrcmp(node_name_long, slurmctld_conf.backup_controller) == 0))) {
-#ifndef HAVE_ALPS_CRAY
-		char *sched_params = NULL;
-#endif
 		slurmctld_primary = 0;
 
 #ifdef HAVE_ALPS_CRAY
 		slurmctld_config.scheduling_disabled = true;
 #else
-		sched_params = slurm_get_sched_params();
-		if (sched_params &&
-		    strstr(sched_params, "no_backup_scheduling"))
+		if (xstrcasestr(slurmctld_conf.sched_params,
+				"no_backup_scheduling"))
 			slurmctld_config.scheduling_disabled = true;
-		xfree(sched_params);
 #endif
 	}
 
@@ -493,7 +508,9 @@ int main(int argc, char **argv)
 				   going down and this happens before it is
 				   normally set up so do it now.
 				*/
+				lock_slurmctld(node_part_write_lock);
 				set_cluster_tres(false);
+				unlock_slurmctld(node_part_write_lock);
 				_accounting_mark_all_nodes_down("cold-start");
 			}
 		} else {
@@ -609,7 +626,7 @@ int main(int argc, char **argv)
 			 * thread since we are shutting down, no reason
 			 * to wait for current info from the database */
 			slurm_mutex_lock(&assoc_cache_mutex);
-			running_cache = (uint16_t)NO_VAL;
+			running_cache = NO_VAL16;
 			slurm_cond_signal(&assoc_cache_cond);
 			slurm_mutex_unlock(&assoc_cache_mutex);
 			pthread_join(assoc_cache_thread, NULL);
@@ -708,25 +725,31 @@ int main(int argc, char **argv)
 	usleep(500000);
 }
 #else
-	/* Give REQUEST_SHUTDOWN a chance to get propagated,
-	 * up to 3 seconds. */
-	for (i=0; i<30; i++) {
+	/*
+	 * Give REQUEST_SHUTDOWN a chance to get propagated, up to 3 seconds.
+	 */
+	for (i = 0; i < 30; i++) {
 		agent_purge();
 		cnt = get_agent_count();
 		if (cnt == 0)
 			break;
 		usleep(100000);
 	}
+	if (i >= 30)
+		info("Dropped %d hung communications to shutdown", cnt);
 
-	/* do this outside of MEMORY_LEAK_DEBUG so that remote connections get
-	 * closed. */
+	/*
+	 * do this outside of MEMORY_LEAK_DEBUG so that remote connections get
+	 * closed.
+	 */
 
 #ifdef HAVE_BG
-	/* Always call slurm_select_fini() on some systems like
-	   BlueGene we need to make sure other processes are ended
-	   or we could get a random core from within it's
-	   underlying infrastructure.
-	*/
+	/*
+	 * Always call slurm_select_fini() on some systems like
+	 * BlueGene we need to make sure other processes are ended
+	 * or we could get a random core from within it's
+	 * underlying infrastructure.
+	 */
         slurm_select_fini();
 #endif
 
@@ -734,8 +757,8 @@ int main(int argc, char **argv)
 
 	xfree(slurmctld_config.auth_info);
 	if (cnt) {
-		info("Slurmctld shutdown completing with %d active agent "
-		     "thread", cnt);
+		info("Slurmctld shutdown completing with %d active agent thread",
+		     cnt);
 	}
 	log_fini();
 	sched_log_fini();
@@ -816,6 +839,15 @@ static void _reconfigure_slurm(void)
 		_update_cred_key();
 		set_slurmctld_state_loc();
 	}
+	/*
+	 * Avoid constant xstrcasestr calls as part of step launch.
+	 * This could live elsewhere if someone finds a better home for it.
+	 */
+	if (xstrcasestr(slurmctld_conf.launch_params, "send_gids"))
+		slurmctld_config.send_groups_in_cred = true;
+	else
+		slurmctld_config.send_groups_in_cred = false;
+
 	gs_reconfig();
 	unlock_slurmctld(config_write_lock);
 	assoc_mgr_set_missing_uids();
@@ -885,7 +917,6 @@ static void *_slurmctld_signal_hand(void *no_data)
 			error("Invalid signal (%d) received", sig);
 		}
 	}
-
 }
 
 static void _default_sigaction(int sig)
@@ -1200,16 +1231,26 @@ static int _accounting_cluster_ready(void)
 
 	rc = clusteracct_storage_g_cluster_tres(acct_db_conn,
 						cluster_nodes,
-						cluster_tres_str, event_time);
+						cluster_tres_str, event_time,
+						SLURM_PROTOCOL_VERSION);
 
 	xfree(cluster_nodes);
 	xfree(cluster_tres_str);
 
-	if (rc == ACCOUNTING_FIRST_REG) {
+	/*
+	 * FIXME: We should do things differently here depending on the return
+	 *        value.  If NODES_CHANGE or FIRST_REQ we probably want to send
+	 *        most everything to accounting, but if just the TRES changed it
+	 *        means the nodes didn't change and we might not need to send
+	 *        anything.
+	 */
+	if ((rc == ACCOUNTING_FIRST_REG) ||
+	    (rc == ACCOUNTING_NODES_CHANGE_DB) ||
+	    (rc == ACCOUNTING_TRES_CHANGE_DB)) {
 		/* see if we are running directly to a database
 		 * instead of a slurmdbd.
 		 */
-		send_all_to_accounting(event_time);
+		send_all_to_accounting(event_time, rc);
 		rc = SLURM_SUCCESS;
 	}
 
@@ -1404,6 +1445,11 @@ static int _init_tres(void)
 		      "we have no TRES from it.  This should only happen if "
 		      "the database is down and you don't have "
 		      "any state files.");
+	else if ((g_tres_count < TRES_ARRAY_TOTAL_CNT) ||
+		 (xstrcmp(assoc_mgr_tres_array[TRES_ARRAY_BILLING]->type,
+			  "billing")))
+		fatal("You are running with a database but for some reason we have less TRES than should be here (%d < %d) and/or the \"billing\" TRES is missing. This should only happen if the database is down after an upgrade.",
+		      g_tres_count, TRES_ARRAY_TOTAL_CNT);
 
 	while ((temp_char = list_pop(char_list))) {
 		tres_rec = xmalloc(sizeof(slurmdb_tres_rec_t));
@@ -1418,21 +1464,23 @@ static int _init_tres(void)
 			tres_rec->id = TRES_ENERGY;
 		else if (!xstrcasecmp(temp_char, "node"))
 			tres_rec->id = TRES_NODE;
-		else if (!strncasecmp(temp_char, "bb/", 3)) {
+		else if (!xstrcasecmp(temp_char, "billing"))
+			tres_rec->id = TRES_BILLING;
+		else if (!xstrncasecmp(temp_char, "bb/", 3)) {
 			tres_rec->type[2] = '\0';
 			tres_rec->name = xstrdup(temp_char+3);
 			if (!tres_rec->name)
 				fatal("Burst Buffer type tres need to have a "
 				      "name, (i.e. bb/cray).  You gave %s",
 				      temp_char);
-		} else if (!strncasecmp(temp_char, "gres/", 5)) {
+		} else if (!xstrncasecmp(temp_char, "gres/", 5)) {
 			tres_rec->type[4] = '\0';
 			tres_rec->name = xstrdup(temp_char+5);
 			if (!tres_rec->name)
 				fatal("Gres type tres need to have a name, "
 				      "(i.e. Gres/GPU).  You gave %s",
 				      temp_char);
-		} else if (!strncasecmp(temp_char, "license/", 8)) {
+		} else if (!xstrncasecmp(temp_char, "license/", 8)) {
 			tres_rec->type[7] = '\0';
 			tres_rec->name = xstrdup(temp_char+8);
 			if (!tres_rec->name)
@@ -1506,6 +1554,27 @@ static int _init_tres(void)
 	return SLURM_SUCCESS;
 }
 
+/*
+ * NOTE: the job_write_lock as well as the assoc_mgr TRES Read lock should be
+ * locked before coming in here.
+ */
+static void _update_job_tres(struct job_record *job_ptr)
+{
+	xassert(verify_lock(JOB_LOCK, WRITE_LOCK));
+
+	/* If this returns 1 it means the positions were
+	   altered so just rebuild it.
+	*/
+	if (assoc_mgr_set_tres_cnt_array(&job_ptr->tres_req_cnt,
+					 job_ptr->tres_req_str,
+					 0, true))
+		job_set_req_tres(job_ptr, true);
+	if (assoc_mgr_set_tres_cnt_array(&job_ptr->tres_alloc_cnt,
+					 job_ptr->tres_alloc_str,
+					 0, true))
+		job_set_alloc_tres(job_ptr, true);
+}
+
 /* any association manager locks should be unlocked before hand */
 static void _update_cluster_tres(void)
 {
@@ -1524,17 +1593,7 @@ static void _update_cluster_tres(void)
 	assoc_mgr_lock(&locks);
 	job_iterator = list_iterator_create(job_list);
 	while ((job_ptr = list_next(job_iterator))) {
-		/* If this returns 1 it means the positions were
-		   altered so just rebuild it.
-		*/
-		if (assoc_mgr_set_tres_cnt_array(&job_ptr->tres_req_cnt,
-						 job_ptr->tres_req_str,
-						 0, true))
-			job_set_req_tres(job_ptr, true);
-		if (assoc_mgr_set_tres_cnt_array(&job_ptr->tres_alloc_cnt,
-						 job_ptr->tres_alloc_str,
-						 0, true))
-			job_set_alloc_tres(job_ptr, true);
+		_update_job_tres(job_ptr);
 	}
 	list_iterator_destroy(job_iterator);
 
@@ -1940,6 +1999,15 @@ static void *_slurmctld_background(void *no_data)
 			_accounting_cluster_ready();
 		}
 
+		if (difftime(now, slurmctld_running_job_count_ts) >=
+		    JOB_COUNT_INTERVAL) {
+			now = time(NULL);
+			lock_slurmctld(job_read_lock);
+			slurmctld_running_job_count_ts = now;
+			slurmctld_running_job_count    = _running_jobs_count();
+			unlock_slurmctld(job_read_lock);
+		}
+
 		/* Stats will reset at midnight (approx) local time. */
 		if (last_proc_req_start == 0) {
 			last_proc_req_start = now;
@@ -2082,16 +2150,26 @@ extern void ctld_assoc_mgr_init(slurm_trigger_callbacks_t *callbacks)
 }
 
 /* send all info for the controller to accounting */
-extern void send_all_to_accounting(time_t event_time)
+extern void send_all_to_accounting(time_t event_time, int db_rc)
 {
 	/* ignore the rcs here because if there was an error we will
 	   push the requests on the queue and process them when the
 	   database server comes back up.
 	*/
-	debug2("send_all_to_accounting: called");
-	send_jobs_to_accounting();
-	send_nodes_to_accounting(event_time);
-	send_resvs_to_accounting();
+	debug2("send_all_to_accounting: called %s", rpc_num2string(db_rc));
+	switch (db_rc) {
+	case ACCOUNTING_FIRST_REG:
+	case ACCOUNTING_NODES_CHANGE_DB:
+		send_jobs_to_accounting();
+		send_resvs_to_accounting(db_rc);
+		/* fall through */
+	case ACCOUNTING_TRES_CHANGE_DB:
+		/* No need to do jobs or resvs when only the TRES change. */
+		send_nodes_to_accounting(event_time);
+		break;
+	default:
+		error("unknown rc of %d given", db_rc);
+	}
 }
 
 static int _add_node_gres_tres(void *x, void *arg)
@@ -2114,13 +2192,50 @@ static int _add_node_gres_tres(void *x, void *arg)
 	return 0;
 }
 
-/* A slurmctld lock needs to at least have a node read lock set before
- * this is called */
+/*
+ * Set the node's billing tres to the highest billing of all partitions that the
+ * node is a part of.
+ */
+static void _set_node_billing_tres(struct node_record *node_ptr,
+				   uint64_t cpu_count,
+				   bool assoc_mgr_locked)
+{
+	int i;
+	struct part_record *part_ptr = NULL;
+	double max_billing = 0;
+	xassert(node_ptr);
+
+	for (i = 0; i < node_ptr->part_cnt; i++) {
+		double tmp_billing;
+		part_ptr = node_ptr->part_pptr[i];
+		if (!part_ptr->billing_weights)
+			continue;
+
+		tmp_billing = assoc_mgr_tres_weighted(node_ptr->tres_cnt,
+						part_ptr->billing_weights,
+						slurmctld_conf.priority_flags,
+						assoc_mgr_locked);
+		max_billing = MAX(max_billing, tmp_billing);
+	}
+
+	/* Set to the configured cpu_count if no partition has
+	 * tresbillingweights set because the job will be allocated the job's
+	 * cpu count if there are no tresbillingweights defined. */
+	if (!max_billing)
+		max_billing = cpu_count;
+	node_ptr->tres_cnt[TRES_ARRAY_BILLING] = max_billing;
+}
+
+/*
+ * A slurmctld lock needs to at least have a node and partition write lock set
+ * before this is called
+ */
 extern void set_cluster_tres(bool assoc_mgr_locked)
 {
 	struct node_record *node_ptr;
 	slurmdb_tres_rec_t *tres_rec, *cpu_tres = NULL, *mem_tres = NULL;
 	int i;
+	uint64_t cluster_billing = 0;
 	char *unique_tres = NULL;
 	assoc_mgr_lock_t locks = { NO_LOCK, NO_LOCK, NO_LOCK, NO_LOCK,
 				   WRITE_LOCK, NO_LOCK, NO_LOCK };
@@ -2201,6 +2316,9 @@ extern void set_cluster_tres(bool assoc_mgr_locked)
 		list_for_each(assoc_mgr_tres_list,
 			      _add_node_gres_tres, node_ptr);
 
+		_set_node_billing_tres(node_ptr, cpu_count, true);
+		cluster_billing += node_ptr->tres_cnt[TRES_ARRAY_BILLING];
+
 		xfree(node_ptr->tres_str);
 		node_ptr->tres_str =
 			assoc_mgr_make_tres_str_from_array(node_ptr->tres_cnt,
@@ -2221,6 +2339,7 @@ extern void set_cluster_tres(bool assoc_mgr_locked)
 		cpu_tres->count = cluster_cpus;
 
 	assoc_mgr_tres_array[TRES_ARRAY_NODE]->count = node_record_count;
+	assoc_mgr_tres_array[TRES_ARRAY_BILLING]->count = cluster_billing;
 
 	set_partition_tres();
 
@@ -2496,7 +2615,7 @@ void update_logging(void)
 			(LOG_LEVEL_INFO + debug_level),
 			(LOG_LEVEL_END - 1));
 	}
-	if (slurmctld_conf.slurmctld_debug != (uint16_t) NO_VAL) {
+	if (slurmctld_conf.slurmctld_debug != NO_VAL16) {
 		log_opts.stderr_level  = slurmctld_conf.slurmctld_debug;
 		log_opts.logfile_level = slurmctld_conf.slurmctld_debug;
 		log_opts.syslog_level  = slurmctld_conf.slurmctld_debug;
@@ -2510,7 +2629,7 @@ void update_logging(void)
 		log_opts.stderr_level = LOG_LEVEL_QUIET;
 		if (!slurmctld_conf.slurmctld_logfile &&
 		    (slurmctld_conf.slurmctld_syslog_debug == LOG_LEVEL_QUIET)){
-			/* Insure fatal errors get logged somewhere */
+			/* Ensure fatal errors get logged somewhere */
 			log_opts.syslog_level = LOG_LEVEL_FATAL;
 		} else {
 			log_opts.syslog_level =
@@ -2529,7 +2648,7 @@ void update_logging(void)
 	/*
 	 * SchedLogLevel restore
 	 */
-	if (slurmctld_conf.sched_log_level != (uint16_t) NO_VAL)
+	if (slurmctld_conf.sched_log_level != NO_VAL16)
 		sched_log_opts.logfile_level = slurmctld_conf.sched_log_level;
 
 	sched_log_alter(sched_log_opts, LOG_DAEMON,
@@ -2711,6 +2830,8 @@ static void *_assoc_cache_mgr(void *no_data)
 	/* Write lock on jobs, read lock on nodes and partitions */
 	slurmctld_lock_t job_write_lock =
 		{ NO_LOCK, WRITE_LOCK, READ_LOCK, WRITE_LOCK, NO_LOCK };
+	assoc_mgr_lock_t locks = { READ_LOCK, NO_LOCK, READ_LOCK, NO_LOCK,
+				   READ_LOCK, NO_LOCK, NO_LOCK };
 
 	while (running_cache == 1) {
 		slurm_mutex_lock(&assoc_cache_mutex);
@@ -2718,10 +2839,12 @@ static void *_assoc_cache_mgr(void *no_data)
 		/* This is here to see if we are exiting.  If we get
 		   NO_VAL then just return since we are closing down.
 		*/
-		if (running_cache == (uint16_t)NO_VAL) {
+		if (running_cache == NO_VAL16) {
 			slurm_mutex_unlock(&assoc_cache_mutex);
 			return NULL;
 		}
+
+		lock_slurmctld(job_write_lock);
 		/*
 		 * Make sure not to have the job_write_lock, assoc_mgr or the
 		 * slurmdbd_lock locked when refresh_lists is called or you may
@@ -2734,10 +2857,11 @@ static void *_assoc_cache_mgr(void *no_data)
 			     g_tres_count, slurmctld_tres_cnt);
 			_init_tres();
 		}
+		if (running_cache == 1)
+			unlock_slurmctld(job_write_lock);
+
 		slurm_mutex_unlock(&assoc_cache_mutex);
 	}
-
-	lock_slurmctld(job_write_lock);
 
 	if (!job_list) {
 		/* This could happen in rare occations, it doesn't
@@ -2752,8 +2876,11 @@ static void *_assoc_cache_mgr(void *no_data)
 	debug2("got real data from the database "
 	       "refreshing the association ptr's for %d jobs",
 	       list_count(job_list));
+	assoc_mgr_lock(&locks);
 	itr = list_iterator_create(job_list);
 	while ((job_ptr = list_next(itr))) {
+		_update_job_tres(job_ptr);
+
 		if (job_ptr->assoc_id) {
 			memset(&assoc_rec, 0,
 			       sizeof(slurmdb_assoc_rec_t));
@@ -2767,7 +2894,7 @@ static void *_assoc_cache_mgr(void *no_data)
 				    acct_db_conn, &assoc_rec,
 				    accounting_enforce,
 				    (slurmdb_assoc_rec_t **)
-				    &job_ptr->assoc_ptr, false)) {
+				    &job_ptr->assoc_ptr, true)) {
 				verbose("Invalid association id %u "
 					"for job id %u",
 					job_ptr->assoc_id, job_ptr->job_id);
@@ -2785,7 +2912,8 @@ static void *_assoc_cache_mgr(void *no_data)
 			if ((assoc_mgr_fill_in_qos(
 				    acct_db_conn, &qos_rec,
 				    accounting_enforce,
-				    (slurmdb_qos_rec_t **)&job_ptr->qos_ptr, 0))
+				    (slurmdb_qos_rec_t **)&job_ptr->qos_ptr,
+				    true))
 			   != SLURM_SUCCESS) {
 				verbose("Invalid qos (%u) for job_id %u",
 					job_ptr->qos_id, job_ptr->job_id);
@@ -2824,7 +2952,8 @@ handle_parts:
 			part_ptr->qos_ptr = NULL;
 			if (assoc_mgr_fill_in_qos(
 				    acct_db_conn, &qos_rec, accounting_enforce,
-				    (slurmdb_qos_rec_t **)&part_ptr->qos_ptr, 0)
+				    (slurmdb_qos_rec_t **)&part_ptr->qos_ptr,
+				    true)
 			    != SLURM_SUCCESS) {
 				fatal("Partition %s has an invalid qos (%s), "
 				      "please check your configuration",
@@ -2835,6 +2964,7 @@ handle_parts:
 	list_iterator_destroy(itr);
 
 end_it:
+	assoc_mgr_unlock(&locks);
 	/* issuing a reconfig will reset the pointers on the burst
 	   buffers */
 	bb_g_reconfig();
@@ -3091,3 +3221,24 @@ static void _get_fed_updates()
 
 	FREE_NULL_LIST(fed_list);
 }
+
+static int _foreach_job_running(void *object, void *arg)
+{
+	struct job_record *job_ptr = (struct job_record *)object;
+	int *count = (int *)arg;
+
+	if (IS_JOB_RUNNING(job_ptr))
+		(*count)++;
+
+	return SLURM_SUCCESS;
+}
+
+static int _running_jobs_count()
+{
+	int count = 0;
+
+	list_for_each(job_list, _foreach_job_running, &count);
+
+	return count;
+}
+

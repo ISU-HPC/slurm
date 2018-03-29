@@ -250,7 +250,7 @@ scontrol_get_job_state(uint32_t job_id)
 		exit_code = 1;
 		if (quiet_flag == -1)
 			slurm_perror ("slurm_load_job error");
-		return (uint16_t) NO_VAL;
+		return NO_VAL16;
 	}
 	if (quiet_flag == -1) {
 		char time_str[32];
@@ -267,7 +267,7 @@ scontrol_get_job_state(uint32_t job_id)
 	}
 	if (quiet_flag == -1)
 		printf("Could not find job %u", job_id);
-	return (uint16_t) NO_VAL;
+	return NO_VAL16;
 }
 
 static bool _pack_id_match(job_info_t *job_ptr, uint32_t pack_job_offset)
@@ -1046,7 +1046,7 @@ extern int scontrol_callerid(int argc, char **argv)
 		fprintf(stderr,
 			"slurm_network_callerid: unable to retrieve callerid data from remote slurmd\n");
 		return SLURM_FAILURE;
-	} else if (job_id == (uint32_t)NO_VAL) {
+	} else if (job_id == NO_VAL) {
 		fprintf(stderr,
 			"slurm_network_callerid: remote job id indeterminate\n");
 		return SLURM_FAILURE;
@@ -1073,7 +1073,12 @@ extern int scontrol_batch_script(int argc, char **argv)
 	else
 		filename = xstrdup_printf("slurm-%u.sh", jobid);
 
-	out = fopen(filename, "w");
+	if (!(out = fopen(filename, "w"))) {
+		fprintf(stderr, "failed to open file `%s`: %m\n", filename);
+		xfree(filename);
+		return errno;
+	}
+
 	exit_code = slurm_job_batch_script(out, jobid);
 	fclose(out);
 	if (exit_code != SLURM_SUCCESS) {

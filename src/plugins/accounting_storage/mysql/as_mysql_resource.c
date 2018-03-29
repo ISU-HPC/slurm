@@ -1038,6 +1038,11 @@ extern List as_mysql_modify_res(mysql_conn_t *mysql_conn, uint32_t uid,
 		return NULL;
 	}
 
+	if (!is_user_min_admin_level(mysql_conn, uid, SLURMDB_ADMIN_OPERATOR)) {
+		errno = ESLURM_ACCESS_DENIED;
+		return NULL;
+	}
+
 	if (check_connection(mysql_conn) != SLURM_SUCCESS) {
 		return NULL;
 	}
@@ -1047,7 +1052,7 @@ extern List as_mysql_modify_res(mysql_conn_t *mysql_conn, uint32_t uid,
 	xfree(tmp);
 
 	/* overloaded for easibility */
-	if (res->percent_used != (uint16_t)NO_VAL) {
+	if (res->percent_used != NO_VAL16) {
 		xstrfmtcat(clus_vals, ", percent_allowed=%u",
 			   res->percent_used);
 		send_update = 1;
@@ -1138,7 +1143,7 @@ extern List as_mysql_modify_res(mysql_conn_t *mysql_conn, uint32_t uid,
 			last_res = curr_res;
 
 			if (have_clusters &&
-			    (res->percent_used != (uint16_t)NO_VAL)) {
+			    (res->percent_used != NO_VAL16)) {
 				percent_used = _get_res_used(
 					mysql_conn, curr_res, clus_extra);
 
@@ -1166,7 +1171,7 @@ extern List as_mysql_modify_res(mysql_conn_t *mysql_conn, uint32_t uid,
 		if (have_clusters && row[3] && row[3][0]) {
 			slurmdb_res_rec_t *res_rec;
 
-			if (res->percent_used != (uint16_t)NO_VAL)
+			if (res->percent_used != NO_VAL16)
 				percent_used += res->percent_used;
 			if (percent_used > 100) {
 				if (debug_flags & DEBUG_FLAG_DB_RES)

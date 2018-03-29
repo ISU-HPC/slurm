@@ -135,6 +135,7 @@ typedef struct slurmctld_config {
 	char *	auth_info;
 	time_t	boot_time;
 	int	daemonize;
+	bool	send_groups_in_cred;
 	bool	resume_backup;
 	bool    scheduling_disabled;
 	int	server_thread_count;
@@ -171,6 +172,7 @@ typedef struct diag_stats {
 
 	uint32_t backfilled_jobs;
 	uint32_t last_backfilled_jobs;
+	uint32_t backfilled_pack_jobs;
 	uint32_t bf_cycle_counter;
 	uint32_t bf_cycle_last;
 	uint32_t bf_cycle_max;
@@ -194,6 +196,7 @@ enum {
 	TRES_ARRAY_MEM,
 	TRES_ARRAY_ENERGY,
 	TRES_ARRAY_NODE,
+	TRES_ARRAY_BILLING,
 	TRES_ARRAY_TOTAL_CNT
 };
 
@@ -206,12 +209,15 @@ extern int   accounting_enforce;
 extern int   association_based_accounting;
 extern uint32_t   cluster_cpus;
 extern int   batch_sched_delay;
+extern bool node_features_updated;
 extern pthread_cond_t purge_thread_cond;
 extern int   sched_interval;
 extern bool  slurmctld_init_db;
 extern int   slurmctld_primary;
 extern int   slurmctld_tres_cnt;
 extern slurmdb_cluster_rec_t *response_cluster_rec;
+extern int    slurmctld_running_job_count;
+extern time_t slurmctld_running_job_count_ts;
 
 /* Buffer size use to print the jobid2str()
  * jobid, taskid and state.
@@ -490,6 +496,7 @@ struct job_details {
 	bitstr_t *exc_node_bitmap;	/* bitmap of excluded nodes */
 	char *exc_nodes;		/* excluded nodes */
 	uint32_t expanding_jobid;	/* ID of job to be expanded */
+	char *extra;			/* extra field, unused */
 	List feature_list;		/* required features with
 					 * node counts */
 	char *features;			/* required features */
@@ -645,6 +652,10 @@ struct job_record {
 	job_fed_details_t *fed_details;	/* details for federated jobs. */
 	front_end_record_t *front_end_ptr; /* Pointer to front-end node running
 					 * this job */
+	gid_t *gids;			/* extended group ids, count is ngids
+					 * do not pack. this is here to cache
+					 * the record, and may not be set
+					 * depending on configuration */
 	char *gres;			/* generic resources requested by job */
 	List gres_list;			/* generic resource allocation detail */
 	char *gres_alloc;		/* Allocated GRES added over all nodes
@@ -680,6 +691,10 @@ struct job_record {
 	char *name;			/* name of the job */
 	char *network;			/* network/switch requirement spec */
 	uint32_t next_step_id;		/* next step id to be used */
+	int ngids;			/* number of extended group ids in gids
+					 * do not pack. this is here to cache
+					 * the record, and may not be set
+					 * depending on configuration */
 	char *nodes;			/* list of nodes allocated to job */
 	slurm_addr_t *node_addr;	/* addresses of the nodes allocated to
 					 * job */
@@ -785,6 +800,7 @@ struct job_record {
 	char *tres_alloc_str;           /* simple tres string for job */
 	char *tres_fmt_alloc_str;       /* formatted tres string for job */
 	uint32_t user_id;		/* user the job runs as */
+	char *user_name;		/* string version of user */
 	uint16_t wait_all_nodes;	/* if set, wait for all nodes to boot
 					 * before starting the job */
 	uint16_t warn_flags;		/* flags for signal to send */
@@ -1225,9 +1241,19 @@ extern void delete_job_desc_files(uint32_t job_id);
  * IN uid - job issuing the code
  * IN job_id - ID of job for which info is requested
  * OUT job_pptr - set to pointer to job record
+ * NOTE: See job_alloc_info_ptr() if job pointer is known
  */
 extern int job_alloc_info(uint32_t uid, uint32_t job_id,
 			  struct job_record **job_pptr);
+
+/*
+ * job_alloc_info_ptr - get details about an existing job allocation
+ * IN uid - job issuing the code
+ * IN job_ptr - pointer to job record
+ * NOTE: See job_alloc_info() if job pointer not known
+ */
+extern int job_alloc_info_ptr(uint32_t uid, struct job_record *job_ptr);
+
 /*
  * job_allocate - create job_records for the supplied job specification and
  *	allocate nodes for it.
@@ -1395,6 +1421,17 @@ extern int job_restart(checkpoint_msg_t *ckpt_ptr, uid_t uid,
  */
 extern int job_signal(uint32_t job_id, uint16_t signal, uint16_t flags,
 		      uid_t uid, bool preempt);
+/*
+ * pack_job_signal - signal all components of a pack job
+ * IN pack_leader - job record of job pack leader
+ * IN signal - signal to send, SIGKILL == cancel the job
+ * IN flags  - see KILL_JOB_* flags in slurm.h
+ * IN uid - uid of requesting user
+ * IN preempt - true if job being preempted
+ * RET 0 on success, otherwise ESLURM error code
+ */
+extern int pack_job_signal(struct job_record *pack_leader, uint16_t signal,
+			   uint16_t flags, uid_t uid, bool preempt);
 
 /*
  * job_step_checkpoint - perform some checkpoint operation
@@ -2084,7 +2121,7 @@ extern void save_all_state(void);
 extern void ctld_assoc_mgr_init(slurm_trigger_callbacks_t *callbacks);
 
 /* send all info for the controller to accounting */
-extern void send_all_to_accounting(time_t event_time);
+extern void send_all_to_accounting(time_t event_time, int db_rc);
 
 /* A slurmctld lock needs to at least have a node read lock set before
  * this is called */
@@ -2533,5 +2570,17 @@ set_remote_working_response(resource_allocation_response_msg_t *resp,
  * Free job's fed_details ptr.
  */
 extern void free_job_fed_details(job_fed_details_t **fed_details_pptr);
+
+/*
+ * Calculate billable TRES based on partition's defined BillingWeights. If none
+ * is defined, return total_cpus. This is cached on job_ptr->billable_tres and
+ * is updated if the job was resized since the last iteration.
+ *
+ * IN job_ptr          - job to calc billable tres on
+ * IN start_time       - time the has started or been resized
+ * IN assoc_mgr_locked - whether the tres assoc lock is set or not
+ */
+extern double calc_job_billable_tres(struct job_record *job_ptr,
+				     time_t start_time, bool assoc_mgr_locked);
 
 #endif /* !_HAVE_SLURMCTLD_H */

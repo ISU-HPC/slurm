@@ -356,7 +356,7 @@ static char *        hostrange_pop(hostrange_t);
 static char *        hostrange_shift(hostrange_t, int);
 static int           hostrange_join(hostrange_t, hostrange_t);
 static hostrange_t   hostrange_intersect(hostrange_t, hostrange_t);
-static int           hostrange_hn_within(hostrange_t, hostname_t);
+static int           hostrange_hn_within(hostrange_t, hostname_t, int);
 static size_t        hostrange_to_string(hostrange_t hr, size_t, char *,
 					 char *, int);
 static size_t        hostrange_numstr(hostrange_t, size_t, char *, int);
@@ -1039,7 +1039,7 @@ static hostrange_t hostrange_intersect(hostrange_t h1, hostrange_t h2)
 /* return 1 if hostname hn is within the hostrange hr
  *        0 if not.
  */
-static int hostrange_hn_within(hostrange_t hr, hostname_t hn)
+static int hostrange_hn_within(hostrange_t hr, hostname_t hn, int dims)
 {
 	if (hr->singlehost) {
 		/*
@@ -1071,7 +1071,9 @@ static int hostrange_hn_within(hostrange_t hr, hostname_t hn)
 	 */
 	if (strcmp(hr->prefix, hn->prefix) != 0) {
 		int len1, len2, ldiff;
-		int dims = slurmdb_setup_cluster_name_dims();
+
+		if (!dims)
+			dims = slurmdb_setup_cluster_name_dims();
 
 		if (dims != 1)
 			return 0;
@@ -1262,7 +1264,7 @@ static hostlist_t hostlist_new(void)
 	if (!new)
 		goto fail1;
 
-	assert(new->magic = HOSTLIST_MAGIC);
+	assert((new->magic = HOSTLIST_MAGIC));
 	slurm_mutex_init(&new->mutex);
 
 	new->hr = (hostrange_t *) malloc(HOSTLIST_CHUNK * sizeof(hostrange_t));
@@ -1984,7 +1986,7 @@ void hostlist_destroy(hostlist_t hl)
 	for (i = 0; i < hl->nranges; i++)
 		hostrange_destroy(hl->hr[i]);
 	free(hl->hr);
-	assert(hl->magic = 0x1);
+	assert((hl->magic = 0x1));
 	UNLOCK_HOSTLIST(hl);
 	slurm_mutex_destroy(&hl->mutex);
 	free(hl);
@@ -2401,7 +2403,7 @@ int hostlist_count(hostlist_t hl)
 	return retval;
 }
 
-int hostlist_find(hostlist_t hl, const char *hostname)
+int hostlist_find_dims(hostlist_t hl, const char *hostname, int dims)
 {
 	int i, count, ret = -1;
 	hostname_t hn;
@@ -2409,12 +2411,15 @@ int hostlist_find(hostlist_t hl, const char *hostname)
 	if (!hostname || !hl)
 		return -1;
 
-	hn = hostname_create(hostname);
+	if (!dims)
+		dims = slurmdb_setup_cluster_name_dims();
+
+	hn = hostname_create_dims(hostname, dims);
 
 	LOCK_HOSTLIST(hl);
 
 	for (i = 0, count = 0; i < hl->nranges; i++) {
-		if (hostrange_hn_within(hl->hr[i], hn)) {
+		if (hostrange_hn_within(hl->hr[i], hn, dims)) {
 			if (hostname_suffix_is_valid(hn))
 				ret = count + hn->num - hl->hr[i]->lo;
 			else
@@ -2428,6 +2433,12 @@ done:
 	UNLOCK_HOSTLIST(hl);
 	hostname_destroy(hn);
 	return ret;
+}
+
+int hostlist_find(hostlist_t hl, const char *hostname)
+{
+
+	return hostlist_find_dims(hl, hostname, 0);
 }
 
 /* hostrange compare with void * arguments to allow use with
@@ -3311,7 +3322,7 @@ static hostlist_iterator_t hostlist_iterator_new(void)
 	i->idx = 0;
 	i->depth = -1;
 	i->next = i;
-	assert(i->magic = HOSTLIST_MAGIC);
+	assert((i->magic = HOSTLIST_MAGIC));
 	return i;
 }
 
@@ -3362,7 +3373,7 @@ void hostlist_iterator_destroy(hostlist_iterator_t i)
 		}
 	}
 	UNLOCK_HOSTLIST(i->hl);
-	assert(i->magic = 0x1);
+	assert((i->magic = 0x1));
 	free(i);
 }
 
@@ -3638,7 +3649,12 @@ static int hostset_find_host(hostset_t set, const char *host)
 	LOCK_HOSTLIST(set->hl);
 	hn = hostname_create(host);
 	for (i = 0; i < set->hl->nranges; i++) {
-		if (hostrange_hn_within(set->hl->hr[i], hn)) {
+		/*
+		 * FIXME: THIS WILL NOT ALWAYS WORK CORRECTLY IF CALLED FROM A
+		 * LOCATION THAT COULD HAVE DIFFERENT DIMENSIONS
+		 * (i.e. slurmdbd).
+		 */
+		if (hostrange_hn_within(set->hl->hr[i], hn, 0)) {
 			retval = 1;
 			goto done;
 		}

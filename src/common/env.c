@@ -221,7 +221,7 @@ int
 envcount (char **env)
 {
 	int envc = 0;
-	while (env[envc] != NULL)
+	while (env && env[envc])
 		envc++;
 	return (envc);
 }
@@ -268,6 +268,9 @@ int setenvf(char ***envp, const char *name, const char *fmt, ...)
 	va_list ap;
 	int size, rc;
 
+	if (!name)
+		return EINVAL;
+
 	value = xmalloc(ENV_BUFSIZE);
 	va_start(ap, fmt);
 	vsnprintf(value, ENV_BUFSIZE, fmt, ap);
@@ -279,7 +282,7 @@ int setenvf(char ***envp, const char *name, const char *fmt, ...)
 		return ENOMEM;
 	}
 
-	if (envp) {
+	if (envp && *envp) {
 		if (env_array_overwrite(envp, name, value) == 1)
 			rc = 0;
 		else
@@ -322,12 +325,13 @@ void unsetenvp(char **env, const char *name)
 
 char *getenvp(char **env, const char *name)
 {
-	size_t len = strlen(name);
+	size_t len;
 	char **ep;
 
-	if ((env == NULL) || (env[0] == NULL))
+	if (!name || !env || !env[0])
 		return (NULL);
 
+	len = strlen(name);
 	ep = _find_name_in_env (env, name);
 
 	if (*ep != NULL)
@@ -927,6 +931,9 @@ extern char *uint32_compressed_to_str(uint32_t array_len,
 	char *sep = ","; /* seperator */
 	char *str = xstrdup("");
 
+	if (!array || !array_reps)
+		return str;
+
 	for (i = 0; i < array_len; i++) {
 		if (i == array_len-1) /* last time through loop */
 			sep = "";
@@ -982,6 +989,9 @@ extern int env_array_for_job(char ***dest,
 	slurm_step_layout_req_t step_layout_req;
 	uint16_t cpus_per_task_array[1];
 	uint32_t cpus_task_reps[1];
+
+	if (!alloc || !desc)
+		return SLURM_ERROR;
 
 	memset(&step_layout_req, 0, sizeof(slurm_step_layout_req_t));
 	step_layout_req.num_tasks = desc->num_tasks;
@@ -1073,7 +1083,7 @@ extern int env_array_for_job(char ***dest,
 				* alloc->cpus_per_node[i];
 		}
 		if ((int)desc->cpus_per_task > 1
-		   && desc->cpus_per_task != (uint16_t)NO_VAL)
+		   && desc->cpus_per_task != NO_VAL16)
 			step_layout_req.num_tasks /= desc->cpus_per_task;
 		//num_tasks = desc->min_cpus;
 	}
@@ -1204,6 +1214,9 @@ env_array_for_batch_job(char ***dest, const batch_job_launch_msg_t *batch,
 	slurm_step_layout_req_t step_layout_req;
 	uint16_t cpus_per_task_array[1];
 	uint32_t cpus_task_reps[1];
+
+	if (!batch)
+		return SLURM_ERROR;
 
 	memset(&step_layout_req, 0, sizeof(slurm_step_layout_req_t));
 	step_layout_req.num_tasks = batch->ntasks;
@@ -1383,9 +1396,13 @@ env_array_for_step(char ***dest,
 		   bool preserve_env)
 {
 	char *tmp, *tpn;
-	uint32_t node_cnt = step->step_layout->node_cnt, task_cnt;
+	uint32_t node_cnt, task_cnt;
 	uint32_t cluster_flags = slurmdb_setup_cluster_flags();
 
+	if (!step || !launch)
+		return;
+
+	node_cnt = step->step_layout->node_cnt;
 	env_array_overwrite_fmt(dest, "SLURM_STEP_ID", "%u", step->job_step_id);
 
 	if (launch->pack_node_list) {
@@ -1828,32 +1845,6 @@ void env_array_merge_slurm(char ***dest_array, const char **src_array)
 }
 
 /*
- * Merge all of the environment variables in src_array into the array
- * dest_array and strip any header names of "SPANK_".  Any variables already
- * found in dest_array will be overwritten with the value from src_array.
- */
-void env_array_merge_spank(char ***dest_array, const char **src_array)
-{
-	char **ptr;
-	char name[256], *value;
-
-	if (src_array == NULL)
-		return;
-
-	value = xmalloc(ENV_BUFSIZE);
-	for (ptr = (char **)src_array; *ptr != NULL; ptr++) {
-		if (_env_array_entry_splitter(*ptr, name, sizeof(name),
-					      value, ENV_BUFSIZE)) {
-			if (xstrncmp(name, "SPANK_" ,6))
-				env_array_overwrite(dest_array, name, value);
-			else
-				env_array_overwrite(dest_array, name+6, value);
-		}
-	}
-	xfree(value);
-}
-
-/*
  * Strip out trailing carriage returns and newlines
  */
 static void _strip_cr_nl(char *line)
@@ -1908,6 +1899,9 @@ char **env_array_from_file(const char *fname)
 	int file_size = 0, tmp_size;
 	int separator = '\0';
 	int fd;
+
+	if (!fname)
+		return NULL;
 
 	/*
 	 * If file name is a numeric value, then it is assumed to be a

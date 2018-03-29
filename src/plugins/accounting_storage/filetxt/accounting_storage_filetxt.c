@@ -621,7 +621,8 @@ extern int clusteracct_storage_p_fini_ctld(void *db_conn,
 extern int clusteracct_storage_p_cluster_tres(void *db_conn,
 					      char *cluster_nodes,
 					      char *tres_str_in,
-					      time_t event_time)
+					      time_t event_time,
+					      uint16_t rpc_version)
 {
 	return SLURM_SUCCESS;
 }
@@ -936,7 +937,7 @@ extern int jobacct_storage_p_step_complete(void *db_conn,
 		ave_cpu /= cpus;
 	}
 
-	if (jobacct->min_cpu != (uint32_t)NO_VAL) {
+	if (jobacct->min_cpu != NO_VAL) {
 		ave_cpu2 = jobacct->min_cpu;
 	}
 

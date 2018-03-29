@@ -265,6 +265,57 @@ void *agent(void *args)
 	if (_valid_agent_arg(agent_arg_ptr))
 		goto cleanup;
 
+#if defined HAVE_NATIVE_CRAY
+	if (agent_arg_ptr->msg_type == REQUEST_REBOOT_NODES) {
+		char *argv[3], *pname;
+		pid_t child;
+		int i, rc, status = 0;
+
+		if (!agent_arg_ptr->hostlist) {
+			error("%s: hostlist is NULL", __func__);
+			goto cleanup;
+		}
+		if (!slurmctld_conf.reboot_program) {
+			error("%s: RebootProgram is NULL", __func__);
+			goto cleanup;
+		}
+
+		pname = strrchr(slurmctld_conf.reboot_program, '/');
+		if (pname)
+			argv[0] = pname + 1;
+		else
+			argv[0] = slurmctld_conf.reboot_program;
+		argv[1] = hostlist_deranged_string_xmalloc(
+					agent_arg_ptr->hostlist);
+		argv[2] = NULL;
+
+		child = fork();
+		if (child == 0) {
+			for (i = 0; i < 1024; i++)
+				(void) close(i);
+			(void) setpgid(0, 0);
+			(void) execv(slurmctld_conf.reboot_program, argv);
+			exit(1);
+		} else if (child < 0) {
+			error("fork: %m");
+		} else {
+			(void) waitpid(child, &status, 0);
+			if (WIFEXITED(status)) {
+				rc = WEXITSTATUS(status);
+				if (rc != 0) {
+					error("ReboodProgram exit status of %d",
+					      rc);
+				}
+			} else if (WIFSIGNALED(status)) {
+				error("ReboodProgram signaled: %s",
+				      strsignal(WTERMSIG(status)));
+			}
+		}
+		xfree(argv[1]);
+		goto cleanup;
+	}
+#endif
+
 	/* initialize the agent data structures */
 	agent_info_ptr = _make_agent_info(agent_arg_ptr);
 	thread_ptr = agent_info_ptr->thread_struct;
@@ -649,7 +700,7 @@ static void _notify_slurmctld_nodes(agent_info_t *agent_ptr,
 	int is_ret_list = 1;
 	/* Locks: Read config, write job, write node */
 	slurmctld_lock_t node_write_lock =
-	    { READ_LOCK, WRITE_LOCK, WRITE_LOCK, NO_LOCK, NO_LOCK };
+	    { READ_LOCK, WRITE_LOCK, WRITE_LOCK, NO_LOCK, READ_LOCK };
 	thd_t *thread_ptr = agent_ptr->thread_struct;
 	int i;
 
@@ -814,7 +865,7 @@ static void *_thread_per_group_rpc(void *args)
 	int sig_array[2] = {SIGUSR1, 0};
 	/* Locks: Write job, write node */
 	slurmctld_lock_t job_write_lock = {
-		NO_LOCK, WRITE_LOCK, WRITE_LOCK, NO_LOCK, NO_LOCK };
+		NO_LOCK, WRITE_LOCK, WRITE_LOCK, NO_LOCK, READ_LOCK };
 	/* Lock: Read node */
 	slurmctld_lock_t node_read_lock = {
 		NO_LOCK, NO_LOCK, READ_LOCK, NO_LOCK, NO_LOCK };
@@ -1701,7 +1752,9 @@ static void _set_job_term_info(struct job_record *job_ptr, uint16_t mail_type,
 		int exit_code_min, exit_code_max;
 
 		base_state = job_ptr->job_state & JOB_STATE_BASE;
-		if (job_ptr->array_recs) {
+		if (job_ptr->array_recs &&
+		    !(job_ptr->mail_type & MAIL_ARRAY_TASKS)) {
+			/* Summarize array tasks. */
 			exit_status_min = job_ptr->array_recs->min_exit_code;
 			exit_status_max = job_ptr->array_recs->max_exit_code;
 			if (WIFEXITED(exit_status_min) &&
@@ -1787,14 +1840,14 @@ extern void mail_job_info (struct job_record *job_ptr, uint16_t mail_type)
 	_set_job_time(job_ptr, mail_type, job_time, sizeof(job_time));
 	_set_job_term_info(job_ptr, mail_type, term_msg, sizeof(term_msg));
 	if (job_ptr->array_recs && !(job_ptr->mail_type & MAIL_ARRAY_TASKS)) {
-		mi->message = xstrdup_printf("SLURM Job_id=%u_* (%u) Name=%s "
-					     "%s%s%s",
+		mi->message = xstrdup_printf("SLURM Array Summary Job_id=%u_* (%u) Name=%s "
+					     "%s%s",
 					     job_ptr->array_job_id,
 					     job_ptr->job_id, job_ptr->name,
 					     _mail_type_str(mail_type),
-					     job_time, term_msg);
+					     term_msg);
 	} else if (job_ptr->array_task_id != NO_VAL) {
-		mi->message = xstrdup_printf("SLURM Job_id=%u_%u (%u) Name=%s "
+		mi->message = xstrdup_printf("SLURM Array Task Job_id=%u_%u (%u) Name=%s "
 					     "%s%s%s",
 					     job_ptr->array_job_id,
 					     job_ptr->array_task_id,

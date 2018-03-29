@@ -1,4 +1,4 @@
-.TH squeue "1" "Slurm Commands" "April 2016" "Slurm Commands"
+.TH squeue "1" "Slurm Commands" "February 2018" "Slurm Commands"
 
 .SH "NAME"
 squeue \- view information about jobs located in the Slurm scheduling queue.
@@ -262,8 +262,8 @@ In the case of job arrays, the job ID format will be of the form
 By default, the job array index field size will be limited to 64 bytes.
 Use the environment variable SLURM_BITSTR_LEN to specify larger field sizes.
 (Valid for jobs and job steps)
-In the case of heterogeneous (pack) job allocations, the job ID format will be
-of the form "#+#" where the first number is the "pack job leader" and the
+In the case of heterogeneous job allocations, the job ID format will be of the
+form "#+#" where the first number is the "heterogeneous job leader" and the
 second number the zero origin offset for each component of the job.
 .TP
 \fB%I\fR
@@ -627,7 +627,7 @@ For non\-array jobs, this is the job ID.
 \fBjobid\fR
 Job id.
 This will have a unique value for each element of job arrays and each
-component of pack jobs.
+component of heterogeneous jobs.
 (Valid for jobs only)
 .TP
 \fBlastschedeval\fR
@@ -1227,11 +1227,17 @@ Job has been allocated resources, but are waiting for them to become ready for u
 \fBCG  COMPLETING\fR
 Job is in the process of completing. Some processes on some nodes may still be active.
 .TP
+\fBDL  DEADLINE\fR
+Job terminated on deadline.
+.TP
 \fBF   FAILED\fR
 Job terminated with non\-zero exit code or other failure condition.
 .TP
 \fBNF  NODE_FAIL\fR
 Job terminated due to failure of one or more allocated nodes.
+.TP
+\fBOOM OUT_OF_MEMORY\fR
+Job experienced out of memory error.
 .TP
 \fBPD  PENDING\fR
 Job is awaiting resource allocation.
@@ -1239,24 +1245,42 @@ Job is awaiting resource allocation.
 \fBPR  PREEMPTED\fR
 Job terminated due to preemption.
 .TP
-\fBR   REVOKED\fR
-Sibling was removed from cluster due to other cluster starting the job.
-.TP
 \fBR   RUNNING\fR
 Job currently has an allocation.
+.TP
+\fBRD  RESV_DEL_HOLD\fR
+Job is held.
+.TP
+\fBRF  REQUEUE_FED\fR
+Job is being requeued by a federation.
+.TP
+\fBRH  REQUEUE_HOLD\fR
+Held job is being requeued.
+.TP
+\fBRQ  REQUEUE\fR
+Completing job is being requeued.
+.TP
+\fBRS  RESIZING\fR
+Job is about to change size.
+.TP
+\fBRV  REVOKED\fR
+Sibling was removed from cluster due to other cluster starting the job.
+.TP
+\fBS   SUSPENDED\fR
+Job has an allocation, but execution has been suspended and CPUs have been
+released for other jobs.
 .TP
 \fBSE  SPECIAL_EXIT\fR
 The job was requeued in a special state. This state can be set by
 users, typically in EpilogSlurmctld, if the job has terminated with
 a particular exit value.
 .TP
+\fBSI  SIGNALING\fR
+Job is being signaled.
+.TP
 \fBST  STOPPED\fR
 Job has an allocation, but execution has been stopped with SIGSTOP signal.
 CPUS have been retained by this job.
-.TP
-\fBS   SUSPENDED\fR
-Job has an allocation, but execution has been suspended and CPUs have been
-released for other jobs.
 .TP
 \fBTO  TIMEOUT\fR
 Job terminated upon reaching its time limit.

@@ -696,20 +696,20 @@ static int _handle_init_msg(slurmdbd_conn_t *slurmdbd_conn,
 
 	*uid = init_msg->uid;
 
-	debug("REQUEST_PERSIST_INIT: CLUSTER:%s VERSION:%u UID:%u IP:%s CONN:%u",
-	      init_msg->cluster_name, init_msg->version, init_msg->uid,
-	      slurmdbd_conn->conn->rem_host, slurmdbd_conn->conn->fd);
-
-	slurmdbd_conn->conn->cluster_name = xstrdup(init_msg->cluster_name);
-
 #if HAVE_SYS_PRCTL_H
 	{
-	char *name = xstrdup_printf("p-%s", slurmdbd_conn->conn->cluster_name);
+	char *name = xstrdup_printf("p-%s", init_msg->cluster_name);
 	if (prctl(PR_SET_NAME, name, NULL, NULL, NULL) < 0)
 		error("%s: cannot set my name to %s %m", __func__, name);
 	xfree(name);
 	}
 #endif
+
+	debug("REQUEST_PERSIST_INIT: CLUSTER:%s VERSION:%u UID:%u IP:%s CONN:%u",
+	      init_msg->cluster_name, init_msg->version, init_msg->uid,
+	      slurmdbd_conn->conn->rem_host, slurmdbd_conn->conn->fd);
+
+	slurmdbd_conn->conn->cluster_name = xstrdup(init_msg->cluster_name);
 
 	/* When dealing with rollbacks it turns out it is much faster
 	   to do the commit once or once in a while instead of
@@ -1157,7 +1157,8 @@ static int _cluster_tres(slurmdbd_conn_t *slurmdbd_conn,
 		slurmdbd_conn->db_conn,
 		cluster_tres_msg->cluster_nodes,
 		cluster_tres_msg->tres_str,
-		cluster_tres_msg->event_time);
+		cluster_tres_msg->event_time,
+		slurmdbd_conn->conn->version);
 	if (rc == ESLURM_ACCESS_DENIED) {
 		comment = "This cluster hasn't been added to accounting yet";
 		rc = SLURM_ERROR;
@@ -1415,7 +1416,7 @@ static int _get_jobs_cond(slurmdbd_conn_t *slurmdbd_conn,
 {
 	dbd_cond_msg_t *cond_msg = msg->data;
 	dbd_list_msg_t list_msg = { NULL };
-	slurmdb_job_cond_t *job_cond = msg->data;
+	slurmdb_job_cond_t *job_cond = cond_msg->cond;
 	int rc = SLURM_SUCCESS;
 
 	debug2("DBD_GET_JOBS_COND: called");
@@ -1444,7 +1445,7 @@ static int _get_jobs_cond(slurmdbd_conn_t *slurmdbd_conn,
 	}
 
 	list_msg.my_list = jobacct_storage_g_get_jobs_cond(
-		slurmdbd_conn->db_conn, *uid, cond_msg->cond);
+		slurmdbd_conn->db_conn, *uid, job_cond);
 
 	if (!errno) {
 		if (!list_msg.my_list)
@@ -2629,6 +2630,7 @@ static void _process_job_start(slurmdbd_conn_t *slurmdbd_conn,
 	job.group_id = job_start_msg->gid;
 	job.job_id = job_start_msg->job_id;
 	job.job_state = job_start_msg->job_state;
+	job.mcs_label = _replace_double_quotes(job_start_msg->mcs_label);
 	job.name = _replace_double_quotes(job_start_msg->name);
 	job.nodes = job_start_msg->nodes;
 	job.network = job_start_msg->node_inx;

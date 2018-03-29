@@ -42,6 +42,10 @@ if {[test_front_end]} {
         send_user "\nWARNING: This test is incompatible with front-end systems\n"
         exit $exit_code
 }
+if {[test_pack_step] == 0} {
+	send_user "\nWARNING: heterogeneous steps not currently supported\n"
+	exit $exit_code
+}
 
 set def_part_name [default_partition]
 set nb_nodes [get_node_cnt_in_part $def_part_name]
@@ -146,22 +150,13 @@ if {[wait_for_file $file_out] != 0} {
 }
 
 set pack_nodelist ""
-send "$bin_sort $file_out\r"
+send "$bin_sort -d $file_out\r"
 expect {
-	-re "0: SLURM_NODELIST=($alpha_numeric_nodelist)" {
-		set pack_nodelist $expect_out(1,string)
-		incr matches
-		exp_continue
-	}
 	-re "0: SLURM_NODELIST_PACK_GROUP_0=$component(0)" {
 		incr matches
 		exp_continue
 	}
 	-re "0: SLURM_NODELIST_PACK_GROUP_1=$component(1)" {
-		incr matches
-		exp_continue
-	}
-	-re "1: SLURM_NODELIST=$pack_nodelist" {
 		incr matches
 		exp_continue
 	}
@@ -185,6 +180,31 @@ expect {
 		wait
 	}
 }
+log_user 0
+send "$bin_sort $file_out\r"
+expect {
+	-re "0: SLURM_NODELIST=($alpha_numeric_nodelist)" {
+		set pack_nodelist $expect_out(1,string)
+		incr matches
+		exp_continue
+	}
+	-re "1: SLURM_NODELIST=$pack_nodelist" {
+		incr matches
+		exp_continue
+	}
+	-re "$prompt" {
+		send_user "\n\n"
+		#break
+	}
+	timeout {
+		log_error "sort not responding\n"
+		end_it 1
+	}
+	eof {
+		wait
+	}
+}
+log_user 1
 if {$matches != 6} {
 	log_error "srun failure ($matches != 6)\n"
 	end_it 1

@@ -1,5 +1,5 @@
 RELEASE NOTES FOR SLURM VERSION 17.11
-28 July 2017
+24 October 2017
 
 IMPORTANT NOTES:
 THE MAXJOBID IS NOW 67,108,863. ANY PRE-EXISTING JOBS WILL CONTINUE TO RUN BUT
@@ -33,6 +33,50 @@ of Slurm will result in loss of state information.
 If using SPANK plugins that use the Slurm APIs, they should be recompiled when
 upgrading Slurm to a new major release.
 
+NOTE FOR THOSE UPGRADING SLURMDBD: The database conversion process from
+      SlurmDBD 16.05 or 17.02 may not work properly with MySQL 5.1 (as was the
+      default version for RHEL 6).  Upgrading to a newer version of MariaDB or
+      MySQL is strongly encouraged to prevent this problem.
+
+NOTE FOR THOSE RUNNING 17.11.[0|1]: It was found a seeded MySQL auto_increment
+      value would be lost eventually if used.  This was found in the tres_table
+      which tracks static TRES under 1001.  This was fixed in MariaDB >=10.2.4,
+      but at the time of writing this was still around in MySQL.  Regardless if
+      you are tracking licenses or GRES in the database
+      (i.e. AccountingStorageTRES=gres/gpu) you might have this this issue.
+      This would mean the id for gres/gpu could have been issued 5 instead of
+      1001.  This is fine uptil 17.11 where a new static TRES was added taking
+      up the id of 5.  If you are already running 17.11 you can easily check to
+      see if you hit this problem by running 'sacctmgr list tres'.  If you see
+      any entry in the Name column for the Type 'billing' TRES (id=5) you are
+      unfortunately hit with the bug. The fix for this issue requires manual
+      intervention with the database.  Most likely if you started a slurmctld
+      up against the slurmdbd the overwritten TRES is now at a different id.
+      You can fix the double issue by altering all the tables with the new TRES
+      id back to 5, remove that entry in the tres_table, and then change the
+      Type of billing back to the original Type and restart the slurmdbd which
+      should finish the conversion.  SchedMD can assist with this. Supported
+      sites please open a ticket at https://bugs.schedmd.com/.  Non-supported
+      sites please contact SchedMD at sales@schedmd.com if you would like to
+      discuss commercial support options.
+
+NOTE: The slurm.spec file used to build RPM packages has been aggressively
+      refactored, and some package names may now be different. Notably,
+      the three daemons (slurmctld, slurmd/slurmstepd, slurmdbd) each
+      have their own separate package with the binary and the appropriate
+      systemd service file, which will be installed automatically (but
+      not enabled).
+      The slurm-plugins, slurm-munge, and slurm-lua package has been removed,
+      and the contents moved in to the main slurm package.
+      The slurm-sql package has been removed, and merged in with the slurm
+      (job_comp_mysql.so) and slurm-slurmdbd (accounting_storage_mysql)
+      packages.
+      The example configuration files have been moved to slurm-example-configs.
+
+NOTE: The refactored slurm.spec file now requires systemd to build. When
+      building on older distributions, you must use the older variant which
+      has been preserved as contribs/slurm.spec-legacy.
+
 NOTE: The slurmctld is now set to fatal if there are any problems with
       any state files.  To avoid this use the new '-i' flag.
 
@@ -65,7 +109,7 @@ NOTE: The SLURM_ID_HASH used for Cray systems has changed to fully use the
       This most likely will go unnoticed by most, just a note of the change.
 
 NOTE: Starting in 17.11 the slurm commands and daemons dynamically link to
-      libslurm.so instead of statically linking.  This dramatically reduces
+      libslurmfull.so instead of statically linking.  This dramatically reduces
       the footprint of Slurm.  If for some reason this creates issues with
       your build you can configure slurm with --without-shared-libslurm.
 
@@ -74,8 +118,29 @@ NOTE: Spank options handled in local and allocator contexts should be able to
       through environment variables and command line options. Environment
       variables are processed first.
 
+NOTE: IBM BlueGene/Q and Cray/ALPS modes are deprecated and will be removed
+      in an upcoming release. You must add the --enable-deprecated option to
+      configure to build these targets.
+
+NOTE: Built-in BLCR support is deprecated, no longer built automatically, and
+      will be removed in an upcoming release. You must add --with-blcr and
+      --enable-deprecated options to configure to build this plugin.
+
+NOTE: srun will now only read in the environment variables SLURM_JOB_NODES and
+      SLURM_JOB_NODELIST instead of SLURM_NNODES and SLURM_NODELIST.  These
+      latter variables have been obsolete for some time please update any
+      scripts still using them.
+
 HIGHLIGHTS
 ==========
+ -- Support for federated clusters to manage a single work-flow across a set of
+    clusters.
+ -- Support for heterogeneous job allocations (various processor types, memory
+    sizes, etc. by job component). Support for heterogeneous job steps within a
+    single MPI_COMM_WORLD is not yet supported for most configurations.
+ -- X11 support is now fully integrated with the main Slurm code. Remove any
+    X11 plugin configured in your plugstack.conf file to avoid errors being
+    logged about conflicting options.
  -- Added new advanced reservation flag of "flex", which permits jobs requesting
     the reservation to begin prior to the reservation's start time and use
     resources inside or outside of the reservation. A typical use case is to
@@ -84,9 +149,12 @@ HIGHLIGHTS
     use those resources in the time frame reserved.
  -- The sprio command has been modified to report a job's priority information
     for every partition the job has been submitted to.
- -- Add the configure option --with-shared-libslurm which will link to
-    libslurm.so instead of libslurm.o thus reducing the footprint of all the
-    binaries.
+ -- Group ID lookup performed at job submit time to avoid lookup on all compute
+    nodes. Enable with PrologFlags=SendGIDs configuration parameter.
+ -- Slurm commands and daemons dynamically link to libslurmfull.so instead of
+    statically linking.  This dramatically reduces the footprint of Slurm.  If
+    for some reason this creates issues with your build you can configure slurm
+    with --without-shared-libslurm.
  -- In switch plugin, added plugin_id symbol to plugins and wrapped
     switch_jobinfo_t with dynamic_plugin_data_t in interface calls in
     order to pass switch information between clusters with different switch
@@ -97,10 +165,25 @@ HIGHLIGHTS
     If you want to run with ALPS please configure with --disable-native-cray.
  -- Added new 'scontrol write batch_script <jobid>' command to fetch a job's
     batch script. Removed the ability to see the script as part of the
-    'scontrol -vv show job' command.
+    'scontrol -dd show job' command.
+ -- Add new "billing" TRES which allows jobs to be limited based on the job's
+    billable TRES calculated by the job's partition's TRESBillingWeights.
+ -- Regular user use of "scontrol top" command is now disabled. Use the
+    configuration parameter "SchedulerParameters=enable_user_top" to enable
+    that functionality. The configuration parameter
+    "SchedulerParameters=disable_user_top" will be silently ignored.
+ -- Change default to let pending jobs run outside of reservation after
+    reservation is gone to put jobs in held state. Added NO_HOLD_JOBS_AFTER_END
+    reservation flag to use old default.
+ -- Support for PMIx v2.0 as well as UCX support.
 
 RPMBUILD CHANGES
 ================
+ -- Components rearranged into obvious packages.
+    - slurm - libraries and all commands.
+    - slurmctld - daemon binary and service file for head node.
+    - slurmd - daemon binary and service file for compute nodes.
+    - slurmdbd - daemon binary and service file for database.
 
 CONFIGURATION FILE CHANGES (see man appropriate man page for details)
 =====================================================================
@@ -158,6 +241,9 @@ COMMAND CHANGES (see man pages for details)
  -- Add sprio "%c" format to print cluster name in federation mode.
  -- Extend the output of the seff utility to also include the job's wall-clock
     time.
+ -- The --cpu_bind and --mem_bind options have been renamed to --cpu-bind and
+    --mem-bind for consistency with the rest of the command line options.
+    (Both old and new syntax are supported for now.)
 
 OTHER CHANGES
 =============
@@ -199,7 +285,7 @@ Added reroute_msg_t to route a message to a different cluster.
 
 Removed members from the following struct definitions
 =====================================================
-In slurm_ctl_conf_t: Removed group_info.
+In slurm_ctl_conf_t: Removed group_info and slurmd_plugstack.
 
 Changed the following enums and #defines
 ========================================
@@ -217,3 +303,4 @@ Removed the following API's
 ===========================
 Removed unused slurm_allocation_lookup() and rename slurm_allocation_lookup_lite() to
 	slurm_allocation_lookup().
+Removed unused slurm_get_slurmd_plugstack() function.

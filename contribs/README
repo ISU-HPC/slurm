@@ -38,6 +38,8 @@ of the Slurm contribs distribution follows:
      opt_modulefiles_slurm - enables use of Munge as soon as built
      pam_job.c             - Less verbose version of the default Cray job service.
 
+  gcp/               [Google Cloud Platform integration scripts]
+
   lua/               [ LUA scripts ]
      Example LUA scripts that can serve as Slurm plugins.
      job_submit.lua - job_submit plugin that can set a job's default partition
@@ -116,6 +118,10 @@ of the Slurm contribs distribution follows:
 
   slurm_completion_help/     [shell script, vim file]
      Scripts to help in option completion when using slurm commands.
+
+  slurm.spec-legacy  [ RPM build script ]
+     A version of slurm.spec that may still work on older platforms.
+     DEPRECATED, NOT MAINTAINED.
 
   spank_core.c       [ SPANK plugin, C program ]
      A Slurm SPANK plugin that can be used to permit users to generated

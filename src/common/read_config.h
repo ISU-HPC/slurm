@@ -68,7 +68,7 @@ extern uint16_t drop_priv_flag;
 #define ACCOUNTING_ENFORCE_NO_STEPS 0x0040
 #define ACCOUNTING_ENFORCE_TRES   0x0080
 
-#define DEFAULT_ACCOUNTING_TRES  "cpu,mem,energy,node"
+#define DEFAULT_ACCOUNTING_TRES  "cpu,mem,energy,node,billing"
 #define DEFAULT_ACCOUNTING_DB      "slurm_acct_db"
 #define DEFAULT_ACCOUNTING_ENFORCE  0
 #define DEFAULT_ACCOUNTING_STORAGE_TYPE "accounting_storage/none"
@@ -109,7 +109,7 @@ extern uint16_t drop_priv_flag;
 #  define DEFAULT_ALLOW_SPEC_RESOURCE_USAGE 0
 #  define DEFAULT_JOB_CONTAINER_PLUGIN "job_container/none"
 #endif
-#define DEFAULT_KEEP_ALIVE_TIME     ((uint16_t) NO_VAL)
+#define DEFAULT_KEEP_ALIVE_TIME     (NO_VAL16)
 #define DEFAULT_KILL_ON_BAD_EXIT    0
 #define DEFAULT_KILL_TREE           0
 #define DEFAULT_KILL_WAIT           30

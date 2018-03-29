@@ -104,6 +104,10 @@
 
 // Data types supported by all HDF5 plugins of this type
 
+#ifndef H5free_memory
+#define H5free_memory free
+#endif
+
 sh5util_opts_t params;
 
 typedef struct table {
@@ -299,6 +303,7 @@ static void _remove_empty_output(void)
 	 * the program failed somewhere along the
 	 * way and the file is just left hanging...
 	 */
+	info("Output file generated is empty, removing it: %s", params.output);
 	if ((sb.st_size == 0) &&
 	    (remove(params.output) == -1))
 		error("%s: remove(%s): %m", __func__, params.output);
@@ -1029,10 +1034,10 @@ static int _extract_series_table(hid_t fid_job, table_t *table, List fields,
 		m_name = H5Tget_member_name(tid, (unsigned)i);
 		/* continue if the field must not be extracted */
 		if (!list_find_first(fields, _str_cmp, m_name)) {
-			free(m_name);
+			H5free_memory(m_name);
 			continue;
 		}
-		free(m_name);
+		H5free_memory(m_name);
 
 		/* get the member type */
 		if ((m_tid = H5Tget_member_type(tid, (unsigned)i)) < 0)
@@ -1233,7 +1238,7 @@ static void _item_analysis_uint(hsize_t nb_tables, hid_t *tables,
 	uint64_t v;
 	uint64_t values[nb_tables];
 	uint8_t  *buffer;
-	uint64_t et, et_max = 0;
+	uint64_t et = 0, et_max = 0;
 
 	buffer = xmalloc(buf_size);
 	for (;;) {
@@ -1334,7 +1339,7 @@ static void _item_analysis_double(hsize_t nb_tables, hid_t *tables,
 	double   v;
 	double   values[nb_tables];
 	uint8_t  *buffer;
-	uint64_t et, et_max = 0;
+	uint64_t et = 0, et_max = 0;
 
 	buffer = xmalloc(buf_size);
 	for (;;) {
@@ -1488,10 +1493,10 @@ static herr_t _extract_item_step(hid_t g_id, const char *step_name,
 		for (j = 0; j < nmembers; j++) {
 			m_name = H5Tget_member_name(tid, (unsigned)j);
 			if (xstrcasecmp(params.data_item, m_name) == 0) {
-				free(m_name);
+				H5free_memory(m_name);
 				break;
 			}
-			free(m_name);
+			H5free_memory(m_name);
 		}
 
 		if (j == nmembers) {
@@ -1656,7 +1661,7 @@ static int _fields_intersection(hid_t fid_job, List tables, List fields)
 			for (i = 0; i < nb_fields; i++) {
 				field = H5Tget_member_name(tid, i);
 				list_append(fields, xstrdup(field));
-				free(field);
+				H5free_memory(field);
 			}
 		} else {
 			/* gather fields */
@@ -1681,7 +1686,7 @@ static int _fields_intersection(hid_t fid_job, List tables, List fields)
 			list_iterator_destroy(it2);
 			/* clean up fields */
 			for (i = 0; i < nb_fields; i++)
-				free(l_fields[i]);
+				H5free_memory(l_fields[i]);
 		}
 
 		H5Tclose(tid);

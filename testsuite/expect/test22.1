@@ -75,6 +75,7 @@ set access_err  0
 set uid [get_my_uid]
 set gid [get_my_gid]
 set timeout 120
+set fedname     "test22_1"
 
 # Cluster
 array set clus_req {}
@@ -332,7 +333,8 @@ if {!$user1wckey1 || !$user1wckey1} {
 }
 
 proc end_it {} {
-	global exit_code sql_rem_clus1 sql_rem_clus2 users accounts cluster cluster2
+	global exit_code sql_rem_clus1 sql_rem_clus2 users accounts
+	global cluster1 cluster2
 
 	incr exit_code [archive_load $sql_rem_clus1]
 	incr exit_code [archive_load $sql_rem_clus2]
@@ -341,6 +343,57 @@ proc end_it {} {
 	remove_cluster "$cluster1"
 	remove_cluster "$cluster2"
 	exit $exit_code
+}
+
+proc test_fed {} {
+	global scontrol alpha sacctmgr env bin_rm cluster1 cluster2 fedname
+
+	set config_dir ""
+	set new_conf /tmp/slurm.conf.test22.1
+
+	spawn $scontrol show config
+	expect {
+		-re "SLURM_CONF *= (/.*)/($alpha).*SLURM_VERSION" {
+			set config_dir $expect_out(1,string)
+			exp_continue
+		}
+		timeout {
+			send_user "\nFAILURE: scontrol is not responding\n"
+			set exit_code 1
+		}
+		eof {
+			wait
+		}
+	}
+
+	delete_federations $fedname
+
+	set cmd1 "$sacctmgr -i add federation $fedname"
+	send_user "$cmd1\n"
+	send_user "[eval exec $cmd1]\n"
+
+	set cmd2 "$sacctmgr -i mod fed $fedname set clusters=$cluster1,$cluster2"
+	send_user "$cmd2\n"
+	send_user "[eval exec $cmd2]\n"
+
+	send_user "This is the config dir: $config_dir; new config: $new_conf \n"
+
+	set old_conf "$config_dir/slurm.conf"
+
+	send_user [exec sed "s/ClusterName\\s*=.*/ClusterName=$cluster1/Ig" $old_conf > $new_conf]
+
+	set env(SLURM_CONF) $new_conf
+
+	send_user "ENV VARIABLE: [exec printenv SLURM_CONF]  \n"
+
+	set exit_code [inc22_1_fed]
+	delete_federations $fedname
+	exec $bin_rm -rf $new_conf
+
+	set env(SLURM_CONF) $config_dir/slurm.conf
+	if {$exit_code ne 0} {
+		end_it
+	}
 }
 
 proc create_sql {cluster sql_in sql_rem} {
@@ -458,11 +511,7 @@ proc create_sql {cluster sql_in sql_rem} {
 	}
 
 	if { $exit_code } {
-		#incr exit_code [archive_load $sql_rem]
-		remove_user "" "" $users
-		remove_acct "" $accounts
-		remove_cluster "$cluster"
-		exit $exit_code
+		end_it
 	}
 
 	#
@@ -504,11 +553,7 @@ proc create_sql {cluster sql_in sql_rem} {
 	}
 
 	if { $exit_code } {
-		#incr exit_code [archive_load $sql_rem]
-		remove_user "" "" $users
-		remove_acct "" $accounts
-		remove_cluster "$cluster"
-		exit $exit_code
+		end_it
 	}
 
 	#
@@ -545,67 +590,20 @@ proc create_sql {cluster sql_in sql_rem} {
 	}
 
 	if { $exit_code } {
-		incr exit_code [archive_load $sql_rem]
-		remove_user "" "" $users
-		remove_acct "" $accounts
-		remove_cluster "$cluster"
-		exit $exit_code
+		end_it
 	}
 }
 
 create_sql $cluster1 $sql_in_clus1 $sql_rem_clus1
 create_sql $cluster2 $sql_in_clus2 $sql_rem_clus2
 
-######################################################################################
-#Fed testing
-
-set config_dir ""
-set new_conf /tmp/slurm.conf.test22.1
-
-spawn $scontrol show config
-expect {
-	-re "SLURM_CONF *= (/.*)/($alpha).*SLURM_VERSION" {
-		set config_dir $expect_out(1,string)
-		exp_continue
-	}
-	timeout {
-		send_user "\nFAILURE: scontrol is not responding\n"
-		set exit_code 1
-	}
-	eof {
-		wait
-	}
-}
-
-delete_federations f2
-
-send_user "[exec $sacctmgr -i add federation f2]\n"
-send_user "[exec $sacctmgr -i mod fed f2 set clusters=$cluster1,$cluster2]\n"
-
-send_user "This is the config dir: $config_dir; new config: $new_conf \n"
-
-set old_conf "$config_dir/slurm.conf"
-
-send_user [exec sed "s/ClusterName=.*/ClusterName=$cluster1/g" $old_conf > $new_conf]
-
-set env(SLURM_CONF) $new_conf
-
-send_user "ENV VARIABLE: [exec printenv SLURM_CONF]  \n"
-
-set exit_code [inc22_1_fed]
-delete_federations f2
-exec $bin_rm -rf $new_conf
-
-if {$exit_code ne 0} {
-	end_it
-}
-
-set env(SLURM_CONF) $config_dir/slurm.conf
-#########################################################################################
 
 #
 # Execute sub-test
 #
+
+# Fed Testing
+test_fed
 
 set exit_code [inc22_1_1]
 if {$exit_code ne 0} {

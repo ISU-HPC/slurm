@@ -111,7 +111,6 @@
 #include "src/slurmd/common/setproctitle.h"
 #include "src/slurmd/slurmd/slurmd.h"
 #include "src/slurmd/common/slurmd_cgroup.h"
-#include "src/slurmd/slurmd/slurmd_plugstack.h"
 #include "src/slurmd/common/xcpuinfo.h"
 
 #define GETOPT_ARGS	"bcCd:Df:hL:Mn:N:vV"
@@ -164,6 +163,7 @@ static int	ncpus;			/* number of CPUs on this node */
  */
 static sig_atomic_t _shutdown = 0;
 static sig_atomic_t _reconfig = 0;
+static sig_atomic_t _update_log = 0;
 static pthread_t msg_pthread = (pthread_t) 0;
 static time_t sent_reg_time = (time_t) 0;
 
@@ -344,8 +344,8 @@ main (int argc, char **argv)
 		fatal("Unable to initialize core specialization plugin.");
 	if (switch_g_node_init() < 0)
 		fatal("Unable to initialize interconnect.");
-	if (node_features_g_init() != SLURM_SUCCESS )
-		fatal( "failed to initialize node_features plugin");	
+	if (node_features_g_init() != SLURM_SUCCESS)
+		fatal("failed to initialize node_features plugin");
 	if (conf->cleanstart && switch_g_clear_node_state())
 		fatal("Unable to clear interconnect state.");
 	switch_g_slurmd_init();
@@ -363,12 +363,6 @@ main (int argc, char **argv)
 	list_install_fork_handlers();
 	slurm_conf_install_fork_handlers();
 	record_launched_jobs();
-
-	/*
-	 * Initialize any plugins
-	 */
-	if (slurmd_plugstack_init())
-		fatal("failed to initialize slurmd_plugstack");
 
 	run_script_health_check();
 	slurm_thread_create_detached(NULL, _registration_engine, NULL);
@@ -437,7 +431,8 @@ _msg_engine(void)
 			_wait_for_all_threads(5); /* Wait for RPCs to finish */
 			_reconfigure();
 		}
-
+		if (_update_log)
+			_update_logging();
 		cli = xmalloc (sizeof (slurm_addr_t));
 		if ((sock = slurm_accept_msg_conn(conf->lfd, cli)) >= 0) {
 			_handle_connection(sock, cli);
@@ -834,6 +829,14 @@ _read_config(void)
 	xfree(conf->block_map);
 	xfree(conf->block_map_inv);
 
+	/*
+	 * This must be reset before _update_logging(), otherwise the
+	 * slurmstepd processes will not get the reconfigure request,
+	 * and logs may be lost if the path changed or the log was rotated.
+	 */
+	_free_and_set(conf->spooldir, xstrdup(cf->slurmd_spooldir));
+	_massage_pathname(&conf->spooldir);
+
 	_update_logging();
 	_update_nice();
 
@@ -900,15 +903,15 @@ _read_config(void)
 	    (conf->cores   != conf->actual_cores)   ||
 	    (conf->threads != conf->actual_threads)) {
 		if (cf->fast_schedule) {
-			info("Node configuration differs from hardware: "
-			     "CPUs=%u:%u(hw) Boards=%u:%u(hw) "
-			     "SocketsPerBoard=%u:%u(hw) CoresPerSocket=%u:%u(hw) "
-			     "ThreadsPerCore=%u:%u(hw)",
-			     conf->cpus,    conf->actual_cpus,
-			     conf->boards,  conf->actual_boards,
-			     conf->sockets, conf->actual_sockets,
-			     conf->cores,   conf->actual_cores,
-			     conf->threads, conf->actual_threads);
+			error("Node configuration differs from hardware: "
+			      "Procs=%u:%u(hw) Boards=%u:%u(hw) "
+			      "SocketsPerBoard=%u:%u(hw) CoresPerSocket=%u:%u(hw) "
+			      "ThreadsPerCore=%u:%u(hw)",
+			      conf->cpus,    conf->actual_cpus,
+			      conf->boards,  conf->actual_boards,
+			      conf->sockets, conf->actual_sockets,
+			      conf->cores,   conf->actual_cores,
+			      conf->threads, conf->actual_threads);
 		} else if ((cf->fast_schedule == 0) && (cr_flag || gang_flag)) {
 			error("You are using cons_res or gang scheduling with "
 			      "Fastschedule=0 and node configuration differs "
@@ -939,8 +942,6 @@ _read_config(void)
 	_free_and_set(conf->tmpfs,    xstrdup(cf->tmp_fs));
 	_free_and_set(conf->health_check_program,
 		      xstrdup(cf->health_check_program));
-	_free_and_set(conf->spooldir, xstrdup(cf->slurmd_spooldir));
-	_massage_pathname(&conf->spooldir);
 	_free_and_set(conf->pidfile,  xstrdup(cf->slurmd_pidfile));
 	_massage_pathname(&conf->pidfile);
 	_free_and_set(conf->plugstack,   xstrdup(cf->plugstack));
@@ -956,7 +957,7 @@ _read_config(void)
 	_free_and_set(conf->job_acct_gather_freq,
 		      xstrdup(cf->job_acct_gather_freq));
 
-	conf->acct_freq_task = (uint16_t)NO_VAL;
+	conf->acct_freq_task = NO_VAL16;
 	cc = acct_gather_parse_freq(PROFILE_TASK,
 				    conf->job_acct_gather_freq);
 	if (cc != -1)
@@ -999,9 +1000,6 @@ _read_config(void)
 static void
 _reconfigure(void)
 {
-	List steps;
-	ListIterator i;
-	step_loc_t *stepd;
 	bool did_change;
 
 	_reconfig = 0;
@@ -1041,29 +1039,6 @@ _reconfigure(void)
 	 * Purge the username -> grouplist cache.
 	 */
 	group_cache_purge();
-
-	/* send reconfig to each stepd so they can refresh their log
-	 * file handle
-	 */
-
-	steps = stepd_available(conf->spooldir, conf->node_name);
-	i = list_iterator_create(steps);
-	while ((stepd = list_next(i))) {
-		int fd;
-		fd = stepd_connect(stepd->directory, stepd->nodename,
-				   stepd->jobid, stepd->stepid,
-				   &stepd->protocol_version);
-		if (fd == -1)
-			continue;
-
-		if (stepd_reconfig(fd, stepd->protocol_version)
-		    != SLURM_SUCCESS)
-			debug("Reconfig jobid=%u.%u failed: %m",
-			      stepd->jobid, stepd->stepid);
-		close(fd);
-	}
-	list_iterator_destroy(i);
-	FREE_NULL_LIST(steps);
 
 	gres_plugin_reconfig(&did_change);
 	(void) switch_g_reconfig();
@@ -1578,11 +1553,7 @@ _slurmd_init(void)
 		}
 	}
 
-#ifdef O_CLOEXEC
 	if ((devnull = open("/dev/null", O_RDWR | O_CLOEXEC)) < 0) {
-#else
-	if ((devnull = open("/dev/null", O_RDWR)) < 0) {
-#endif
 		error("Unable to open /dev/null: %m");
 		return SLURM_FAILURE;
 	}
@@ -1787,7 +1758,7 @@ static void
 _usr_handler(int signum)
 {
 	if (signum == SIGUSR2) {
-		_update_logging();
+		_update_log = 1;
 	}
 }
 
@@ -1867,12 +1838,16 @@ _kill_old_slurmd(void)
 /* Reset slurmd logging based upon configuration parameters */
 static void _update_logging(void)
 {
+	List steps;
+	ListIterator i;
+	step_loc_t *stepd;
 	log_options_t *o = &conf->log_opts;
 	slurm_ctl_conf_t *cf;
 
+	_update_log = 0;
 	/* Preserve execute line verbose arguments (if any) */
 	cf = slurm_conf_lock();
-	if (!conf->debug_level_set && (cf->slurmd_debug != (uint16_t) NO_VAL))
+	if (!conf->debug_level_set && (cf->slurmd_debug != NO_VAL16))
 		conf->debug_level = cf->slurmd_debug;
 	conf->syslog_debug = cf->slurmd_syslog_debug;
 	conf->log_fmt = cf->log_fmt;
@@ -1893,7 +1868,7 @@ static void _update_logging(void)
 		o->stderr_level = LOG_LEVEL_QUIET;
 		if (!conf->logfile &&
 		    (conf->syslog_debug == LOG_LEVEL_QUIET)) {
-			/* Insure fatal errors get logged somewhere */
+			/* Ensure fatal errors get logged somewhere */
  			o->syslog_level = LOG_LEVEL_FATAL;
 		} else {
 			o->syslog_level = conf->syslog_debug;
@@ -1903,7 +1878,8 @@ static void _update_logging(void)
 	log_alter(conf->log_opts, SYSLOG_FACILITY_DAEMON, conf->logfile);
 	log_set_timefmt(conf->log_fmt);
 
-	/* If logging to syslog and running in
+	/*
+	 * If logging to syslog and running in
 	 * MULTIPLE_SLURMD mode add my node_name
 	 * in the name tag for syslog.
 	 */
@@ -1918,6 +1894,29 @@ static void _update_logging(void)
 		log_set_argv0(buf);
 	}
 #endif
+
+	/*
+	 * Send reconfig to each stepd so they will rotate as well.
+	 */
+
+	steps = stepd_available(conf->spooldir, conf->node_name);
+	i = list_iterator_create(steps);
+	while ((stepd = list_next(i))) {
+		int fd;
+		fd = stepd_connect(stepd->directory, stepd->nodename,
+				   stepd->jobid, stepd->stepid,
+				   &stepd->protocol_version);
+		if (fd == -1)
+			continue;
+
+		if (stepd_reconfig(fd, stepd->protocol_version)
+		    != SLURM_SUCCESS)
+			debug("Reconfig jobid=%u.%u failed: %m",
+			      stepd->jobid, stepd->stepid);
+		close(fd);
+	}
+	list_iterator_destroy(i);
+	FREE_NULL_LIST(steps);
 }
 
 /* Reset slurmd nice value */

@@ -299,17 +299,22 @@ static int _print_str(char *str, int width, bool right, bool cut_output)
 	char format[64];
 	int printed = 0;
 
-	if (right == true && width != 0)
+	if (right == true && width > 0)
 		snprintf(format, 64, "%%%ds", width);
-	else if (width != 0)
+	else if (width > 0)
 		snprintf(format, 64, "%%.%ds", width);
-	else {
+	else if (width < 0) {
+		format[0] = '%';
+		format[1] = 's';
+		format[2] = ' ';
+		format[3] = '\0';
+	} else if (width == 0) {
 		format[0] = '%';
 		format[1] = 's';
 		format[2] = '\0';
 	}
 
-	if ((width == 0) || (cut_output == false)) {
+	if ((width <= 0) || (cut_output == false) ) {
 		if ((printed = printf(format, str)) < 0)
 			return printed;
 	} else {
@@ -575,7 +580,7 @@ int _print_job_core_spec(job_info_t * job, int width, bool right, char* suffix)
 
 	if (job == NULL) {	/* Print the Header instead */
 		_print_str("CORE_SPEC", width, right, true);
-	} else if (job->core_spec == (uint16_t) NO_VAL) {
+	} else if (job->core_spec == NO_VAL16) {
 		_print_str("N/A", width, right, true);
 	} else if (job->core_spec & CORE_SPEC_THREAD) {
 		snprintf(spec, FORMAT_STRING_SIZE, "%d Threads",
@@ -1187,19 +1192,19 @@ int _print_job_num_sct(job_info_t * job, int width, bool right_justify,
 	char threads[10];
 	char *sct = NULL;
 	if (job) {
-		if (job->sockets_per_node == (uint16_t) NO_VAL)
+		if (job->sockets_per_node == NO_VAL16)
 			strcpy(sockets, "*");
 		else
 			convert_num_unit((float)job->sockets_per_node, sockets,
 					sizeof(sockets), UNIT_NONE, NO_VAL,
 					params.convert_flags);
-		if (job->cores_per_socket == (uint16_t) NO_VAL)
+		if (job->cores_per_socket == NO_VAL16)
 			strcpy(cores, "*");
 		else
 			convert_num_unit((float)job->cores_per_socket, cores,
 					sizeof(cores), UNIT_NONE, NO_VAL,
 					params.convert_flags);
-		if (job->threads_per_core == (uint16_t) NO_VAL)
+		if (job->threads_per_core == NO_VAL16)
 			strcpy(threads, "*");
 		else
 			convert_num_unit((float)job->threads_per_core, threads,
@@ -1285,7 +1290,7 @@ int _print_sockets(job_info_t * job, int width, bool right_justify,
 	if (job == NULL)	/* Print the Header instead */
 		_print_str("SOCKETS_PER_NODE", width, right_justify, true);
 	else {
-		if (job->sockets_per_node == (uint16_t) NO_VAL)
+		if (job->sockets_per_node == NO_VAL16)
 			strcpy(tmp_char, "*");
 		else
 			convert_num_unit((float)job->sockets_per_node, tmp_char,
@@ -1306,7 +1311,7 @@ int _print_cores(job_info_t * job, int width, bool right_justify,
 	if (job == NULL)	/* Print the Header instead */
 		_print_str("CORES_PER_SOCKET", width, right_justify, true);
 	else {
-		if (job->cores_per_socket == (uint16_t) NO_VAL)
+		if (job->cores_per_socket == NO_VAL16)
 			strcpy(tmp_char, "*");
 		else
 			convert_num_unit((float)job->cores_per_socket, tmp_char,
@@ -1327,7 +1332,7 @@ int _print_threads(job_info_t * job, int width, bool right_justify,
 	if (job == NULL)	/* Print the Header instead */
 		_print_str("THREADS_PER_CORE", width, right_justify, true);
 	else {
-		if (job->threads_per_core == (uint16_t) NO_VAL)
+		if (job->threads_per_core == NO_VAL16)
 			strcpy(tmp_char, "*");
 		else
 			convert_num_unit((float)job->threads_per_core, tmp_char,
@@ -1663,7 +1668,7 @@ int _print_job_boards_per_node(job_info_t * job, int width, bool right_justify,
 {
 	if (job == NULL)
 		_print_str("BOARDS_PER_NODE", width, right_justify, true);
-	else if (job->boards_per_node == (uint16_t) NO_VAL)
+	else if (job->boards_per_node == NO_VAL16)
 		_print_str("N/A", width, right_justify, true);
 	else
 		_print_int(job->boards_per_node, width, right_justify, true);
@@ -1901,8 +1906,8 @@ int _print_job_ntasks_per_core(job_info_t * job, int width, bool right_justify,
 {
 	if (job == NULL)
 		_print_str("NTASKS_PER_CORE", width, right_justify, true);
-	else if ((job->ntasks_per_core == (uint16_t) NO_VAL) ||
-		 (job->ntasks_per_core == (uint16_t) INFINITE))
+	else if ((job->ntasks_per_core == NO_VAL16) ||
+		 (job->ntasks_per_core == INFINITE16))
 		_print_str("N/A", width, right_justify, true);
 	else
 		_print_int(job->ntasks_per_core, width, right_justify, true);
@@ -1917,8 +1922,8 @@ int _print_job_ntasks_per_node(job_info_t * job, int width, bool right_justify,
 {
 	if (job == NULL)
 		_print_str("NTASKS_PER_NODE", width, right_justify, true);
-	else if ((job->ntasks_per_node == (uint16_t) NO_VAL) ||
-		 (job->ntasks_per_node == (uint16_t) INFINITE))
+	else if ((job->ntasks_per_node == NO_VAL16) ||
+		 (job->ntasks_per_node == INFINITE16))
 		_print_str("N/A", width, right_justify, true);
 	else
 		_print_int(job->ntasks_per_node, width, right_justify, true);
@@ -1933,8 +1938,8 @@ int _print_job_ntasks_per_socket(job_info_t * job, int width,
 {
 	if (job == NULL)
 		_print_str("NTASKS_PER_SOCKET", width, right_justify, true);
-	else if ((job->ntasks_per_socket == (uint16_t) NO_VAL) ||
-		 (job->ntasks_per_socket == (uint16_t) INFINITE))
+	else if ((job->ntasks_per_socket == NO_VAL16) ||
+		 (job->ntasks_per_socket == INFINITE16))
 		_print_str("N/A", width, right_justify, true);
 	else
 		_print_int(job->ntasks_per_socket, width, right_justify, true);
@@ -1949,8 +1954,8 @@ int _print_job_ntasks_per_board(job_info_t * job, int width,
 {
 	if (job == NULL)
 		_print_str("NTASKS_PER_BOARD", width, right_justify, true);
-	else if ((job->ntasks_per_board == (uint16_t) NO_VAL) ||
-		 (job->ntasks_per_board == (uint16_t) INFINITE))
+	else if ((job->ntasks_per_board == NO_VAL16) ||
+		 (job->ntasks_per_board == INFINITE16))
 		_print_str("N/A", width, right_justify, true);
 	else
 		_print_int(job->ntasks_per_board, width, right_justify, true);
@@ -2614,16 +2619,20 @@ int _print_step_state(job_step_info_t * step, int width, bool right,
 	return SLURM_SUCCESS;
 }
 
-/* filter job records per input specifications,
- * returns >0 if job should be filter out (not printed) */
+/*
+ * Filter job records per input specifications,
+ * Returns >0 if job should be filter out (not printed)
+ * Returns 0 if job record should be printed
+ */
 static int _filter_job(job_info_t * job)
 {
-	int filter;
+	int i, filter;
 	ListIterator iterator;
 	uint32_t *user;
 	uint32_t *state_id;
 	char *account, *license, *qos, *name;
 	squeue_job_step_t *job_step_id;
+	bool partial_array = false;
 
 	if (job->job_id == 0)
 		return 1;
@@ -2632,12 +2641,21 @@ static int _filter_job(job_info_t * job)
 		filter = 1;
 		iterator = list_iterator_create(params.job_list);
 		while ((job_step_id = list_next(iterator))) {
-			if (((job_step_id->array_id == NO_VAL)   &&
-			     ((job_step_id->job_id  == job->array_job_id) ||
+			if (((job_step_id->array_id == NO_VAL)             &&
+			     ((job_step_id->job_id  == job->array_job_id)  ||
 			      (job_step_id->job_id  == job->job_id)))      ||
-			    ((job_step_id->array_id == job->array_task_id)  &&
+			    ((job_step_id->array_id == job->array_task_id) &&
 			     (job_step_id->job_id   == job->array_job_id))) {
 				filter = 0;
+				break;
+			}
+			if ((job_step_id->array_id != NO_VAL)             &&
+			    (job_step_id->job_id   == job->array_job_id)  &&
+			    (job->array_bitmap &&
+			     bit_test((bitstr_t *)job->array_bitmap,
+				      job_step_id->array_id))) {
+				filter = 0;
+				partial_array = true;
 				break;
 			}
 			if (job_step_id->job_id == job->pack_job_id) {
@@ -2780,6 +2798,35 @@ static int _filter_job(job_info_t * job)
 		list_iterator_destroy(iterator);
 		if (filter == 1)
 			return 8;
+	}
+
+	if (partial_array) {
+		/* Print this record, but perhaps only some job array records */
+		bitstr_t *new_array_bitmap;
+		int array_len = bit_size((bitstr_t *)job->array_bitmap);
+		new_array_bitmap = bit_alloc(array_len);
+		iterator = list_iterator_create(params.job_list);
+		while ((job_step_id = list_next(iterator))) {
+			if ((job_step_id->job_id == job->array_job_id) &&
+			    (job_step_id->array_id < array_len)) {
+				bit_set(new_array_bitmap,job_step_id->array_id);
+			}
+		}
+		list_iterator_destroy(iterator);
+		bit_and((bitstr_t *)job->array_bitmap, new_array_bitmap);
+		bit_free(new_array_bitmap);
+		xfree(job->array_task_str);
+		i = bit_set_count((bitstr_t *)job->array_bitmap);
+		if (i == 1) {
+			job->array_task_id =
+				bit_ffs((bitstr_t *)job->array_bitmap);
+			bit_free((bitstr_t *)job->array_bitmap);
+		} else {
+			i = i * 16 + 10;
+			job->array_task_str = xmalloc(i);
+			(void) bit_fmt(job->array_task_str, i,
+				       (bitstr_t *)job->array_bitmap);
+		}
 	}
 
 	return 0;

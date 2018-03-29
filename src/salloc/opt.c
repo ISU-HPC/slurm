@@ -50,7 +50,7 @@
 #include <stdarg.h>		/* va_start   */
 #include <stdio.h>
 #include <stdlib.h>		/* getenv, strtol, etc. */
-#include <string.h>		/* strcpy, strncasecmp */
+#include <string.h>		/* strcpy     */
 #include <sys/param.h>		/* MAXPATHLEN */
 #include <sys/stat.h>
 #include <sys/types.h>
@@ -176,7 +176,8 @@
 #define LONG_OPT_X11             0x170
 
 /*---- global variables, defined in opt.h ----*/
-opt_t opt;
+slurm_opt_t opt;
+salloc_opt_t saopt;
 int error_exit = 1;
 bool first_pass = true;
 int immediate_exit = 1;
@@ -290,10 +291,13 @@ static void _opt_default(void)
 	 * specified on the command line
 	 */
 	if (first_pass) {
+		opt.salloc_opt = &saopt;
+		opt.sbatch_opt = NULL;
+		opt.srun_opt = NULL;
 		xfree(opt.account);
 		xfree(opt.acctg_freq);
 		opt.begin		= 0;
-		opt.bell		= BELL_AFTER_DELAY;
+		saopt.bell		= BELL_AFTER_DELAY;
 		xfree(opt.c_constraints);
 		xfree(opt.clusters);
 		xfree(opt.comment);
@@ -303,6 +307,7 @@ static void _opt_default(void)
 		xfree(opt.dependency);
 		opt.egid		= (gid_t) -1;
 		opt.euid		= (uid_t) -1;
+		xfree(opt.extra);
 		xfree(opt.exc_nodes);
 		opt.get_user_env_mode	= -1;
 		opt.get_user_env_time	= -1;
@@ -310,12 +315,12 @@ static void _opt_default(void)
 		opt.hold		= false;
 		opt.immediate		= 0;
 		xfree(opt.job_name);
-		opt.kill_command_signal	= SIGTERM;
-		opt.kill_command_signal_set = false;
+		saopt.kill_command_signal = SIGTERM;
+		saopt.kill_command_signal_set = false;
 		xfree(opt.mcs_label);
 		opt.nice		= NO_VAL;
 		opt.no_kill		= false;
-		opt.no_shell		= false;
+		saopt.no_shell		= false;
 		opt.power_flags		= 0;
 		opt.priority		= 0;
 		opt.profile		= ACCT_GATHER_PROFILE_NOT_SET;
@@ -331,19 +336,19 @@ static void _opt_default(void)
 		if (xstrcmp(opt.user, "nobody") == 0)
 			fatal("Invalid user id: %u", (uint32_t) opt.uid);
 		opt.verbose		= 0;
-		opt.wait_all_nodes	= NO_VAL16;
+		saopt.wait_all_nodes	= NO_VAL16;
 		opt.warn_flags		= 0;
 		opt.warn_signal		= 0;
 		opt.warn_time		= 0;
 		xfree(opt.wckey);
 		opt.x11			= 0;
-	} else if (opt.default_job_name) {
+	} else if (saopt.default_job_name) {
 		xfree(opt.job_name);
 	}
 
 	/* All other options must be specified individually for each component
 	 * of the job */
-	xfree(opt.burst_buffer);
+	xfree(saopt.burst_buffer);
 	xfree(opt.constraints);
 	opt.contiguous			= false;
 	for (i = 0; i < HIGHEST_DIMENSIONS; i++) {
@@ -357,7 +362,7 @@ static void _opt_default(void)
 	opt.cpu_freq_min		= NO_VAL;
 	opt.cpus_per_task		= 0;
 	opt.cpus_set			= false;
-	opt.default_job_name		= false;
+	saopt.default_job_name		= false;
 	opt.distribution		= SLURM_DIST_UNKNOWN;
 	/* opt.geometry[i]		= 0;	See above */
 	xfree(opt.hint_env);
@@ -369,7 +374,7 @@ static void _opt_default(void)
 	xfree(opt.mem_bind);
 	opt.mem_bind_type		= 0;
 	opt.mem_per_cpu			= -1;
-	opt.mincpus			= -1;
+	opt.pn_min_cpus			= -1;
 	opt.min_nodes			= 1;
 	opt.no_rotate			= false;
 	opt.ntasks			= 1;
@@ -383,14 +388,14 @@ static void _opt_default(void)
 	opt.overcommit			= false;
 	xfree(opt.partition);
 	opt.plane_size			= NO_VAL;
-	opt.realmem			= -1;
+	opt.pn_min_memory		= -1;
 	xfree(opt.reservation);
 	opt.req_switch			= -1;
 	opt.shared			= NO_VAL16;
 	opt.sockets_per_node		= NO_VAL; /* requested sockets */
 	opt.threads_per_core		= NO_VAL; /* requested threads */
 	opt.threads_per_core_set	= false;
-	opt.tmpdisk			= -1;
+	opt.pn_min_tmp_disk		= -1;
 	opt.wait4switch			= -1;
 
 }
@@ -417,7 +422,7 @@ env_vars_t env_vars[] = {
   {"SALLOC_ACCOUNT",       OPT_STRING,     &opt.account,       NULL          },
   {"SALLOC_ACCTG_FREQ",    OPT_STRING,     &opt.acctg_freq,    NULL          },
   {"SALLOC_BELL",          OPT_BELL,       NULL,               NULL          },
-  {"SALLOC_BURST_BUFFER",  OPT_STRING,     &opt.burst_buffer,  NULL          },
+  {"SALLOC_BURST_BUFFER",  OPT_STRING,     &saopt.burst_buffer,  NULL          },
   {"SALLOC_CLUSTERS",      OPT_STRING,     &opt.clusters,      NULL          },
   {"SLURM_CLUSTERS",       OPT_STRING,     &opt.clusters,      NULL          },
   {"SALLOC_CONN_TYPE",     OPT_CONN_TYPE,  NULL,               NULL          },
@@ -452,7 +457,7 @@ env_vars_t env_vars[] = {
   {"SALLOC_TIMELIMIT",     OPT_STRING,     &opt.time_limit_str,NULL          },
   {"SALLOC_USE_MIN_NODES", OPT_USE_MIN_NODES ,NULL,            NULL          },
   {"SALLOC_WAIT",          OPT_IMMEDIATE,  NULL,               NULL          },
-  {"SALLOC_WAIT_ALL_NODES",OPT_INT,        &opt.wait_all_nodes,NULL          },
+  {"SALLOC_WAIT_ALL_NODES",OPT_INT,        &saopt.wait_all_nodes,NULL          },
   {"SALLOC_WAIT4SWITCH",   OPT_TIME_VAL,   NULL,               NULL          },
   {"SALLOC_WCKEY",         OPT_STRING,     &opt.wckey,         NULL          },
   {NULL, 0, NULL, NULL}
@@ -583,10 +588,10 @@ _process_env_var(env_vars_t *e, const char *val)
 		break;
 
 	case OPT_BELL:
-		opt.bell = BELL_ALWAYS;
+		saopt.bell = BELL_ALWAYS;
 		break;
 	case OPT_NO_BELL:
-		opt.bell = BELL_NEVER;
+		saopt.bell = BELL_NEVER;
 		break;
 	case OPT_JOBID:
 		info("WARNING: Creating SLURM job allocation from within "
@@ -634,13 +639,13 @@ _process_env_var(env_vars_t *e, const char *val)
 		break;
 	case OPT_KILL_CMD:
 		if (val) {
-			opt.kill_command_signal = sig_name2num((char *) val);
-			if (opt.kill_command_signal == 0) {
+			saopt.kill_command_signal = sig_name2num((char *) val);
+			if (saopt.kill_command_signal == 0) {
 				error("Invalid signal name %s", val);
 				exit(error_exit);
 			}
 		}
-		opt.kill_command_signal_set = true;
+		saopt.kill_command_signal_set = true;
 		break;
 
 	case OPT_TIME_VAL:
@@ -749,6 +754,7 @@ static void _set_options(int argc, char **argv)
 		{"mcs-label",     required_argument, 0, LONG_OPT_MCS_LABEL},
 		{"mem",           required_argument, 0, LONG_OPT_MEM},
 		{"mem-per-cpu",   required_argument, 0, LONG_OPT_MEM_PER_CPU},
+		{"mem-bind",      required_argument, 0, LONG_OPT_MEM_BIND},
 		{"mem_bind",      required_argument, 0, LONG_OPT_MEM_BIND},
 		{"mincores",      required_argument, 0, LONG_OPT_MINCORES},
 		{"mincpus",       required_argument, 0, LONG_OPT_MINCPU},
@@ -781,7 +787,9 @@ static void _set_options(int argc, char **argv)
 		{"use-min-nodes", no_argument,       0, LONG_OPT_USE_MIN_NODES},
 		{"wait-all-nodes",required_argument, 0, LONG_OPT_WAIT_ALL_NODES},
 		{"wckey",         required_argument, 0, LONG_OPT_WCKEY},
+#ifdef WITH_SLURM_X11
 		{"x11",           optional_argument, 0, LONG_OPT_X11},
+#endif
 		{NULL,            0,                 0, 0}
 	};
 	char *opt_string =
@@ -885,13 +893,13 @@ static void _set_options(int argc, char **argv)
 			break;
 		case 'K': /* argument is optional */
 			if (optarg) {
-				opt.kill_command_signal = sig_name2num(optarg);
-				if (opt.kill_command_signal == 0) {
+				saopt.kill_command_signal = sig_name2num(optarg);
+				if (saopt.kill_command_signal == 0) {
 					error("Invalid signal name %s", optarg);
 					exit(error_exit);
 				}
 			}
-			opt.kill_command_signal_set = true;
+			saopt.kill_command_signal_set = true;
 			break;
 		case 'L':
 			xfree(opt.licenses);
@@ -1031,8 +1039,8 @@ static void _set_options(int argc, char **argv)
 			}
                         break;
 		case LONG_OPT_MINCPU:
-			opt.mincpus = parse_int("mincpus", optarg, true);
-			if (opt.mincpus < 0) {
+			opt.pn_min_cpus = parse_int("mincpus", optarg, true);
+			if (opt.pn_min_cpus < 0) {
 				error("invalid mincpus constraint %s",
 				      optarg);
 				exit(error_exit);
@@ -1075,8 +1083,8 @@ static void _set_options(int argc, char **argv)
 		case LONG_OPT_MEM:
 			if (!optarg)
 				break;	/* Fix for Coverity false positive */
-			opt.realmem = (int64_t) str_to_mbytes2(optarg);
-			if (opt.realmem < 0) {
+			opt.pn_min_memory = (int64_t) str_to_mbytes2(optarg);
+			if (opt.pn_min_memory < 0) {
 				error("invalid memory constraint %s",
 				      optarg);
 				exit(error_exit);
@@ -1095,13 +1103,17 @@ static void _set_options(int argc, char **argv)
 		case LONG_OPT_TMP:
 			if (!optarg)
 				break;	/* Fix for Coverity false positive */
-			opt.tmpdisk = str_to_mbytes2(optarg);
-			if (opt.tmpdisk < 0) {
+			opt.pn_min_tmp_disk = str_to_mbytes2(optarg);
+			if (opt.pn_min_tmp_disk < 0) {
 				error("invalid tmp value %s", optarg);
 				exit(error_exit);
 			}
 			break;
 		case LONG_OPT_UID:
+			if (getuid() != 0) {
+				error("--uid only permitted by root user");
+				exit(error_exit);
+			}
 			if (opt.euid != (uid_t) -1) {
 				error("duplicate --uid option");
 				exit(error_exit);
@@ -1112,6 +1124,10 @@ static void _set_options(int argc, char **argv)
 			}
 			break;
 		case LONG_OPT_GID:
+			if (getuid() != 0) {
+				error("--gid only permitted by root user");
+				exit(error_exit);
+			}
 			if (opt.egid != (gid_t) -1) {
 				error("duplicate --gid option");
 				exit(error_exit);
@@ -1136,7 +1152,7 @@ static void _set_options(int argc, char **argv)
 			break;
 		case LONG_OPT_MAIL_TYPE:
 			opt.mail_type |= parse_mail_type(optarg);
-			if (opt.mail_type == (uint16_t)INFINITE) {
+			if (opt.mail_type == INFINITE16) {
 				error("--mail-type=%s invalid", optarg);
 				exit(error_exit);
 			}
@@ -1192,10 +1208,10 @@ static void _set_options(int argc, char **argv)
 			}
 			break;
 		case LONG_OPT_BELL:
-			opt.bell = BELL_ALWAYS;
+			saopt.bell = BELL_ALWAYS;
 			break;
 		case LONG_OPT_NO_BELL:
-			opt.bell = BELL_NEVER;
+			saopt.bell = BELL_NEVER;
 			break;
 		case LONG_OPT_JOBID:
 			opt.jobid = parse_int("jobid", optarg, true);
@@ -1296,10 +1312,12 @@ static void _set_options(int argc, char **argv)
 			break;
 		case LONG_OPT_ACCTG_FREQ:
 			xfree(opt.acctg_freq);
+			if (validate_acctg_freq(optarg))
+				exit(1);
 			opt.acctg_freq = xstrdup(optarg);
 			break;
 		case LONG_OPT_NOSHELL:
-			opt.no_shell = true;
+			saopt.no_shell = true;
 			break;
 		case LONG_OPT_GET_USER_ENV:
 			if (optarg)
@@ -1365,7 +1383,7 @@ static void _set_options(int argc, char **argv)
 				      optarg);
 				exit(1);
 			}
-			opt.wait_all_nodes = strtol(optarg, NULL, 10);
+			saopt.wait_all_nodes = strtol(optarg, NULL, 10);
 			break;
 		case LONG_OPT_CPU_FREQ:
 		        if (cpu_freq_verify_cmdline(optarg, &opt.cpu_freq_min,
@@ -1387,14 +1405,14 @@ static void _set_options(int argc, char **argv)
 		case LONG_OPT_BURST_BUFFER_SPEC:
 			if (!optarg)
 				break;	/* Fix for Coverity false positive */
-			xfree(opt.burst_buffer);
-			opt.burst_buffer = xstrdup(optarg);
+			xfree(saopt.burst_buffer);
+			saopt.burst_buffer = xstrdup(optarg);
 			break;
 		case LONG_OPT_BURST_BUFFER_FILE:
 			if (!optarg)
 				break;	/* Fix for Coverity false positive */
-			xfree(opt.burst_buffer);
-			opt.burst_buffer = _read_file(optarg);
+			xfree(saopt.burst_buffer);
+			saopt.burst_buffer = _read_file(optarg);
 			break;
 		case LONG_OPT_THREAD_SPEC:
 			opt.core_spec = parse_int("thread_spec", optarg, true) |
@@ -1595,8 +1613,8 @@ static bool _opt_verify(void)
 		opt.ntasks_set = 1;
 	}
 
-	if (opt.cpus_set && (opt.mincpus < opt.cpus_per_task))
-		opt.mincpus = opt.cpus_per_task;
+	if (opt.cpus_set && (opt.pn_min_cpus < opt.cpus_per_task))
+		opt.pn_min_cpus = opt.cpus_per_task;
 
 	if ((opt.euid != (uid_t) -1) && (opt.euid != opt.uid))
 		opt.uid = opt.euid;
@@ -1604,10 +1622,10 @@ static bool _opt_verify(void)
 	if ((opt.egid != (gid_t) -1) && (opt.egid != opt.gid))
 		opt.gid = opt.egid;
 
-	if ((opt.no_shell == false) && (command_argc == 0)) {
+	if ((saopt.no_shell == false) && (command_argc == 0)) {
 		_salloc_default_command(&command_argc, &command_argv);
 		if (!opt.job_name)
-			opt.default_job_name = true;
+			saopt.default_job_name = true;
 	}
 
 	if ((opt.job_name == NULL) && (command_argc > 0))
@@ -1639,7 +1657,7 @@ static bool _opt_verify(void)
 		      "within salloc?");
 		return false;
 	}
-	if (opt.no_shell) {
+	if (saopt.no_shell) {
 		/*
 		 * As long as we are not using srun instead of aprun, this flag
 		 * makes no difference for the operational behaviour of aprun.
@@ -1647,7 +1665,7 @@ static bool _opt_verify(void)
 		error("--no-shell mode is not supported on Cray (due to srun)");
 		return false;
 	}
-	if (opt.shared && opt.shared != (uint16_t)NO_VAL) {
+	if (opt.shared && opt.shared != NO_VAL16) {
 		info("Oversubscribing resources is not supported on Cray/ALPS systems");
 		opt.shared = false;
 	}
@@ -1655,16 +1673,16 @@ static bool _opt_verify(void)
 		info("Oversubscribing is not supported on Cray.");
 		opt.overcommit = false;
 	}
-	if (!opt.wait_all_nodes)
+	if (!saopt.wait_all_nodes)
 		info("Cray needs --wait-all-nodes to wait on ALPS reservation");
-	opt.wait_all_nodes = 1;
-	if (opt.kill_command_signal_set) {
+	saopt.wait_all_nodes = 1;
+	if (saopt.kill_command_signal_set) {
 		/*
 		 * Disabled to avoid that the user supplies a weaker signal that
 		 * could cause the child processes not to terminate.
 		 */
 		info("The --kill-command is not supported on Cray.");
-		opt.kill_command_signal_set = false;
+		saopt.kill_command_signal_set = false;
 	}
 #endif
 
@@ -1683,11 +1701,11 @@ static bool _opt_verify(void)
 		verified = false;
 	}
 
-	if ((opt.realmem > -1) && (opt.mem_per_cpu > -1)) {
-		if (opt.realmem < opt.mem_per_cpu) {
+	if ((opt.pn_min_memory > -1) && (opt.mem_per_cpu > -1)) {
+		if (opt.pn_min_memory < opt.mem_per_cpu) {
 			info("mem < mem-per-cpu - resizing mem to be equal "
 			     "to mem-per-cpu");
-			opt.realmem = opt.mem_per_cpu;
+			opt.pn_min_memory = opt.mem_per_cpu;
 		}
 	}
 
@@ -1861,11 +1879,11 @@ static bool _opt_verify(void)
 	cpu_freq_set_env("SLURM_CPU_FREQ_REQ",
 			opt.cpu_freq_min, opt.cpu_freq_max, opt.cpu_freq_gov);
 
-	if (opt.wait_all_nodes == (uint16_t) NO_VAL) {
+	if (saopt.wait_all_nodes == NO_VAL16) {
 		char *sched_params;
 		sched_params = slurm_get_sched_params();
 		if (sched_params && strstr(sched_params, "salloc_wait_nodes"))
-			opt.wait_all_nodes = 1;
+			saopt.wait_all_nodes = 1;
 		xfree(sched_params);
 	}
 
@@ -2011,17 +2029,17 @@ static char *print_constraints()
 {
 	char *buf = xstrdup("");
 
-	if (opt.mincpus > 0)
-		xstrfmtcat(buf, "mincpus=%d ", opt.mincpus);
+	if (opt.pn_min_cpus > 0)
+		xstrfmtcat(buf, "mincpus=%d ", opt.pn_min_cpus);
 
-	if (opt.realmem > 0)
-		xstrfmtcat(buf, "mem=%"PRIi64"M ", opt.realmem);
+	if (opt.pn_min_memory > 0)
+		xstrfmtcat(buf, "mem=%"PRIi64"M ", opt.pn_min_memory);
 
 	if (opt.mem_per_cpu > 0)
 		xstrfmtcat(buf, "mem-per-cpu=%"PRIi64"M ", opt.mem_per_cpu);
 
-	if (opt.tmpdisk > 0)
-		xstrfmtcat(buf, "tmp=%ld ", opt.tmpdisk);
+	if (opt.pn_min_tmp_disk > 0)
+		xstrfmtcat(buf, "tmp=%ld ", opt.pn_min_tmp_disk);
 
 	if (opt.contiguous == true)
 		xstrcat(buf, "contiguous ");
@@ -2102,7 +2120,7 @@ static void _opt_list(void)
 	str = print_constraints();
 	info("constraints    : %s", str);
 	xfree(str);
-	if (opt.conn_type[0] != (uint16_t) NO_VAL) {
+	if (opt.conn_type[0] != NO_VAL16) {
 		str = conn_type_string_full(opt.conn_type);
 		info("conn_type      : %s", str);
 		xfree(str);
@@ -2138,7 +2156,7 @@ static void _opt_list(void)
 	info("ntasks-per-socket : %d", opt.ntasks_per_socket);
 	info("ntasks-per-core   : %d", opt.ntasks_per_core);
 	info("plane_size        : %u", opt.plane_size);
-	info("mem_bind          : %s",
+	info("mem-bind          : %s",
 	     opt.mem_bind == NULL ? "default" : opt.mem_bind);
 	str = print_commandline(command_argc, command_argv);
 	info("user command   : `%s'", str);
@@ -2147,14 +2165,14 @@ static void _opt_list(void)
 	info("cpu_freq_gov   : %u", opt.cpu_freq_gov);
 	info("switches          : %d", opt.req_switch);
 	info("wait-for-switches : %d", opt.wait4switch);
-	if (opt.core_spec == (uint16_t) NO_VAL)
+	if (opt.core_spec == NO_VAL16)
 		info("core-spec         : NA");
 	else if (opt.core_spec & CORE_SPEC_THREAD) {
 		info("thread-spec       : %d",
 		     opt.core_spec & (~CORE_SPEC_THREAD));
 	} else
 		info("core-spec         : %d", opt.core_spec);
-	info("burst_buffer      : `%s'", opt.burst_buffer);
+	info("burst_buffer      : `%s'", saopt.burst_buffer);
 	if (opt.mcs_label)
 		info("mcs-label         : %s",opt.mcs_label);
 	xfree(str);
@@ -2181,7 +2199,7 @@ static void _usage(void)
 "              [--bell] [--no-bell] [--kill-command[=signal]] [--spread-job]\n"
 "              [--nodefile=file] [--nodelist=hosts] [--exclude=hosts]\n"
 "              [--network=type] [--mem-per-cpu=MB] [--qos=qos]\n"
-"              [--mem_bind=...] [--reservation=name] [--mcs-label=mcs]\n"
+"              [--mem-bind=...] [--reservation=name] [--mcs-label=mcs]\n"
 "              [--time-min=minutes] [--gres=list] [--gres-flags=opts]\n"
 "              [--cpu-freq=min[-max[:gov]] [--power=flags] [--profile=...]\n"
 "              [--switches=max-switches[@max-time-to-wait]]\n"
@@ -2301,8 +2319,8 @@ static void _help(void)
 		printf(
 "      --hint=                 Bind tasks according to application hints\n"
 "                              (see \"--hint=help\" for options)\n"
-"      --mem_bind=             Bind memory to locality domains (ldom)\n"
-"                              (see \"--mem_bind=help\" for options)\n");
+"      --mem-bind=             Bind memory to locality domains (ldom)\n"
+"                              (see \"--mem-bind=help\" for options)\n");
 	}
 	slurm_conf_unlock();
 

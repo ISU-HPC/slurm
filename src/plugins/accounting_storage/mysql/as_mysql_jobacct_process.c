@@ -99,6 +99,7 @@ char *job_req_inx[] = {
 	"t1.tres_alloc",
 	"t1.tres_req",
 	"t1.work_dir",
+	"t1.mcs_label",
 	"t2.acct",
 	"t2.lft",
 	"t2.user"
@@ -150,6 +151,7 @@ enum {
 	JOB_REQ_TRESA,
 	JOB_REQ_TRESR,
 	JOB_REQ_WORK_DIR,
+	JOB_REQ_MCS_LABEL,
 	JOB_REQ_ACCOUNT,
 	JOB_REQ_LFT,
 	JOB_REQ_USER_NAME,
@@ -262,14 +264,22 @@ enum {
 static void _state_time_string(char **extra, char *cluster_name, uint32_t state,
 			       uint32_t start, uint32_t end)
 {
-	int base_state = state & JOB_STATE_BASE;
+	int base_state = state;
 
 	if (!start && !end) {
 		xstrfmtcat(*extra, "t1.state='%u'", state);
 		return;
 	}
 
- 	switch(base_state) {
+	switch(state) {
+	case JOB_RESIZING:
+	case JOB_REQUEUE:
+		break;
+	default:
+		base_state = state & JOB_STATE_BASE;
+	}
+
+	switch(base_state) {
 	case JOB_PENDING:
 		if (start) {
 			if (!end) {
@@ -340,7 +350,8 @@ static void _state_time_string(char **extra, char *cluster_name, uint32_t state,
 	case JOB_PREEMPTED:
 	case JOB_DEADLINE:
 	default:
-		xstrfmtcat(*extra, "(t1.state='%u' && (t1.time_end && ", state);
+		xstrfmtcat(*extra, "(t1.state='%u' && (t1.time_end && ",
+			   base_state);
 		if (start) {
 			if (!end) {
 				xstrfmtcat(*extra, "(t1.time_end >= %d)))",
@@ -579,7 +590,10 @@ static int _cluster_get_jobs(mysql_conn_t *mysql_conn,
 		else
 			job->wckey = xstrdup("");
 		job->wckeyid = slurm_atoul(row[JOB_REQ_WCKEYID]);
-
+		if (row[JOB_REQ_MCS_LABEL])
+			job->mcs_label = xstrdup(row[JOB_REQ_MCS_LABEL]);
+		else
+			job->mcs_label = xstrdup("");
 		if (row[JOB_REQ_USER_NAME])
 			job->user = xstrdup(row[JOB_REQ_USER_NAME]);
 		else
@@ -1118,8 +1132,8 @@ extern List setup_cluster_list_with_inx(mysql_conn_t *mysql_conn,
 		local_cluster->asked_bitmap =
 			bit_alloc(hostlist_count(local_cluster->hl));
 		while ((host = hostlist_next_dims(h_itr, dims))) {
-			if ((loc = hostlist_find(
-				     local_cluster->hl, host)) != -1)
+			if ((loc = hostlist_find_dims(
+				     local_cluster->hl, host, dims)) != -1)
 				bit_set(local_cluster->asked_bitmap, loc);
 			free(host);
 		}
@@ -1166,14 +1180,14 @@ extern int good_nodes_from_inx(List local_cluster_list,
 		if (!node_inx || !node_inx[0])
 			return 0;
 		if ((start < (*curr_cluster)->start)
-		    || (start > (*curr_cluster)->end)) {
+		    || (start >= (*curr_cluster)->end)) {
 			local_cluster_t *local_cluster = NULL;
 
 			ListIterator itr =
 				list_iterator_create(local_cluster_list);
 			while ((local_cluster = list_next(itr))) {
 				if ((start >= local_cluster->start)
-				    && (start <= local_cluster->end)) {
+				    && (start < local_cluster->end)) {
 					*curr_cluster = local_cluster;
 					break;
 				}

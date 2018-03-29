@@ -221,8 +221,10 @@ extern int slurm_send_slurmdbd_recv_rc_msg(uint16_t rpc_version,
 	} else {	/* resp.msg_type == PERSIST_RC */
 		persist_rc_msg_t *msg = resp.data;
 		*resp_code = msg->rc;
-		if (msg->rc != SLURM_SUCCESS
-		    && msg->rc != ACCOUNTING_FIRST_REG) {
+		if (msg->rc != SLURM_SUCCESS &&
+		    msg->rc != ACCOUNTING_FIRST_REG &&
+		    msg->rc != ACCOUNTING_TRES_CHANGE_DB &&
+		    msg->rc != ACCOUNTING_NODES_CHANGE_DB) {
 			char *comment = msg->comment;
 			if (!comment)
 				comment = slurm_strerror(msg->rc);
@@ -443,6 +445,7 @@ static void _open_slurmdbd_conn(bool need_db)
 		slurmdbd_conn = xmalloc(sizeof(slurm_persist_conn_t));
 		slurmdbd_conn->flags =
 			PERSIST_FLAG_DBD | PERSIST_FLAG_RECONNECT;
+		slurmdbd_conn->persist_type = PERSIST_TYPE_DBD;
 		slurmdbd_conn->cluster_name = xstrdup(slurmdbd_cluster);
 
 		slurmdbd_conn->timeout = (slurm_get_msg_timeout() + 35) * 1000;
@@ -1097,6 +1100,9 @@ extern slurmdbd_msg_type_t str_2_slurmdbd_msg_type(char *msg_type)
 		return DBD_SEND_MULT_MSG;
 	} else if (!xstrcasecmp(msg_type, "Got Multiple Message Returns")) {
 		return DBD_GOT_MULT_MSG;
+	} else if (!xstrcasecmp(msg_type,
+				"Persistent Connection Initialization")) {
+		return SLURM_PERSIST_INIT;
 	} else {
 		return NO_VAL;
 	}
@@ -1654,6 +1660,12 @@ extern char *slurmdbd_msg_type_2_str(slurmdbd_msg_type_t msg_type, int get_enum)
 			return "DBD_SHUTDOWN";
 		} else
 			return "Shutdown daemon";
+		break;
+	case SLURM_PERSIST_INIT:
+		if (get_enum) {
+			return "SLURM_PERSIST_INIT";
+		} else
+			return "Persistent Connection Initialization";
 		break;
 	default:
 		snprintf(unk_str, sizeof(unk_str), "MsgType=%d", msg_type);
@@ -2670,6 +2682,7 @@ extern void slurmdbd_free_job_start_msg(void *in)
 		xfree(msg->gres_alloc);
 		xfree(msg->gres_req);
 		xfree(msg->gres_used);
+		xfree(msg->mcs_label);
 		xfree(msg->name);
 		xfree(msg->nodes);
 		xfree(msg->node_inx);
@@ -3340,6 +3353,7 @@ slurmdbd_pack_job_start_msg(void *in,
 		packstr(msg->gres_used, buffer);
 		pack32(msg->job_id, buffer);
 		pack32(msg->job_state, buffer);
+		packstr(msg->mcs_label, buffer);
 		packstr(msg->name, buffer);
 		packstr(msg->nodes, buffer);
 		packstr(msg->node_inx, buffer);
@@ -3463,6 +3477,7 @@ slurmdbd_unpack_job_start_msg(void **msg,
 				       buffer);
 		safe_unpack32(&msg_ptr->job_id, buffer);
 		safe_unpack32(&msg_ptr->job_state, buffer);
+		safe_unpackstr_xmalloc(&msg_ptr->mcs_label, &uint32_tmp, buffer);
 		safe_unpackstr_xmalloc(&msg_ptr->name, &uint32_tmp, buffer);
 		safe_unpackstr_xmalloc(&msg_ptr->nodes, &uint32_tmp, buffer);
 		safe_unpackstr_xmalloc(&msg_ptr->node_inx, &uint32_tmp, buffer);
@@ -4519,4 +4534,11 @@ unpack_error:
 	*out = NULL;
 	return SLURM_ERROR;
 
+}
+
+extern int slurmdbd_agent_queue_count()
+{
+	if (!agent_list)
+		return 0;
+	return list_count(agent_list);
 }

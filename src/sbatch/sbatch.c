@@ -84,13 +84,18 @@ int main(int argc, char **argv)
 	submit_response_msg_t *resp = NULL;
 	char *script_name;
 	char *script_body;
-	char *line = NULL, *buf = NULL, *ptrptr = NULL;
 	char **pack_argv;
 	int script_size = 0, pack_argc, pack_argc_off = 0, pack_inx;
 	int i, rc = SLURM_SUCCESS, retries = 0;
 	bool pack_fini = false;
 	List job_env_list = NULL, job_req_list = NULL;
 	sbatch_env_t *local_env = NULL;
+
+	/* force line-buffered output on non-tty outputs */
+	if (!isatty(STDOUT_FILENO))
+		setvbuf(stdout, NULL, _IOLBF, 0);
+	if (!isatty(STDERR_FILENO))
+		setvbuf(stderr, NULL, _IOLBF, 0);
 
 	slurm_conf_init(NULL);
 	log_init(xbasename(argv[0]), logopt, 0, NULL);
@@ -116,15 +121,15 @@ int main(int argc, char **argv)
 		log_alter(logopt, 0, NULL);
 	}
 
-	if (opt.wrap != NULL) {
-		script_body = _script_wrap(opt.wrap);
+	if (sbopt.wrap != NULL) {
+		script_body = _script_wrap(sbopt.wrap);
 	} else {
 		script_body = _get_script_buffer(script_name, &script_size);
 	}
 	if (script_body == NULL)
 		exit(error_exit);
 
-	pack_argc = argc - opt.script_argc;
+	pack_argc = argc - sbopt.script_argc;
 	pack_argv = argv;
 	for (pack_inx = 0; !pack_fini; pack_inx++) {
 		bool more_packs = false;
@@ -143,8 +148,8 @@ int main(int argc, char **argv)
 			pack_fini = true;
 		}
 
-		if (opt.burst_buffer_file)
-			_add_bb_to_script(&script_body, opt.burst_buffer_file);
+		if (sbopt.burst_buffer_file)
+			_add_bb_to_script(&script_body, sbopt.burst_buffer_file);
 
 		if (spank_init_post_opt() < 0) {
 			error("Plugin stack post-option processing failed");
@@ -162,7 +167,7 @@ int main(int argc, char **argv)
 		 * if the environment is coming from a file, the
 		 * environment at execution startup, must be unset.
 		 */
-		if (opt.export_file != NULL)
+		if (sbopt.export_file != NULL)
 			env_unset_environment();
 
 		_set_prio_process_env();
@@ -230,7 +235,7 @@ int main(int argc, char **argv)
 	if (_check_cluster_specific_settings(desc) != SLURM_SUCCESS)
 		exit(error_exit);
 
-	if (opt.test_only) {
+	if (sbopt.test_only) {
 		if (job_req_list)
 			rc = slurm_pack_job_will_run(job_req_list);
 		else
@@ -280,17 +285,9 @@ int main(int argc, char **argv)
 		exit(error_exit);
 	}
 
-	if (resp->job_submit_user_msg) {
-		buf = xstrdup(resp->job_submit_user_msg);
-		line = strtok_r(buf, "\n", &ptrptr);
-		while (line) {
-			info("%s", line);
-			line = strtok_r(NULL, "\n", &ptrptr);
-		}
-		xfree(buf);
-	}
+	print_multi_line_string(resp->job_submit_user_msg, -1);
 
-	if (!opt.parsable) {
+	if (!sbopt.parsable) {
 		printf("Submitted batch job %u", resp->job_id);
 		if (working_cluster_rec)
 			printf(" on cluster %s", working_cluster_rec->name);
@@ -301,7 +298,7 @@ int main(int argc, char **argv)
 			printf(";%s", working_cluster_rec->name);
 		printf("\n");
 	}
-	if (opt.wait)
+	if (sbopt.wait)
 		rc = _job_wait(resp->job_id);
 
 	return rc;
@@ -388,8 +385,8 @@ static int _job_wait(uint32_t job_id)
 			error("Job %u no longer found and exit code not found",
 			      job_id);
 		} else {
-			error("Currently unable to load job state "
-			      "information, retrying: %m");
+			complete = false;
+			error("Currently unable to load job state information, retrying: %m");
 		}
 	}
 
@@ -398,8 +395,8 @@ static int _job_wait(uint32_t job_id)
 
 static char *_find_quote_token(char *tmp, char *sep, char **last)
 {
-	char *start, *quote_single = 0, *quote_double = 0;
-	int i;
+	char *start;
+	int i, quote_single = 0, quote_double = 0;
 
 	xassert(last);
 	if (*last)
@@ -452,7 +449,7 @@ static void _env_merge_filter(job_desc_msg_t *desc)
 	int i, len;
 	char *save_env[2] = { NULL, NULL }, *tmp, *tok, *last = NULL;
 
-	tmp = xstrdup(opt.export_env);
+	tmp = xstrdup(sbopt.export_env);
 	tok = _find_quote_token(tmp, ",", &last);
 	while (tok) {
 
@@ -501,20 +498,20 @@ static int _check_cluster_specific_settings(job_desc_msg_t *req)
 		/*
 		 * Fix options and inform user, but do not abort submission.
 		 */
-		if (req->shared && (req->shared != (uint16_t)NO_VAL)) {
+		if (req->shared && (req->shared != NO_VAL16)) {
 			info("--share is not supported on Cray/ALPS systems.");
-			req->shared = (uint16_t)NO_VAL;
+			req->shared = NO_VAL16;
 		}
-		if (req->overcommit && (req->overcommit != (uint8_t)NO_VAL)) {
+		if (req->overcommit && (req->overcommit != NO_VAL8)) {
 			info("--overcommit is not supported on Cray/ALPS "
 			     "systems.");
 			req->overcommit = false;
 		}
 		if (req->wait_all_nodes &&
-		    (req->wait_all_nodes != (uint16_t)NO_VAL)) {
+		    (req->wait_all_nodes != NO_VAL16)) {
 			info("--wait-all-nodes is handled automatically on "
 			     "Cray/ALPS systems.");
-			req->wait_all_nodes = (uint16_t)NO_VAL;
+			req->wait_all_nodes = NO_VAL16;
 		}
 	}
 	return rc;
@@ -548,6 +545,7 @@ static int _fill_job_desc_from_opts(job_desc_msg_t *desc)
 	}
 
 	desc->req_nodes = xstrdup(opt.nodelist);
+	desc->extra = xstrdup(opt.extra);
 	desc->exc_nodes = xstrdup(opt.exc_nodes);
 	desc->partition = xstrdup(opt.partition);
 	desc->profile = opt.profile;
@@ -566,8 +564,8 @@ static int _fill_job_desc_from_opts(job_desc_msg_t *desc)
 	if (opt.dependency)
 		desc->dependency = xstrdup(opt.dependency);
 
-	if (opt.array_inx)
-		desc->array_inx = xstrdup(opt.array_inx);
+	if (sbopt.array_inx)
+		desc->array_inx = xstrdup(sbopt.array_inx);
 	if (opt.mem_bind)
 		desc->mem_bind       = xstrdup(opt.mem_bind);
 	if (opt.mem_bind_type)
@@ -601,7 +599,7 @@ static int _fill_job_desc_from_opts(job_desc_msg_t *desc)
 	if (opt.hold)
 		desc->priority     = 0;
 
-	if (opt.geometry[0] != (uint16_t) NO_VAL) {
+	if (opt.geometry[0] != NO_VAL16) {
 		int dims = slurmdb_setup_cluster_dims();
 
 		for (i = 0; i < dims; i++)
@@ -624,14 +622,14 @@ static int _fill_job_desc_from_opts(job_desc_msg_t *desc)
 		desc->ramdiskimage = xstrdup(opt.ramdiskimage);
 
 	/* job constraints */
-	if (opt.mincpus > -1)
-		desc->pn_min_cpus = opt.mincpus;
-	if (opt.realmem > -1)
-		desc->pn_min_memory = opt.realmem;
+	if (opt.pn_min_cpus > -1)
+		desc->pn_min_cpus = opt.pn_min_cpus;
+	if (opt.pn_min_memory > -1)
+		desc->pn_min_memory = opt.pn_min_memory;
 	else if (opt.mem_per_cpu > -1)
 		desc->pn_min_memory = opt.mem_per_cpu | MEM_PER_CPU;
-	if (opt.tmpdisk > -1)
-		desc->pn_min_tmp_disk = opt.tmpdisk;
+	if (opt.pn_min_tmp_disk > -1)
+		desc->pn_min_tmp_disk = opt.pn_min_tmp_disk;
 	if (opt.overcommit) {
 		desc->min_cpus = MAX(opt.min_nodes, 1);
 		desc->overcommit = opt.overcommit;
@@ -668,7 +666,7 @@ static int _fill_job_desc_from_opts(job_desc_msg_t *desc)
 	if (opt.shared != NO_VAL16)
 		desc->shared = opt.shared;
 
-	desc->wait_all_nodes = opt.wait_all_nodes;
+	desc->wait_all_nodes = sbopt.wait_all_nodes;
 	if (opt.warn_flags)
 		desc->warn_flags = opt.warn_flags;
 	if (opt.warn_signal)
@@ -677,16 +675,16 @@ static int _fill_job_desc_from_opts(job_desc_msg_t *desc)
 		desc->warn_time = opt.warn_time;
 
 	desc->environment = NULL;
-	if (opt.export_file) {
-		desc->environment = env_array_from_file(opt.export_file);
+	if (sbopt.export_file) {
+		desc->environment = env_array_from_file(sbopt.export_file);
 		if (desc->environment == NULL)
 			exit(1);
 	}
-	if (opt.export_env == NULL) {
+	if (sbopt.export_env == NULL) {
 		env_array_merge(&desc->environment, (const char **) environ);
-	} else if (!xstrcasecmp(opt.export_env, "ALL")) {
+	} else if (!xstrcasecmp(sbopt.export_env, "ALL")) {
 		env_array_merge(&desc->environment, (const char **) environ);
-	} else if (!xstrcasecmp(opt.export_env, "NONE")) {
+	} else if (!xstrcasecmp(sbopt.export_env, "NONE")) {
 		desc->environment = env_array_create();
 		env_array_merge_slurm(&desc->environment,
 				      (const char **)environ);
@@ -708,23 +706,23 @@ static int _fill_job_desc_from_opts(job_desc_msg_t *desc)
 
 	desc->env_size = envcount(desc->environment);
 
-	desc->argc     = opt.script_argc;
-	desc->argv     = xmalloc(sizeof(char *) * opt.script_argc);
-	for (i = 0; i < opt.script_argc; i++)
-		desc->argv[i] = xstrdup(opt.script_argv[i]);
-	desc->std_err  = xstrdup(opt.efname);
-	desc->std_in   = xstrdup(opt.ifname);
-	desc->std_out  = xstrdup(opt.ofname);
+	desc->argc     = sbopt.script_argc;
+	desc->argv     = xmalloc(sizeof(char *) * sbopt.script_argc);
+	for (i = 0; i < sbopt.script_argc; i++)
+		desc->argv[i] = xstrdup(sbopt.script_argv[i]);
+	desc->std_err  = xstrdup(sbopt.efname);
+	desc->std_in   = xstrdup(sbopt.ifname);
+	desc->std_out  = xstrdup(sbopt.ofname);
 	desc->work_dir = xstrdup(opt.cwd);
-	if (opt.requeue != NO_VAL)
-		desc->requeue = opt.requeue;
-	if (opt.open_mode)
-		desc->open_mode = opt.open_mode;
+	if (sbopt.requeue != NO_VAL)
+		desc->requeue = sbopt.requeue;
+	if (sbopt.open_mode)
+		desc->open_mode = sbopt.open_mode;
 	if (opt.acctg_freq)
 		desc->acctg_freq = xstrdup(opt.acctg_freq);
 
-	desc->ckpt_dir = opt.ckpt_dir;
-	desc->ckpt_interval = (uint16_t) opt.ckpt_interval;
+	desc->ckpt_dir = sbopt.ckpt_dir;
+	desc->ckpt_interval = (uint16_t) sbopt.ckpt_interval;
 
 	if (opt.spank_job_env_size) {
 		desc->spank_job_env_size = opt.spank_job_env_size;
@@ -808,8 +806,8 @@ static int _set_umask_env(void)
 	if (getenv("SLURM_UMASK"))	/* use this value */
 		return SLURM_SUCCESS;
 
-	if (opt.umask >= 0) {
-		mask = opt.umask;
+	if (sbopt.umask >= 0) {
+		mask = sbopt.umask;
 	} else {
 		mask = (int)umask(0);
 		umask(mask);
@@ -1009,8 +1007,8 @@ static int _set_rlimit_env(void)
 	slurm_conf_unlock();
 
 	/* Modify limits with any command-line options */
-	if (opt.propagate && parse_rlimits( opt.propagate, PROPAGATE_RLIMITS)){
-		error("--propagate=%s is not valid.", opt.propagate);
+	if (sbopt.propagate && parse_rlimits( sbopt.propagate, PROPAGATE_RLIMITS)){
+		error("--propagate=%s is not valid.", sbopt.propagate);
 		exit(error_exit);
 	}
 
@@ -1027,7 +1025,7 @@ static int _set_rlimit_env(void)
 
 		cur = (unsigned long) rlim->rlim_cur;
 		snprintf(name, sizeof(name), "SLURM_RLIMIT_%s", rli->name);
-		if (opt.propagate && rli->propagate_flag == PROPAGATE_RLIMITS)
+		if (sbopt.propagate && rli->propagate_flag == PROPAGATE_RLIMITS)
 			/*
 			 * Prepend 'U' to indicate user requested propagate
 			 */

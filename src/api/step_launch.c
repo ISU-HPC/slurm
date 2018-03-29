@@ -104,24 +104,6 @@ static uid_t  slurm_uid;
 static bool   force_terminated_job = false;
 static int    task_exit_signal = 0;
 
-#ifdef HAVE_NATIVE_CRAY
-/* On a Cray we need to validate the gid
- * before the launch of the tasks.  Since a native
- * Cray really isn't a cluster but a distributed system this should
- * be ok.
- * This could be hacked by a user, but the only damage they
- * could really do is set SLURM_USER_NAME to be something
- * other than the actual name.  Running any getpwXXX commands
- * on a cray compute node is not scalable and could
- * potentially cause all sorts of issues and timeouts when
- * talking with LDAP or NIS when done on the compute node.  We
- * have not seen this issue on a regular cluster, so we do
- * the validating there instead when not on a Cray.
- */
-static bool   validate_gid = true;
-#else
-static bool   validate_gid = false;
-#endif
 static void _exec_prog(slurm_msg_t *msg);
 static int  _msg_thr_create(struct step_launch_state *sls, int num_nodes);
 static void _handle_msg(void *arg, slurm_msg_t *msg);
@@ -261,6 +243,7 @@ extern int slurm_step_launch(slurm_step_ctx_t *ctx,
 	if (params->pack_jobid && (params->pack_jobid != NO_VAL))
 		_rebuild_mpi_layout(ctx, params);
 
+	mpi_env = xmalloc(sizeof(char *));  /* Needed for setenvf used by MPI */
 	if ((ctx->launch_state->mpi_state =
 	     mpi_hook_client_prelaunch(ctx->launch_state->mpi_info, &mpi_env))
 	    == NULL) {
@@ -278,10 +261,6 @@ extern int slurm_step_launch(slurm_step_ctx_t *ctx,
 	launch.job_id = ctx->step_req->job_id;
 	launch.uid = ctx->step_req->user_id;
 	launch.gid = params->gid;
-	if (!slurm_valid_uid_gid((uid_t)launch.uid, &launch.gid,
-				 &launch.user_name, 0, validate_gid)) {
-		return SLURM_ERROR;
-	}
 	launch.argc = params->argc;
 	launch.argv = params->argv;
 	launch.spank_job_env = params->spank_job_env;
@@ -486,9 +465,6 @@ extern int slurm_step_launch_add(slurm_step_ctx_t *ctx,
 	launch.job_id = ctx->step_req->job_id;
 	launch.uid = ctx->step_req->user_id;
 	launch.gid = params->gid;
-	if (!slurm_valid_uid_gid((uid_t)launch.uid, &launch.gid,
-				 &launch.user_name, 0, validate_gid))
-		return SLURM_ERROR;
 	launch.argc = params->argc;
 	launch.argv = params->argv;
 	launch.spank_job_env = params->spank_job_env;
@@ -809,7 +785,8 @@ void slurm_step_launch_wait_finish(slurm_step_ctx_t *ctx)
 	}
 
 	/* Then shutdown the message handler thread */
-	eio_signal_shutdown(sls->msg_handle);
+	if (sls->msg_handle)
+		eio_signal_shutdown(sls->msg_handle);
 
 	slurm_mutex_unlock(&sls->lock);
 	if (sls->msg_thread)
@@ -958,12 +935,13 @@ RESEND:	slurm_msg_t_init(&req);
 		 */
 		if ((rc != 0) && (rc != ESLURM_INVALID_JOB_ID) &&
 		    (rc != ESLURMD_JOB_NOTRUNNING) && (rc != ESRCH) &&
-		    (rc != EAGAIN)) {
+		    (rc != EAGAIN) &&
+		    (rc != ESLURM_TRANSITION_STATE_NO_UPDATE)) {
 			error("Failure sending signal %d to step %u.%u on node %s: %s",
 			      signo, ctx->job_id, ctx->step_resp->job_step_id,
 			      ret_data_info->node_name, slurm_strerror(rc));
 		}
-		if (rc == EAGAIN)
+		if ((rc == EAGAIN) || (rc == ESLURM_TRANSITION_STATE_NO_UPDATE))
 			retry = true;
 	}
 	list_iterator_destroy(itr);
@@ -1446,6 +1424,7 @@ _step_missing_handler(struct step_launch_state *sls, slurm_msg_t *missing_msg)
 	slurm_mutex_lock(&sls->lock);
 
 	if (!sls->io_timeout_thread_created) {
+		sls->io_timeout_thread_created = true;
 		slurm_thread_create(&sls->io_timeout_thread,
 				    _check_io_timeout, sls);
 	}

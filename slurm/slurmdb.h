@@ -236,6 +236,7 @@ typedef struct {
 
 	List def_qos_id_list;   /* list of char * */
 
+	List format_list; 	/* list of char * */
 	List id_list;		/* list of char */
 
 	uint16_t only_defs;  /* only send back defaults */
@@ -270,6 +271,7 @@ typedef struct {
 	uint32_t cpus_min;      /* number of cpus low range */
 	uint16_t duplicates;    /* report duplicate job entries */
 	int32_t exitcode;       /* exit code of job */
+	List format_list; 	/* list of char * */
 	List groupid_list;	/* list of char * */
 	List jobname_list;	/* list of char * */
 	uint32_t nodes_max;     /* number of nodes high range */
@@ -398,6 +400,7 @@ typedef struct {
 typedef struct {
 	uint64_t count;  /* Count of tres on a given cluster, 0 if
 			    listed generically. */
+	List format_list;/* list of char * */
 	List id_list;    /* Database ID */
 	List name_list;  /* Name of tres if type is generic like GRES
 			    or License. */
@@ -587,6 +590,7 @@ typedef struct {
 	List cluster_list; /* list of char * */
 	List federation_list; /* list of char */
 	uint32_t flags;
+	List format_list; 	/* list of char * */
 	List plugin_id_select_list; /* list of char * */
 	List rpc_version_list; /* list of char * */
 	time_t usage_end;
@@ -668,6 +672,7 @@ typedef struct {
 	uint32_t cpus_min;      /* number of cpus low range */
 	uint16_t event_type;    /* type of events (slurmdb_event_type_t),
 				 * default is all */
+	List format_list; 	/* list of char * */
 	List node_list;	        /* list of char * */
 	time_t period_end;      /* period end of events */
 	time_t period_start;    /* period start of events */
@@ -693,8 +698,9 @@ typedef struct {
 } slurmdb_event_rec_t;
 
 typedef struct {
-	List federation_list; 	/* list of char * */
 	List cluster_list; 	/* list of char * */
+	List federation_list; 	/* list of char * */
+	List format_list; 	/* list of char * */
 	uint16_t with_deleted;
 } slurmdb_federation_cond_t;
 
@@ -740,6 +746,7 @@ typedef struct {
 	uint32_t jobid;
 	char	*jobname;
 	uint32_t lft;
+	char 	*mcs_label;
 	char	*nodes;
 	char	*partition;
 	uint32_t pack_job_id;
@@ -927,6 +934,7 @@ typedef struct {
 typedef struct {
 	List description_list; /* list of char * */
 	List id_list; /* list of char * */
+	List format_list;/* list of char * */
 	List name_list; /* list of char * */
 	uint16_t preempt_mode;	/* See PREEMPT_MODE_* in slurm/slurm.h */
 	uint16_t with_deleted;
@@ -935,7 +943,8 @@ typedef struct {
 typedef struct {
 	List cluster_list; /* cluster reservations are on list of
 			    * char * */
-	uint16_t flags; /* flags for reservation. */
+	uint32_t flags; /* flags for reservation. */
+	List format_list;/* list of char * */
 	List id_list;   /* ids of reservations. list of char * */
 	List name_list; /* name of reservations. list of char * */
 	char *nodes; /* list of nodes in reservation */
@@ -958,6 +967,7 @@ typedef struct {
 				 * the pervious start time.  Needed
 				 * for accounting */
 	char *tres_str;
+	double unused_wall; /* amount of seconds this reservation wasn't used */
 	List tres_list; /* list of slurmdb_tres_rec_t, only set when
 			 * job usage is requested.
 			 */
@@ -1005,6 +1015,7 @@ typedef struct {
 	List cluster_list; /* list of char * */
 	List description_list; /* list of char * */
 	uint32_t flags;
+	List format_list;/* list of char * */
 	List id_list; /* list of char * */
 	List manager_list; /* list of char * */
 	List name_list; /* list of char * */
@@ -1035,6 +1046,7 @@ typedef struct {
 	List action_list; /* list of char * */
 	List actor_list; /* list of char * */
 	List cluster_list; /* list of char * */
+	List format_list;/* list of char * */
 	List id_list; /* list of char * */
 	List info_list; /* list of char * */
 	List name_list; /* list of char * */
@@ -1111,6 +1123,7 @@ typedef struct {
 
 typedef struct {
 	List cluster_list;	/* list of char * */
+	List format_list;	/* list of char * */
 	List id_list;		/* list of char * */
 
 	List name_list;         /* list of char * */
@@ -1445,6 +1458,13 @@ extern void *slurmdb_connection_get();
  */
 extern int slurmdb_connection_close(void **db_conn);
 
+/*
+ * commit or rollback changes made without closing connection
+ * IN: void * pointer returned from slurmdb_connection_get()
+ * IN: bool - true will commit changes false will rollback
+ * RET: SLURM_SUCCESS on success SLURM_ERROR else
+ */
+extern int slurmdb_connection_commit(void *db_conn, bool commit);
 
 /************** coordinator functions **************/
 
@@ -1467,6 +1487,81 @@ extern int slurmdb_coord_add(void *db_conn,
  */
 extern List slurmdb_coord_remove(void *db_conn, List acct_list,
 				 slurmdb_user_cond_t *user_cond);
+
+/*************** Federation functions **************/
+
+/*
+ * add federations to accounting system
+ * IN:  list List of slurmdb_federation_rec_t *
+ * RET: SLURM_SUCCESS on success SLURM_ERROR else
+ */
+extern int slurmdb_federations_add(void *db_conn, List federation_list);
+
+/*
+ * modify existing federations in the accounting system
+ * IN:  slurmdb_federation_cond_t *fed_cond
+ * IN:  slurmdb_federation_rec_t  *fed
+ * RET: List containing (char *'s) else NULL on error
+ */
+extern List slurmdb_federations_modify(void *db_conn,
+				       slurmdb_federation_cond_t *fed_cond,
+				       slurmdb_federation_rec_t *fed);
+
+/*
+ * remove federations from accounting system
+ * IN:  slurmdb_federation_cond_t *fed_cond
+ * RET: List containing (char *'s) else NULL on error
+ */
+extern List slurmdb_federations_remove(void *db_conn,
+				       slurmdb_federation_cond_t *fed_cond);
+
+/*
+ * get info from the storage
+ * IN:  slurmdb_federation_cond_t *
+ * RET: List of slurmdb_federation_rec_t *
+ * note List needs to be freed when called
+ */
+extern List slurmdb_federations_get(void *db_conn,
+				    slurmdb_federation_cond_t *fed_cond);
+
+/*************** Job functions **************/
+
+/*
+ * modify existing job in the accounting system
+ * IN:  slurmdb_job_modify_cond_t *job_cond
+ * IN:  slurmdb_job_rec_t *job
+ * RET: List containing (char *'s) else NULL on error
+ */
+extern List slurmdb_job_modify(void *db_conn,
+			       slurmdb_job_modify_cond_t *job_cond,
+			       slurmdb_job_rec_t *job);
+
+/*
+ * get info from the storage
+ * returns List of slurmdb_job_rec_t *
+ * note List needs to be freed with slurm_list_destroy() when called
+ */
+extern List slurmdb_jobs_get(void *db_conn, slurmdb_job_cond_t *job_cond);
+
+/*
+ * Fix runaway jobs
+ * IN: jobs, a list of all the runaway jobs
+ * RET: SLURM_SUCCESS on success SLURM_ERROR else
+ */
+extern int slurmdb_jobs_fix_runaway(void *db_conn, List jobs);
+
+/* initialization of job completion logging */
+extern int slurmdb_jobcomp_init(char *jobcomp_loc);
+
+/* terminate pthreads and free, general clean-up for termination */
+extern int slurmdb_jobcomp_fini(void);
+
+/*
+ * get info from the storage
+ * returns List of jobcomp_job_rec_t *
+ * note List needs to be freed when called
+ */
+extern List slurmdb_jobcomp_jobs_get(slurmdb_job_cond_t *job_cond);
 
 /************** extra get functions **************/
 
@@ -1506,13 +1601,6 @@ extern List slurmdb_config_get(void *db_conn);
  */
 extern List slurmdb_events_get(void *db_conn,
 			       slurmdb_event_cond_t *event_cond);
-
-/*
- * get info from the storage
- * returns List of slurmdb_job_rec_t *
- * note List needs to be freed with slurm_list_destroy() when called
- */
-extern List slurmdb_jobs_get(void *db_conn, slurmdb_job_cond_t *job_cond);
 
 /*
  * get info from the storage
@@ -1689,7 +1777,7 @@ extern char *slurmdb_tree_name_get(char *name, char *parent, List tree_list);
  * IN:  res_list List of char *
  * RET: SLURM_SUCCESS on success SLURM_ERROR else
  */
-extern int slurmdb_res_add(void *db_conn, uint32_t uid, List res_list);
+extern int slurmdb_res_add(void *db_conn, List res_list);
 
 /*
  * get info from the storage
@@ -1725,7 +1813,7 @@ extern List slurmdb_res_remove(void *db_conn, slurmdb_res_cond_t *res_cond);
  * IN:  qos_list List of char *
  * RET: SLURM_SUCCESS on success SLURM_ERROR else
  */
-extern int slurmdb_qos_add(void *db_conn, uint32_t uid, List qos_list);
+extern int slurmdb_qos_add(void *db_conn, List qos_list);
 
 /*
  * get info from the storage
@@ -1761,7 +1849,7 @@ extern List slurmdb_qos_remove(void *db_conn, slurmdb_qos_cond_t *qos_cond);
  * IN:  tres_list List of char *
  * RET: SLURM_SUCCESS on success SLURM_ERROR else
  */
-extern int slurmdb_tres_add(void *db_conn, uint32_t uid, List tres_list);
+extern int slurmdb_tres_add(void *db_conn, List tres_list);
 
 /*
  * get info from the storage

@@ -38,6 +38,8 @@
 
 #include <config.h>
 
+#define _GNU_SOURCE
+
 #include <fcntl.h>
 #include <sys/resource.h>
 #include <sys/stat.h>
@@ -108,8 +110,11 @@ read_pidfile(const char *pidfile, int *pidfd)
 	if ((fd = open(pidfile, O_RDONLY)) < 0)
 		return ((pid_t) 0);
 
-	if (!(fp = fdopen(fd, "r")) && (errno != ENOENT))
+	if (!(fp = fdopen(fd, "r"))) {
 		error ("Unable to access old pidfile at `%s': %m", pidfile);
+		(void) close(fd);
+		return ((pid_t) 0);
+	}
 
 	if (fscanf(fp, "%lu", &pid) < 1) {
 		error ("Possible corrupt pidfile `%s'", pidfile);
@@ -147,13 +152,8 @@ create_pidfile(const char *pidfile, uid_t uid)
 	xassert(pidfile != NULL);
 	xassert(pidfile[0] == '/');
 
-#ifdef O_CLOEXEC
 	fd = open(pidfile, O_CREAT | O_WRONLY | O_TRUNC | O_CLOEXEC,
 		  S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH);
-#else
-	fd = open(pidfile, O_CREAT | O_WRONLY | O_TRUNC,
-		  S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH);
-#endif
 	if (fd < 0) {
 		error("Unable to open pidfile `%s': %m", pidfile);
 		return -1;

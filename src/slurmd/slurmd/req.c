@@ -191,6 +191,7 @@ static void _rpc_pid2jid(slurm_msg_t *msg);
 static int  _rpc_file_bcast(slurm_msg_t *msg);
 static void _file_bcast_cleanup(void);
 static int  _file_bcast_register_file(slurm_msg_t *msg,
+				      sbcast_cred_arg_t *cred_arg,
 				      file_bcast_info_t *key);
 static int  _rpc_ping(slurm_msg_t *);
 static int  _rpc_health_check(slurm_msg_t *);
@@ -202,7 +203,8 @@ static int  _rpc_stat_jobacct(slurm_msg_t *msg);
 static int  _rpc_list_pids(slurm_msg_t *msg);
 static int  _rpc_daemon_status(slurm_msg_t *msg);
 static int  _run_epilog(job_env_t *job_env);
-static int  _run_prolog(job_env_t *job_env, slurm_cred_t *cred);
+static int  _run_prolog(job_env_t *job_env, slurm_cred_t *cred,
+			bool remove_running);
 static void _rpc_forward_data(slurm_msg_t *msg);
 static int  _rpc_network_callerid(slurm_msg_t *msg);
 
@@ -215,8 +217,10 @@ static int  _waiter_complete (uint32_t jobid);
 
 static void _send_back_fd(int socket, int fd);
 static bool _steps_completed_now(uint32_t jobid);
-static int  _valid_sbcast_cred(file_bcast_msg_t *req, uid_t req_uid,
-			       uint16_t block_no, uint32_t *job_id);
+static sbcast_cred_arg_t *_valid_sbcast_cred(file_bcast_msg_t *req,
+					     uid_t req_uid,
+					     gid_t req_gid,
+					     uint16_t protocol_version);
 static void _wait_state_completed(uint32_t jobid, int max_delay);
 static uid_t _get_job_uid(uint32_t jobid);
 
@@ -471,15 +475,11 @@ _send_slurmstepd_init(int fd, int type, void *req,
 		      slurm_addr_t *cli, slurm_addr_t *self,
 		      hostset_t step_hset, uint16_t protocol_version)
 {
-	int len = 0, ngids, i;
+	int len = 0;
 	Buf buffer = NULL;
 	slurm_msg_t msg;
-	uid_t uid = (uid_t)-1;
-	gid_t gid = (gid_t)-1;
-	gid_t *gids;
-	uint32_t jobid = 0;
 
-	int rank, proto;
+	int rank;
 	int parent_rank, children, depth, max_depth;
 	char *parent_alias = NULL;
 	slurm_addr_t parent_addr = {0};
@@ -606,20 +606,9 @@ _send_slurmstepd_init(int fd, int type, void *req,
 	/* send req over to slurmstepd */
 	switch (type) {
 	case LAUNCH_BATCH_JOB:
-		jobid = ((batch_job_launch_msg_t *)req)->job_id;
-		gid = (uid_t)((batch_job_launch_msg_t *)req)->gid;
-		uid = (uid_t)((batch_job_launch_msg_t *)req)->uid;
 		msg.msg_type = REQUEST_BATCH_JOB_LAUNCH;
 		break;
 	case LAUNCH_TASKS:
-		/*
-		 * The validity of req->uid was verified against the
-		 * auth credential in _rpc_launch_tasks().  req->gid
-		 * has NOT yet been checked!
-		 */
-		jobid = ((launch_tasks_request_msg_t *)req)->job_id;
-		gid = (uid_t)((launch_tasks_request_msg_t *)req)->gid;
-		uid = (uid_t)((launch_tasks_request_msg_t *)req)->uid;
 		msg.msg_type = REQUEST_LAUNCH_TASKS;
 		break;
 	default:
@@ -629,29 +618,18 @@ _send_slurmstepd_init(int fd, int type, void *req,
 	buffer = init_buf(0);
 	msg.data = req;
 
-	if (protocol_version == NO_VAL16)
-		proto = SLURM_PROTOCOL_VERSION;
-	else
-		proto = protocol_version;
-
-	msg.protocol_version = (uint16_t)proto;
+	/* always force the RPC format to the latest */
+	msg.protocol_version = SLURM_PROTOCOL_VERSION;
 	pack_msg(&msg, buffer);
 	len = get_buf_offset(buffer);
 
-	safe_write(fd, &proto, sizeof(int));
+	/* this is the protocol version for the client srun only */
+	safe_write(fd, &protocol_version, sizeof(int));
 
 	safe_write(fd, &len, sizeof(int));
 	safe_write(fd, get_buf_data(buffer), len);
 	free_buf(buffer);
 	buffer = NULL;
-
-	ngids = group_cache_lookup_job(jobid, uid, gid, &gids);
-	safe_write(fd, &ngids, sizeof(int));
-	for (i = 0; i < ngids; i++) {
-		/* we assume sizeof(gid_t) == sizeof(uint32_t) */
-		safe_write(fd, &gids[i], sizeof(uint32_t));
-	}
-	xfree(gids);
 
 	return 0;
 
@@ -921,6 +899,36 @@ _forkexec_slurmstepd(uint16_t type, void *req,
 	}
 }
 
+static void _setup_x11_display(uint32_t job_id, uint32_t step_id,
+			       char ***env, uint32_t *envc)
+{
+	int display = 0, fd;
+	uint16_t protocol_version;
+
+	fd = stepd_connect(conf->spooldir, conf->node_name,
+			   job_id, SLURM_EXTERN_CONT,
+			   &protocol_version);
+
+	if (fd == -1) {
+		error("could not get x11 forwarding display for job %u step %u,"
+		      " x11 forwarding disabled", job_id, step_id);
+		return;
+	}
+
+	display = stepd_get_x11_display(fd, protocol_version);
+	close(fd);
+
+	if (!display) {
+		error("could not get x11 forwarding display for job %u step %u,"
+		      " x11 forwarding disabled", job_id, step_id);
+		return;
+	}
+
+	debug2("%s: setting DISPLAY=localhost:%d:0 for job %u step %u",
+	       __func__, display, job_id, step_id);
+	env_array_overwrite_fmt(env, "DISPLAY", "localhost:%d.0", display);
+	*envc = envcount(*env);
+}
 
 /*
  * The job(step) credential is the only place to get a definitive
@@ -928,45 +936,34 @@ _forkexec_slurmstepd(uint16_t type, void *req,
  * a hostset_t of the nodes. Validate the incoming RPC, updating
  * job_mem needed.
  */
-static int
-_check_job_credential(launch_tasks_request_msg_t *req, uid_t uid,
-		      int node_id, hostset_t *step_hset,
-		      uint16_t protocol_version)
+static int _check_job_credential(launch_tasks_request_msg_t *req,
+				 uid_t auth_uid, gid_t auth_gid,
+				 int node_id, hostset_t *step_hset,
+				 uint16_t protocol_version)
 {
 	slurm_cred_arg_t arg;
 	hostset_t	s_hset = NULL;
-	bool		user_ok = _slurm_authorized_user(uid);
+	bool		user_ok = _slurm_authorized_user(auth_uid);
 	int		host_index = -1;
-	int		rc;
 	slurm_cred_t    *cred = req->cred;
 	uint32_t	jobid = req->job_id;
 	uint32_t	stepid = req->job_step_id;
 	int		tasks_to_launch = req->tasks_to_launch[node_id];
 	uint32_t	job_cpus = 0, step_cpus = 0;
 
-	/*
-	 * First call slurm_cred_verify() so that all valid
-	 * credentials are checked
-	 */
 	if (user_ok && (req->flags & LAUNCH_NO_ALLOC)) {
 		/* If we didn't allocate then the cred isn't valid, just skip
 		 * checking.  This is only cool for root or SlurmUser */
 		debug("%s: FYI, user %d is an authorized user running outside of an allocation.",
-		      __func__, uid);
+		      __func__, auth_uid);
 		return SLURM_SUCCESS;
 	}
 
-	rc = slurm_cred_verify(conf->vctx, cred, &arg, protocol_version);
-	if (rc < 0) {
-		if ((!user_ok) || (errno != ESLURMD_INVALID_JOB_CREDENTIAL)) {
-			return SLURM_ERROR;
-		} else {
-			debug("_check_job_credential slurm_cred_verify failed:"
-			      " %m, but continuing anyway.");
-		}
-		*step_hset = NULL;
-		return SLURM_SUCCESS;
-	}
+	/*
+	 * First call slurm_cred_verify() so that all credentials are checked
+	 */
+	if (slurm_cred_verify(conf->vctx, cred, &arg, protocol_version) < 0)
+		return SLURM_ERROR;
 
 	if ((arg.jobid != jobid) || (arg.stepid != stepid)) {
 		error("job credential for %u.%u, expected %u.%u",
@@ -974,10 +971,41 @@ _check_job_credential(launch_tasks_request_msg_t *req, uid_t uid,
 		goto fail;
 	}
 
-	if (arg.uid != uid) {
-		error("job credential created for uid %ld, expected %ld",
-		      (long) arg.uid, (long) uid);
+	if (arg.uid != req->uid) {
+		error("job %u credential created for uid %u, expected %u",
+		      arg.jobid, arg.uid, req->uid);
 		goto fail;
+	}
+
+	if (arg.gid != NO_VAL && arg.gid != req->gid) {
+		error("job %u credential created for gid %u, expected %u",
+		      arg.jobid, arg.gid, req->gid);
+		goto fail;
+	} else if (arg.gid == NO_VAL) {
+		/*
+		 * The pre-17.11 RPC format did not have gid, so populate
+		 * it off of the auth header instead.
+		 */
+		req->gid = auth_gid;
+	}
+
+	xfree(req->user_name);
+	if (arg.user_name)
+		req->user_name = xstrdup(arg.user_name);
+	else
+		req->user_name = uid_to_string(req->uid);
+
+	xfree(req->gids);
+	if (arg.ngids) {
+		req->ngids = arg.ngids;
+		req->gids = copy_gids(arg.ngids, arg.gids);
+	} else {
+		/*
+		 * The gids were not sent in the cred, or dealing with an older
+		 * RPC format, so retrieve from cache instead.
+		 */
+		req->ngids = group_cache_lookup(req->uid, req->gid,
+						req->user_name, &req->gids);
 	}
 
 	/*
@@ -1000,6 +1028,7 @@ _check_job_credential(launch_tasks_request_msg_t *req, uid_t uid,
 	if ((arg.job_nhosts > 0) && (tasks_to_launch > 0)) {
 		uint32_t hi, i, i_first_bit=0, i_last_bit=0, j;
 		bool cpu_log = slurm_get_debug_flags() & DEBUG_FLAG_CPU_BIND;
+		bool setup_x11 = false;
 
 #ifdef HAVE_FRONT_END
 		host_index = 0;	/* It is always 0 for front end systems */
@@ -1021,6 +1050,28 @@ _check_job_credential(launch_tasks_request_msg_t *req, uid_t uid,
 			goto fail;
 		}
 #endif
+
+		/*
+		 * handle the x11 flag bit here since we have access to the
+		 * host_index already.
+		 *
+		 */
+		if (!arg.x11)
+			setup_x11 = false;
+		else if (arg.x11 & X11_FORWARD_ALL)
+			setup_x11 = true;
+		/* assumes that the first node is the batch host */
+		else if (((arg.x11 & X11_FORWARD_FIRST) ||
+			  (arg.x11 & X11_FORWARD_BATCH))
+			 && (host_index == 0))
+			setup_x11 = true;
+		else if ((arg.x11 & X11_FORWARD_LAST)
+			 && (host_index == (req->nnodes - 1)))
+			setup_x11 = true;
+
+		if (setup_x11)
+			_setup_x11_display(req->job_id, req->job_step_id,
+					   &req->env, &req->envc);
 
 		if (cpu_log) {
 			char *per_job = "", *per_step = "";
@@ -1328,6 +1379,7 @@ _rpc_launch_tasks(slurm_msg_t *msg)
 	uint16_t port;
 	char     host[MAXHOSTNAMELEN];
 	uid_t    req_uid;
+	gid_t    req_gid;
 	launch_tasks_request_msg_t *req = msg->data;
 	bool     super_user = false;
 	bool     mem_sort = false;
@@ -1346,6 +1398,7 @@ _rpc_launch_tasks(slurm_msg_t *msg)
 	nodeid = nodelist_find(req->complete_nodelist, conf->node_name);
 #endif
 	req_uid = g_slurm_auth_get_uid(msg->auth_cred, conf->auth_info);
+	req_gid = g_slurm_auth_get_gid(msg->auth_cred, conf->auth_info);
 	memcpy(&req->orig_addr, &msg->orig_addr, sizeof(slurm_addr_t));
 
 	super_user = _slurm_authorized_user(req_uid);
@@ -1376,7 +1429,7 @@ _rpc_launch_tasks(slurm_msg_t *msg)
 	slurm_mutex_lock(&prolog_mutex);
 	first_job_run = !slurm_cred_jobid_cached(conf->vctx, req->job_id);
 #endif
-	if (_check_job_credential(req, req_uid, nodeid, &step_hset,
+	if (_check_job_credential(req, req_uid, req_gid, nodeid, &step_hset,
 				  msg->protocol_version) < 0) {
 		errnum = errno;
 		error("Invalid job credential from %ld@%s: %m",
@@ -1412,7 +1465,7 @@ _rpc_launch_tasks(slurm_msg_t *msg)
 		job_env.spank_job_env_size = req->spank_job_env_size;
 		job_env.uid = req->uid;
 		job_env.user_name = req->user_name;
-		rc =  _run_prolog(&job_env, req->cred);
+		rc =  _run_prolog(&job_env, req->cred, true);
 		if (rc) {
 			int term_sig = 0, exit_status = 0;
 			if (WIFSIGNALED(rc))
@@ -1527,17 +1580,15 @@ done:
  * IN flags - flags to open() call
  * IN mode - mode to open() call
  * IN jobid - (optional) job id
- * IN username - needed for group_cache_lookup call
  * IN uid - User ID to use for file access check
  * IN gid - Group ID to use for file access check
  * RET -1 on error, file descriptor otherwise
  */
 static int _open_as_other(char *path_name, int flags, int mode,
-			  uint32_t jobid, uid_t uid, gid_t gid)
+			  uint32_t jobid, uid_t uid, gid_t gid,
+			  int ngids, gid_t *gids)
 {
 	pid_t child;
-	int ngids;
-	gid_t *gids;
 	int pipe[2];
 	int fd = -1, rc = 0;
 
@@ -1553,19 +1604,15 @@ static int _open_as_other(char *path_name, int flags, int mode,
 		return -1;
 	}
 
-	ngids = group_cache_lookup_job(jobid, uid, gid, &gids);
-
 	child = fork();
 	if (child == -1) {
 		error("%s: fork failure", __func__);
-		xfree(gids);
 		close(pipe[0]);
 		close(pipe[1]);
 		return -1;
 	} else if (child > 0) {
 		close(pipe[0]);
 		(void) waitpid(child, &rc, 0);
-		xfree(gids);
 		if (WIFEXITED(rc) && (WEXITSTATUS(rc) == 0))
 			fd = _receive_fd(pipe[1]);
 		close(pipe[1]);
@@ -1604,7 +1651,6 @@ static int _open_as_other(char *path_name, int flags, int mode,
 		error("%s: uid: %u setgroups failed: %m", __func__, uid);
 		exit(errno);
 	}
-	xfree(gids);
 
 	if (setgid(gid) < 0) {
 		error("%s: uid:%u setgid(%u): %m", __func__, uid, gid);
@@ -1636,7 +1682,8 @@ _prolog_error(batch_job_launch_msg_t *req, int rc)
 
 	path_name = fname_create2(req);
 	if ((fd = _open_as_other(path_name, flags, 0644,
-				 req->job_id, req->uid, req->gid)) == -1) {
+				 req->job_id, req->uid, req->gid,
+				 req->ngids, req->gids)) == -1) {
 		error("Unable to open %s: Permission denied", path_name);
 		xfree(path_name);
 		return;
@@ -1767,6 +1814,14 @@ _set_batch_job_limits(slurm_msg_t *msg)
 	} else
 		req->job_mem = arg.job_mem_limit;
 
+	/*
+	 * handle x11 settings here since this is the only access to the cred
+	 * on the batch step.
+	 */
+	if ((arg.x11 & X11_FORWARD_ALL) || (arg.x11 & X11_FORWARD_BATCH))
+		_setup_x11_display(req->job_id, SLURM_BATCH_SCRIPT,
+				   &req->environment, &req->envc);
+
 	slurm_cred_free_args(&arg);
 }
 
@@ -1801,10 +1856,10 @@ static void _note_batch_job_finished(uint32_t job_id)
 /* Send notification to slurmctld we are finished running the prolog.
  * This is needed on system that don't use srun to launch their tasks.
  */
-static void _notify_slurmctld_prolog_fini(
+static int _notify_slurmctld_prolog_fini(
 	uint32_t job_id, uint32_t prolog_return_code)
 {
-	int rc;
+	int rc, ret_c;
 	slurm_msg_t req_msg;
 	complete_prolog_msg_t req;
 
@@ -1815,10 +1870,16 @@ static void _notify_slurmctld_prolog_fini(
 	req_msg.msg_type= REQUEST_COMPLETE_PROLOG;
 	req_msg.data	= &req;
 
-	if ((slurm_send_recv_controller_rc_msg(&req_msg, &rc,
-					       working_cluster_rec) < 0) ||
-	    (rc != SLURM_SUCCESS))
+	/*
+	 * Here we only care about the return code of
+	 * slurm_send_recv_controller_rc_msg since it means there was a
+	 * communication failure and we may need to try again.
+	 */
+	if ((ret_c = slurm_send_recv_controller_rc_msg(
+		     &req_msg, &rc, working_cluster_rec)))
 		error("Error sending prolog completion notification: %m");
+
+	return ret_c;
 }
 
 /* Convert memory limits from per-CPU to per-node */
@@ -1934,12 +1995,13 @@ static void _make_prolog_mem_container(slurm_msg_t *msg)
 	}
 }
 
-static void _spawn_prolog_stepd(slurm_msg_t *msg)
+static int _spawn_prolog_stepd(slurm_msg_t *msg)
 {
 	prolog_launch_msg_t *req = (prolog_launch_msg_t *)msg->data;
 	launch_tasks_request_msg_t *launch_req;
 	slurm_addr_t self;
 	slurm_addr_t *cli = &msg->orig_addr;
+	int rc = SLURM_SUCCESS;
 	int i;
 
 	launch_req = xmalloc(sizeof(launch_tasks_request_msg_t));
@@ -1966,11 +2028,51 @@ static void _spawn_prolog_stepd(slurm_msg_t *msg)
 	launch_req->tasks_to_launch	= xmalloc(sizeof(uint16_t)
 						  * req->nnodes);
 	launch_req->uid			= req->uid;
+	launch_req->user_name		= req->user_name;
 
-	launch_req->x11			= req->x11;
-	launch_req->x11_magic_cookie	= req->x11_magic_cookie;
-	launch_req->x11_target_host	= req->x11_target_host;
-	launch_req->x11_target_port	= req->x11_target_port;
+	/*
+	 * determine which node this is in the allocation and if
+	 * it should setup the x11 forwarding or not
+	 */
+	if (req->x11) {
+		bool setup_x11 = false;
+		int host_index = -1;
+#ifdef HAVE_FRONT_END
+		host_index = 0;	/* It is always 0 for front end systems */
+#else
+		hostset_t j_hset;
+		/*
+		 * Determine need to setup X11 based upon this node's index into
+		 * the _job's_ allocation
+		 */
+		if (req->x11 & X11_FORWARD_ALL) {
+			;	/* Don't need host_index */
+		} else if (!(j_hset = hostset_create(req->nodes))) {
+			error("Unable to parse hostlist: `%s'", req->nodes);
+		} else {
+			host_index = hostset_find(j_hset, conf->node_name);
+			hostset_destroy(j_hset);
+		}
+#endif
+
+		if (req->x11 & X11_FORWARD_ALL)
+			setup_x11 = true;
+		/* assumes that the first node is the batch host */
+		else if (((req->x11 & X11_FORWARD_FIRST) ||
+			  (req->x11 & X11_FORWARD_BATCH))
+			 && (host_index == 0))
+			setup_x11 = true;
+		else if ((req->x11 & X11_FORWARD_LAST)
+			 && (host_index == (req->nnodes - 1)))
+			setup_x11 = true;
+
+		if (setup_x11) {
+			launch_req->x11 = req->x11;
+			launch_req->x11_magic_cookie = req->x11_magic_cookie;
+			launch_req->x11_target_host = req->x11_target_host;
+			launch_req->x11_target_port = req->x11_target_port;
+		}
+	}
 
 	for (i = 0; i < req->nnodes; i++) {
 		uint32_t *tmp32 = xmalloc(sizeof(uint32_t));
@@ -1987,17 +2089,30 @@ static void _spawn_prolog_stepd(slurm_msg_t *msg)
 	 */
 	if (slurm_get_stream_addr(msg->conn_fd, &self)) {
 		error("%s: slurm_get_stream_addr(): %m", __func__);
+		rc = SLURM_ERROR;
 	} else if (slurm_cred_revoked(conf->vctx, req->cred)) {
 		info("Job %u already killed, do not launch extern step",
 		     req->job_id);
+		/*
+		 * Don't set the rc to SLURM_ERROR at this point.
+		 * The job's already been killed, and returning a prolog
+		 * failure will just add more confusion. Better to just
+		 * silently terminate.
+		 */
 	} else {
 		hostset_t step_hset = hostset_create(req->nodes);
+		int rc;
 
 		debug3("%s: call to _forkexec_slurmstepd", __func__);
-		(void) _forkexec_slurmstepd(
-			LAUNCH_TASKS, (void *)launch_req, cli,
-			&self, step_hset, msg->protocol_version);
-		debug3("%s: return from _forkexec_slurmstepd", __func__);
+		rc =  _forkexec_slurmstepd(LAUNCH_TASKS, (void *)launch_req,
+					   cli, &self, step_hset,
+					   msg->protocol_version);
+		debug3("%s: return from _forkexec_slurmstepd %d",
+		       __func__, rc);
+
+		if (rc != SLURM_SUCCESS)
+			_launch_job_fail(req->job_id, rc);
+
 		if (step_hset)
 			hostset_destroy(step_hset);
 	}
@@ -2007,11 +2122,13 @@ static void _spawn_prolog_stepd(slurm_msg_t *msg)
 	xfree(launch_req->global_task_ids);
 	xfree(launch_req->tasks_to_launch);
 	xfree(launch_req);
+
+	return rc;
 }
 
 static void _rpc_prolog(slurm_msg_t *msg)
 {
-	int rc = SLURM_SUCCESS;
+	int rc = SLURM_SUCCESS, alt_rc = SLURM_ERROR;
 	prolog_launch_msg_t *req = (prolog_launch_msg_t *)msg->data;
 	job_env_t job_env;
 	bool     first_job_run;
@@ -2027,18 +2144,15 @@ static void _rpc_prolog(slurm_msg_t *msg)
 		return;
 	}
 
+	if (!req->user_name)
+		req->user_name = uid_to_string(req->uid);
+	/*
+	 * Send message back to the slurmctld so it knows we got the rpc.  A
+	 * prolog could easily run way longer than a MessageTimeout or we would
+	 * just wait.
+	 */
 	if (slurm_send_rc_msg(msg, rc) < 0) {
-		error("Error starting prolog: %m");
-	}
-	if (rc) {
-		int term_sig = 0, exit_status = 0;
-		if (WIFSIGNALED(rc))
-			term_sig    = WTERMSIG(rc);
-		else if (WIFEXITED(rc))
-			exit_status = WEXITSTATUS(rc);
-		error("[job %u] prolog start failed status=%d:%d",
-		      req->job_id, exit_status, term_sig);
-		rc = ESLURMD_PROLOG_FAILED;
+		error("%s: Error talking to slurmctld: %m", __func__);
 	}
 
 	slurm_mutex_lock(&prolog_mutex);
@@ -2047,18 +2161,11 @@ static void _rpc_prolog(slurm_msg_t *msg)
 		if (slurmctld_conf.prolog_flags & PROLOG_FLAG_CONTAIN)
 			_make_prolog_mem_container(msg);
 
-		if (container_g_create(req->job_id))
-			error("container_g_create(%u): %m", req->job_id);
-
 		slurm_cred_insert_jobid(conf->vctx, req->job_id);
 		_add_job_running_prolog(req->job_id);
+		/* signal just in case the batch rpc got here before we did */
+		slurm_cond_broadcast(&conf->prolog_running_cond);
 		slurm_mutex_unlock(&prolog_mutex);
-
-		if (req->ngids && req->gids)
-			group_cache_push(req->job_id, req->uid, req->gid,
-					 req->user_name,
-					 req->ngids, &req->gids);
-
 		memset(&job_env, 0, sizeof(job_env_t));
 
 		job_env.jobid = req->job_id;
@@ -2077,8 +2184,11 @@ static void _rpc_prolog(slurm_msg_t *msg)
 		job_env.resv_id = select_g_select_jobinfo_xstrdup(
 			req->select_jobinfo, SELECT_PRINT_RESV_ID);
 #endif
-		rc = _run_prolog(&job_env, req->cred);
-
+		if ((rc = container_g_create(req->job_id)))
+			error("container_g_create(%u): %m", req->job_id);
+		else
+			rc = _run_prolog(&job_env, req->cred, false);
+		xfree(job_env.resv_id);
 		if (rc) {
 			int term_sig = 0, exit_status = 0;
 			if (WIFSIGNALED(rc))
@@ -2089,18 +2199,30 @@ static void _rpc_prolog(slurm_msg_t *msg)
 			      req->job_id, exit_status, term_sig);
 			rc = ESLURMD_PROLOG_FAILED;
 		}
+
+		if ((rc == SLURM_SUCCESS) &&
+		    (slurmctld_conf.prolog_flags & PROLOG_FLAG_CONTAIN))
+			rc = _spawn_prolog_stepd(msg);
+		_remove_job_running_prolog(req->job_id);
 	} else
 		slurm_mutex_unlock(&prolog_mutex);
 
-	if (!(slurmctld_conf.prolog_flags & PROLOG_FLAG_NOHOLD))
-		_notify_slurmctld_prolog_fini(req->job_id, rc);
+	/*
+	 * We need the slurmctld to know we are done or we can get into a
+	 * situation where nothing from the job will ever launch because the
+	 * prolog will never appear to stop running.
+	 */
+	while (alt_rc != SLURM_SUCCESS) {
+		if (!(slurmctld_conf.prolog_flags & PROLOG_FLAG_NOHOLD))
+			alt_rc = _notify_slurmctld_prolog_fini(
+				req->job_id, rc);
+		else
+			alt_rc = SLURM_SUCCESS;
 
-	if (rc == SLURM_SUCCESS) {
-		if (slurmctld_conf.prolog_flags & PROLOG_FLAG_CONTAIN)
-			_spawn_prolog_stepd(msg);
-	} else {
-		_launch_job_fail(req->job_id, rc);
-		send_registration_msg(rc, false);
+		if (rc != SLURM_SUCCESS) {
+			alt_rc = _launch_job_fail(req->job_id, rc);
+			send_registration_msg(rc, false);
+		}
 	}
 }
 
@@ -2140,6 +2262,15 @@ _rpc_batch_job(slurm_msg_t *msg, bool new_msg)
 		goto done;
 	}
 
+	/* lookup user_name if not provided by slurmctld */
+	if (!req->user_name)
+		req->user_name = uid_to_string(req->uid);
+
+	/* lookup gids if they weren't sent by slurmctld */
+	if (!req->ngids)
+		req->ngids = group_cache_lookup(req->uid, req->gid,
+						req->user_name, &req->gids);
+
 	task_g_slurmd_batch_request(req->job_id, req);	/* determine task affinity */
 
 	slurm_mutex_lock(&prolog_mutex);
@@ -2161,6 +2292,40 @@ _rpc_batch_job(slurm_msg_t *msg, bool new_msg)
 		rc = SLURM_COMMUNICATIONS_SEND_ERROR;
 		slurm_mutex_unlock(&prolog_mutex);
 		goto done;
+	}
+
+	if (slurmctld_conf.prolog_flags & PROLOG_FLAG_ALLOC) {
+		struct timespec ts = {0, 0};
+		struct timeval now;
+		int retry_cnt = 0;
+		/*
+		 * We want to wait until the rpc_prolog is ran before
+		 * continuing. Since we are already locked on prolog_mutex here
+		 * we don't have to unlock to wait on the
+		 * conf->prolog_running_cond.
+		 */
+		while (first_job_run) {
+			retry_cnt++;
+			/*
+			 * This race should only happen for at most a second as
+			 * we are only waiting for the other rpc to get here.
+			 * If we are waiting for more that 50 trys something bad
+			 * happened.
+			 */
+			if (retry_cnt > 50) {
+				rc = ESLURMD_PROLOG_FAILED;
+				goto done;
+			}
+
+			gettimeofday(&now, NULL);
+			ts.tv_sec = now.tv_sec + 1;
+			ts.tv_nsec = now.tv_usec * 1000;
+
+			slurm_cond_timedwait(&conf->prolog_running_cond,
+					     &prolog_mutex, &ts);
+			first_job_run = !slurm_cred_jobid_cached(conf->vctx,
+								 req->job_id);
+		}
 	}
 
 	/*
@@ -2194,9 +2359,10 @@ _rpc_batch_job(slurm_msg_t *msg, bool new_msg)
 		job_env.resv_id = select_g_select_jobinfo_xstrdup(
 			req->select_jobinfo, SELECT_PRINT_RESV_ID);
 #endif
-		if (container_g_create(req->job_id))
+		if ((rc = container_g_create(req->job_id)))
 			error("container_g_create(%u): %m", req->job_id);
-		rc = _run_prolog(&job_env, req->cred);
+		else
+			rc = _run_prolog(&job_env, req->cred, true);
 		xfree(job_env.resv_id);
 		if (rc) {
 			int term_sig = 0, exit_status = 0;
@@ -2236,12 +2402,7 @@ _rpc_batch_job(slurm_msg_t *msg, bool new_msg)
 	}
 
 	slurm_mutex_lock(&launch_mutex);
-	if (req->step_id == SLURM_BATCH_SCRIPT)
-		info("Launching batch job %u for UID %d",
-		     req->job_id, req->uid);
-	else
-		info("Launching batch job %u.%u for UID %d",
-		     req->job_id, req->step_id, req->uid);
+	info("Launching batch job %u for UID %u", req->job_id, req->uid);
 
 	debug3("_rpc_batch_job: call to _forkexec_slurmstepd");
 	rc = _forkexec_slurmstepd(LAUNCH_BATCH_JOB, (void *)req, cli, NULL,
@@ -3050,7 +3211,7 @@ _signal_jobstep(uint32_t jobid, uint32_t stepid, uint16_t signal,
 	if (_prolog_is_running(jobid)) {
 		info("signal %d req for %u.%u while prolog is running."
 		     " Returning failure.", signal, jobid, stepid);
-		return EAGAIN;
+		return ESLURM_TRANSITION_STATE_NO_UPDATE;
 	}
 
 	fd = stepd_connect(conf->spooldir, conf->node_name, jobid, stepid,
@@ -3075,6 +3236,22 @@ _rpc_signal_tasks(slurm_msg_t *msg)
 {
 	int               rc = SLURM_SUCCESS;
 	signal_tasks_msg_t *req = (signal_tasks_msg_t *) msg->data;
+	uid_t job_uid, req_uid;
+
+	job_uid = _get_job_uid(req->job_id);
+
+	if ((int)job_uid < 0) {
+		rc = ESLURM_INVALID_JOB_ID;
+		goto done;
+	}
+
+	req_uid = g_slurm_auth_get_uid(msg->auth_cred, conf->auth_info);
+	if ((req_uid != job_uid) && (!_slurm_authorized_user(req_uid))) {
+		debug("%s: from uid %ld for job %u owned by uid %ld",
+		      __func__, (long)req_uid, req->job_id, (long)job_uid);
+		rc = ESLURM_USER_ID_MISSING;     /* or bad in this case */
+		goto done;
+	}
 
 	/* security is handled when communicating with the stepd */
 	if (req->flags & KILL_FULL_JOB) {
@@ -3093,7 +3270,7 @@ _rpc_signal_tasks(slurm_msg_t *msg)
 		rc = _signal_jobstep(req->job_id, req->job_step_id,
 				     req->signal, req->flags);
 	}
-
+done:
 	slurm_send_rc_msg(msg, rc);
 }
 
@@ -3479,7 +3656,7 @@ _rpc_network_callerid(slurm_msg_t *msg)
 
 	uid_t req_uid = -1;
 	uid_t job_uid = -1;
-	uint32_t job_id = (uint32_t)NO_VAL;
+	uint32_t job_id = NO_VAL;
 	callerid_conn_t conn;
 	int rc = ESLURM_INVALID_JOB_ID;
 	char ip_src_str[INET6_ADDRSTRLEN];
@@ -3732,39 +3909,59 @@ static void  _rpc_pid2jid(slurm_msg_t *msg)
 /* Validate sbcast credential.
  * NOTE: We can only perform the full credential validation once with
  * Munge without generating a credential replay error
- * RET SLURM_SUCCESS or an error code */
-static int
-_valid_sbcast_cred(file_bcast_msg_t *req, uid_t req_uid, uint16_t block_no,
-		   uint32_t *job_id)
+ * RET an sbcast credential or NULL on error.
+ * free with sbcast_cred_arg_free()
+ */
+static sbcast_cred_arg_t *_valid_sbcast_cred(file_bcast_msg_t *req,
+					     uid_t req_uid,
+					     gid_t req_gid,
+					     uint16_t protocol_version)
 {
-	int rc = SLURM_SUCCESS;
-	char *nodes = NULL;
+	sbcast_cred_arg_t *arg;
 	hostset_t hset = NULL;
 
-	*job_id = NO_VAL;
-	rc = extract_sbcast_cred(conf->vctx, req->cred, block_no,
-				 job_id, &nodes);
-	if (rc != 0) {
-		error("Security violation: Invalid sbcast_cred from uid %d",
+	arg = extract_sbcast_cred(conf->vctx, req->cred, req->block_no,
+				  protocol_version);
+	if (!arg) {
+		error("Security violation: Invalid sbcast_cred from uid %u",
 		      req_uid);
-		return ESLURMD_INVALID_JOB_CREDENTIAL;
+		return NULL;
 	}
 
-	if (!(hset = hostset_create(nodes))) {
-		error("Unable to parse sbcast_cred hostlist %s", nodes);
-		rc = ESLURMD_INVALID_JOB_CREDENTIAL;
+	if (!(hset = hostset_create(arg->nodes))) {
+		error("Unable to parse sbcast_cred hostlist %s", arg->nodes);
+		sbcast_cred_arg_free(arg);
+		return NULL;
 	} else if (!hostset_within(hset, conf->node_name)) {
-		error("Security violation: sbcast_cred from %d has "
-		      "bad hostset %s", req_uid, nodes);
-		rc = ESLURMD_INVALID_JOB_CREDENTIAL;
-	}
-	if (hset)
+		error("Security violation: sbcast_cred from %u has "
+		      "bad hostset %s", req_uid, arg->nodes);
+		sbcast_cred_arg_free(arg);
 		hostset_destroy(hset);
-	xfree(nodes);
+		return NULL;
+	}
+	hostset_destroy(hset);
 
+	/* fill in the credential with any missing data */
+	if (arg->uid == NO_VAL)
+		arg->uid = req_uid;
+	if (arg->gid == NO_VAL)
+		arg->gid = req_gid;
+	if ((arg->uid != req_uid) || (arg->gid != req_gid)) {
+		error("Security violation: sbcast cred from %u/%u but rpc from %u/%u",
+		      arg->uid, arg->gid, req_uid, req_gid);
+		sbcast_cred_arg_free(arg);
+		return NULL;
+	}
+
+	/*
+	 * NOTE: user_name, ngids, gids may still be NULL, 0, NULL at this point.
+	 *       we skip filling them in here to avoid excessive lookup calls
+	 *       as this must run once per block (and there may be thousands of
+	 *       blocks), and is only currently needed by the first block.
+	 */
 	/* print_sbcast_cred(req->cred); */
 
-	return rc;
+	return arg;
 }
 
 static void _fb_rdlock(void)
@@ -3891,6 +4088,7 @@ static int _rpc_file_bcast(slurm_msg_t *msg)
 {
 	int rc;
 	int64_t offset, inx;
+	sbcast_cred_arg_t *cred_arg;
 	file_bcast_info_t *file_info;
 	file_bcast_msg_t *req = msg->data;
 	file_bcast_info_t key;
@@ -3899,9 +4097,12 @@ static int _rpc_file_bcast(slurm_msg_t *msg)
 	key.gid = g_slurm_auth_get_gid(msg->auth_cred, conf->auth_info);
 	key.fname = req->fname;
 
-	rc = _valid_sbcast_cred(req, key.uid, req->block_no, &key.job_id);
-	if ((rc != SLURM_SUCCESS) && !_slurm_authorized_user(key.uid))
-		return rc;
+	cred_arg = _valid_sbcast_cred(req, key.uid, key.gid,
+				      msg->protocol_version);
+	if (!cred_arg)
+		return ESLURMD_INVALID_JOB_CREDENTIAL;
+
+	key.job_id = cred_arg->job_id;
 
 #if 0
 	info("last_block=%u force=%u modes=%o",
@@ -3926,9 +4127,12 @@ static int _rpc_file_bcast(slurm_msg_t *msg)
 
 	/* first block must register the file and open fd/mmap */
 	if (req->block_no == 1) {
-		if ((rc = _file_bcast_register_file(msg, &key)))
+		if ((rc = _file_bcast_register_file(msg, cred_arg, &key))) {
+			sbcast_cred_arg_free(cred_arg);
 			return rc;
+		}
 	}
+	sbcast_cred_arg_free(cred_arg);
 
 	_fb_rdlock();
 	if (!(file_info = _bcast_lookup_file(&key))) {
@@ -4037,11 +4241,18 @@ static int _receive_fd(int socket)
 }
 
 static int _file_bcast_register_file(slurm_msg_t *msg,
+				     sbcast_cred_arg_t *cred_arg,
 				     file_bcast_info_t *key)
 {
 	file_bcast_msg_t *req = msg->data;
 	int fd, flags;
 	file_bcast_info_t *file_info;
+
+	/* may still be unset in credential */
+	if (!cred_arg->ngids || !cred_arg->gids)
+		cred_arg->ngids = group_cache_lookup(key->uid, key->gid,
+						     cred_arg->user_name,
+						     &cred_arg->gids);
 
 	flags = O_WRONLY | O_CREAT;
 	if (req->force)
@@ -4050,7 +4261,8 @@ static int _file_bcast_register_file(slurm_msg_t *msg,
 		flags |= O_EXCL;
 
 	if ((fd = _open_as_other(req->fname, flags, 0700,
-				 key->job_id, key->uid, key->gid)) == -1) {
+				 key->job_id, key->uid, key->gid,
+				 cred_arg->ngids, cred_arg->gids)) == -1) {
 		error("Unable to open %s: Permission denied", req->fname);
 		return SLURM_ERROR;
 	}
@@ -4061,7 +4273,7 @@ static int _file_bcast_register_file(slurm_msg_t *msg,
 	file_info->uid = key->uid;
 	file_info->gid = key->gid;
 	file_info->job_id = key->job_id;
-	file_info->start_time = time(NULL);
+	file_info->last_update = file_info->start_time = time(NULL);
 
 	//TODO: mmap the file here
 	_fb_wrlock();
@@ -4087,7 +4299,7 @@ _rpc_reattach_tasks(slurm_msg_t *msg)
 	int               fd;
 	uid_t             req_uid;
 	slurm_addr_t *cli = &msg->orig_addr;
-	uint32_t nodeid = (uint32_t)NO_VAL;
+	uint32_t nodeid = NO_VAL;
 	uid_t uid = -1;
 	uint16_t protocol_version;
 
@@ -4303,7 +4515,7 @@ extern int ume_notify(void)
 		debug2("container SIG_UME to job %u.%u",
 		       stepd->jobid, stepd->stepid);
 		if (stepd_signal_container(
-			    fd, stepd->protocol_version, 0, SIG_UME) < 0)
+			    fd, stepd->protocol_version, SIG_UME, 0) < 0)
 			debug("kill jobid=%u failed: %m", stepd->jobid);
 		close(fd);
 	}
@@ -4643,12 +4855,8 @@ _rpc_suspend_job(slurm_msg_t *msg)
 	if ((req->op == SUSPEND_JOB) && (req->indf_susp))
 		switch_g_job_suspend(req->switch_info, 5);
 
-	/* Release or reclaim resources bound to these tasks (task affinity) */
-	if (req->op == SUSPEND_JOB) {
+	if (req->op == SUSPEND_JOB)
 		(void) task_g_slurmd_suspend_job(req->job_id);
-	} else {
-		(void) task_g_slurmd_resume_job(req->job_id);
-	}
 
 	/*
 	 * Loop through all job steps and call stepd_suspend or stepd_resume
@@ -4759,6 +4967,8 @@ _rpc_suspend_job(slurm_msg_t *msg)
 	list_iterator_destroy(i);
 	FREE_NULL_LIST(steps);
 
+	if (req->op == RESUME_JOB) /* Call task plugin after processes resume */
+		(void) task_g_slurmd_resume_job(req->job_id);
 	if ((req->op == RESUME_JOB) && (req->indf_susp))
 		switch_g_job_resume(req->switch_info, 5);
 
@@ -5143,6 +5353,24 @@ _rpc_terminate_job(slurm_msg_t *msg)
 		debug("credential for job %u revoked", req->job_id);
 	}
 
+	if (_prolog_is_running(req->job_id)) {
+		if (msg->conn_fd >= 0) {
+			/* If the step hasn't finished running the prolog
+			 * (or finshed starting the extern step) yet just send
+			 * a success to let the controller know we got
+			 * this request.
+			 */
+			debug("%s: sent SUCCESS for %u, waiting for prolog to finish",
+			      __func__, req->job_id);
+			slurm_send_rc_msg(msg, SLURM_SUCCESS);
+			if (close(msg->conn_fd) < 0)
+				error("%s: close(%d): %m",
+				      __func__, msg->conn_fd);
+			msg->conn_fd = -1;
+		}
+		_wait_for_job_running_prolog(req->job_id);
+	}
+
 	/*
 	 * Before signaling steps, if the job has any steps that are still
 	 * in the process of fork/exec/check in with slurmd, wait on a condition
@@ -5171,6 +5399,7 @@ _rpc_terminate_job(slurm_msg_t *msg)
 			error("Error in _wait_for_starting_step");
 		}
 	}
+
 	if (IS_JOB_NODE_FAILED(req))
 		_kill_all_active_steps(req->job_id, SIG_NODE_FAIL, 0, true);
 	if (IS_JOB_PENDING(req))
@@ -5524,10 +5753,14 @@ _build_env(job_env_t *job_env)
 		job_env->spank_job_env_size = 0;
 		job_env->spank_job_env = (char **) NULL;
 	}
-	if (job_env->spank_job_env_size) {
-		env_array_merge_spank(&env,
-				      (const char **) job_env->spank_job_env);
-	}
+	/*
+	 * User-controlled environment variables, such as those set through
+	 * SPANK, must be prepended with SPANK_ or some other safe prefix.
+	 * Otherwise, a malicious user could cause arbitrary code to execute
+	 * during the prolog/epilog as root.
+	 */
+	if (job_env->spank_job_env_size)
+		env_array_merge(&env, (const char **) job_env->spank_job_env);
 
 	slurm_mutex_lock(&conf->config_mutex);
 	setenvf(&env, "SLURMD_NODENAME", "%s", conf->node_name);
@@ -5677,7 +5910,7 @@ static int _run_job_script(const char *name, const char *path,
 #ifdef HAVE_BG
 /* a slow prolog is expected on bluegene systems */
 static int
-_run_prolog(job_env_t *job_env, slurm_cred_t *cred)
+_run_prolog(job_env_t *job_env, slurm_cred_t *cred, bool remove_running)
 {
 	int rc;
 	char *my_prolog;
@@ -5692,7 +5925,8 @@ _run_prolog(job_env_t *job_env, slurm_cred_t *cred)
 
 	rc = _run_job_script("prolog", my_prolog, job_env->jobid,
 			     -1, my_env, job_env->uid);
-	_remove_job_running_prolog(job_env->jobid);
+	if (remove_running)
+		_remove_job_running_prolog(job_env->jobid);
 	xfree(my_prolog);
 	_destroy_env(my_env);
 
@@ -5761,7 +5995,7 @@ static int _get_node_inx(char *hostlist)
 }
 
 static int
-_run_prolog(job_env_t *job_env, slurm_cred_t *cred)
+_run_prolog(job_env_t *job_env, slurm_cred_t *cred, bool remove_running)
 {
 	DEF_TIMERS;
 	int rc, diff_time;
@@ -5835,7 +6069,8 @@ _run_prolog(job_env_t *job_env, slurm_cred_t *cred)
 		     job_env->jobid, diff_time);
 	}
 
-	_remove_job_running_prolog(job_env->jobid);
+	if (remove_running)
+		_remove_job_running_prolog(job_env->jobid);
 	xfree(my_prolog);
 	_destroy_env(my_env);
 
@@ -5876,7 +6111,7 @@ _run_epilog(job_env_t *job_env)
 		script_lock = true;
 	}
 
-	if (timeout == (uint16_t)NO_VAL)
+	if (timeout == NO_VAL16)
 		error_code = _run_job_script("epilog", my_epilog, job_env->jobid,
 					     -1, my_env, job_env->uid);
 	else
@@ -5885,8 +6120,6 @@ _run_epilog(job_env_t *job_env)
 
 	xfree(my_epilog);
 	_destroy_env(my_env);
-
-	group_cache_remove_jobid(job_env->jobid);
 
 	diff_time = difftime(time(NULL), start_time);
 	if (diff_time >= (msg_timeout / 2)) {
@@ -5990,11 +6223,8 @@ static int _compare_starting_steps(void *listentry, void *key)
 	starting_step_t *step0 = (starting_step_t *)listentry;
 	starting_step_t *step1 = (starting_step_t *)key;
 
-	if (step1->step_id != NO_VAL)
-		return (step0->job_id  == step1->job_id &&
-			step0->step_id == step1->step_id);
-	else
-		return (step0->job_id  == step1->job_id);
+	return (step0->job_id == step1->job_id &&
+		step0->step_id == step1->step_id);
 }
 
 

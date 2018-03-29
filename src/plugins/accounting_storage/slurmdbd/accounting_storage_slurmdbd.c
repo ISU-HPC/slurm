@@ -117,6 +117,7 @@ static void _partial_free_dbd_job_start(void *object)
 		xfree(req->account);
 		xfree(req->array_task_str);
 		xfree(req->block_id);
+		xfree(req->mcs_label);
 		xfree(req->name);
 		xfree(req->nodes);
 		xfree(req->partition);
@@ -227,6 +228,7 @@ static int _setup_job_start_msg(dbd_job_start_msg_t *req,
 	req->timelimit     = job_ptr->time_limit;
 	req->tres_alloc_str= xstrdup(job_ptr->tres_alloc_str);
 	req->tres_req_str  = xstrdup(job_ptr->tres_req_str);
+	req->mcs_label	   = xstrdup(job_ptr->mcs_label);
 	req->wckey         = xstrdup(job_ptr->wckey);
 	req->uid           = job_ptr->user_id;
 	req->qos_id        = job_ptr->qos_id;
@@ -2473,7 +2475,8 @@ extern int clusteracct_storage_p_node_up(void *db_conn,
 extern int clusteracct_storage_p_cluster_tres(void *db_conn,
 					      char *cluster_nodes,
 					      char *tres_str_in,
-					      time_t event_time)
+					      time_t event_time,
+					      uint16_t rpc_version)
 {
 	slurmdbd_msg_t msg;
 	dbd_cluster_tres_msg_t req;
@@ -2548,10 +2551,11 @@ extern int jobacct_storage_p_job_start(void *db_conn,
 	msg.msg_type      = DBD_JOB_START;
 	msg.data          = &req;
 
-	/* if we already have the db_index don't wait around for it
-	 * again just send the message.  This also applies when the
-	 * slurmdbd is down and we are about to remove the job from
-	 * the system.
+	/* If we already have the db_index don't wait around for it
+	 * again just send the message when not resizing.  This also applies
+	 * when the slurmdbd is down and we are about to remove the job from
+	 * the system.  We don't want to wait for the db_index in that situation
+	 * either.
 	 */
 	if ((req.db_index && !IS_JOB_RESIZING(job_ptr))
 	    || (!req.db_index && IS_JOB_FINISHED(job_ptr))) {

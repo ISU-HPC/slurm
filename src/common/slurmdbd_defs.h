@@ -265,6 +265,7 @@ typedef struct dbd_job_start_msg {
 	uint32_t gid;	        /* group ID */
 	uint32_t job_id;	/* job ID */
 	uint32_t job_state;	/* job state */
+	char *   mcs_label;	/* job mcs_label */
 	char *   name;		/* job name */
 	char *   nodes;		/* hosts allocated to the job */
 	char *   node_inx;      /* ranged bitmap string of hosts
@@ -598,4 +599,6 @@ extern int slurmdbd_unpack_usage_msg(dbd_usage_msg_t **msg,
 extern int slurmdbd_unpack_buffer(void **in,
 				  uint16_t rpc_version,
 				  Buf buffer);
+
+extern int slurmdbd_agent_queue_count();
 #endif	/* !_SLURMDBD_DEFS_H */

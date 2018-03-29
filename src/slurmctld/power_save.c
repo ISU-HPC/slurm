@@ -131,7 +131,7 @@ static void _exc_node_part_free(void *x)
 
 static int _parse_exc_nodes(void)
 {
-	int rc;
+	int rc = SLURM_SUCCESS;
 	char *end_ptr = NULL, *save_ptr = NULL, *sep, *tmp, *tok;
 
 	sep = strchr(exc_nodes, ':');
@@ -254,7 +254,7 @@ static int _pick_exc_nodes(void *x, void *arg)
 /* Perform any power change work to nodes */
 static void _do_power_work(time_t now)
 {
-	int i, wake_cnt = 0, sleep_cnt = 0, susp_total = 0;
+	int i, wake_cnt = 0, susp_total = 0;
 	time_t delta_t;
 	uint32_t susp_state;
 	bitstr_t *avoid_node_bitmap = NULL;
@@ -389,7 +389,6 @@ static void _do_power_work(time_t now)
 				sleep_node_bitmap =
 					bit_alloc(node_record_count);
 			}
-			sleep_cnt++;
 			suspend_cnt++;
 			suspend_cnt_f++;
 			node_ptr->node_state |= NODE_STATE_POWER_SAVE;
@@ -402,6 +401,25 @@ static void _do_power_work(time_t now)
 			bit_set(sleep_node_bitmap,   i);
 			bit_set(suspend_node_bitmap, i);
 			last_suspend = now;
+		}
+
+		/*
+		 * Down nodes as if not resumed by ResumeTimeout
+		 */
+		if (bit_test(booting_node_bitmap, i) &&
+		    (now > node_ptr->last_response)  &&
+		    IS_NODE_POWER_UP(node_ptr) &&
+		    IS_NODE_NO_RESPOND(node_ptr)) {
+			info("node %s not resumed by ResumeTimeout(%d) - marking down and power_save",
+			     node_ptr->name, resume_timeout);
+			set_node_down_ptr(node_ptr, "ResumeTimeout reached");
+			node_ptr->node_state &= (~NODE_STATE_POWER_UP);
+			node_ptr->node_state |= NODE_STATE_POWER_SAVE;
+			bit_set(power_node_bitmap, i);
+			bit_set(avail_node_bitmap, i);
+			bit_clear(booting_node_bitmap, i);
+			bit_clear(resume_node_bitmap, i);
+			node_ptr->last_idle = 0;
 		}
 	}
 	FREE_NULL_BITMAP(avoid_node_bitmap);
@@ -898,10 +916,12 @@ static void *_init_power_save(void *arg)
 		if (boot_time == 0)
 			boot_time = now;
 
-		/* Only run every 60 seconds or after a node state change,
-		 *  whichever happens first */
+		/*
+		 * Only run every 10 seconds or after a node state change,
+		 * whichever happens first
+		 */
 		if ((last_node_update >= last_power_scan) ||
-		    (now >= (last_power_scan + 60))) {
+		    (now >= (last_power_scan + 10))) {
 			lock_slurmctld(node_write_lock);
 			_do_power_work(now);
 			unlock_slurmctld(node_write_lock);

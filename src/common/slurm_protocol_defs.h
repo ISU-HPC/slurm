@@ -254,7 +254,7 @@ typedef enum {
 	REQUEST_ASSOC_MGR_INFO,
 	RESPONSE_ASSOC_MGR_INFO,
 	REQUEST_EVENT_LOG,
-	RESPONSE_SICP_INFO_DEFUNCT,	/* DEFUNCT */
+	DEFUNCT_RESPONSE_SICP_INFO_DEFUNCT,	/* DEFUNCT */
 	REQUEST_LAYOUT_INFO,
 	RESPONSE_LAYOUT_INFO,
 	REQUEST_FED_INFO,
@@ -291,8 +291,10 @@ typedef enum {
 	RESPONSE_JOB_WILL_RUN,
 	REQUEST_JOB_ALLOCATION_INFO,
 	RESPONSE_JOB_ALLOCATION_INFO,
-	REQUEST_JOB_PACK_ALLOCATION,
-	RESPONSE_JOB_PACK_ALLOCATION,
+	DEFUNCT_REQUEST_JOB_ALLOCATION_INFO_LITE, /* DEFUNCT, CAN BE REUSED 2
+						   * VERSIONS AFTER V17.02 */
+	DEFUNCT_RESPONSE_JOB_ALLOCATION_INFO_LITE, /* DEFUNCT, CAN BE REUSED 2
+						    * VERSIONS AFTER V17.02 */
 	REQUEST_UPDATE_JOB_TIME,
 	REQUEST_JOB_READY,
 	RESPONSE_JOB_READY,		/* 4020 */
@@ -300,14 +302,16 @@ typedef enum {
 	REQUEST_JOB_NOTIFY,
 	REQUEST_JOB_SBCAST_CRED,
 	RESPONSE_JOB_SBCAST_CRED,
-
-	REQUEST_SIB_JOB_LOCK = 4050,
-	REQUEST_SIB_JOB_UNLOCK,
-	REQUEST_CTLD_MULT_MSG,
-	RESPONSE_CTLD_MULT_MSG,
-	REQUEST_SIB_MSG,
+	REQUEST_JOB_PACK_ALLOCATION,
+	RESPONSE_JOB_PACK_ALLOCATION,
 	REQUEST_JOB_PACK_ALLOC_INFO,
 	REQUEST_SUBMIT_BATCH_JOB_PACK,
+
+	REQUEST_CTLD_MULT_MSG = 4500,
+	RESPONSE_CTLD_MULT_MSG,
+	REQUEST_SIB_MSG,
+	REQUEST_SIB_JOB_LOCK,
+	REQUEST_SIB_JOB_UNLOCK,
 
 	REQUEST_JOB_STEP_CREATE = 5001,
 	RESPONSE_JOB_STEP_CREATE,
@@ -357,7 +361,8 @@ typedef enum {
 	REQUEST_REATTACH_TASKS,
 	RESPONSE_REATTACH_TASKS,
 	REQUEST_KILL_TIMELIMIT,
-	REQUEST_SIGNAL_JOB_DEFUNCT,	/* 6010 */ /* DEFUNCT */
+	DEFUNCT_REQUEST_SIGNAL_JOB,	/* 6010 */ /* DEFUNCT REUSE 2 VERSIONS
+						    * AFTER 17.11 */
 	REQUEST_TERMINATE_JOB,
 	MESSAGE_EPILOG_COMPLETE,
 	REQUEST_ABORT_JOB,	/* job shouldn't be running, kill it without
@@ -397,14 +402,12 @@ typedef enum {
 	ACCOUNTING_UPDATE_MSG = 10001,
 	ACCOUNTING_FIRST_REG,
 	ACCOUNTING_REGISTER_CTLD,
+	ACCOUNTING_TRES_CHANGE_DB,
+	ACCOUNTING_NODES_CHANGE_DB,
 
 	MESSAGE_COMPOSITE = 11001,
 	RESPONSE_MESSAGE_COMPOSITE,
 } slurm_msg_type_t;
-
-typedef enum {
-	CREDENTIAL1
-} slurm_credential_type_t;
 
 /*****************************************************************************\
  * core api configuration struct
@@ -787,6 +790,8 @@ typedef struct launch_tasks_request_msg {
 	uint32_t  uid;
 	char     *user_name;
 	uint32_t  gid;
+	uint32_t  ngids;
+	uint32_t *gids;
 	uint64_t  job_mem_lim;	/* MB of memory reserved by job per node OR
 				 * real memory per CPU | MEM_PER_CPU,
 				 * default=0 (no limit) */
@@ -799,9 +804,9 @@ typedef struct launch_tasks_request_msg {
 	char    **env;
 	char    **argv;
 	char     *cwd;
-	uint16_t cpu_bind_type;	/* --cpu_bind=                    */
+	uint16_t cpu_bind_type;	/* --cpu-bind=                    */
 	char     *cpu_bind;	/* binding map for map/mask_cpu           */
-	uint16_t mem_bind_type;	/* --mem_bind=                    */
+	uint16_t mem_bind_type;	/* --mem-bind=                    */
 	char     *mem_bind;	/* binding map for tasks to memory        */
 	uint16_t accel_bind_type; /* --accel-bind= */
 	uint16_t  num_resp_port;
@@ -961,10 +966,8 @@ typedef struct prolog_launch_msg {
 	char *alias_list;		/* node name/address/hostnamne aliases */
 	slurm_cred_t *cred;
 	uint32_t gid;
-	uint32_t *gids;			/* extended gid list. (optional) */
 	uint32_t job_id;		/* slurm job_id */
 	uint64_t job_mem_limit;		/* job's memory limit, passed via cred */
-	uint32_t ngids;			/* number of gids */
 	uint32_t nnodes;			/* count of nodes, passed via cred */
 	char *nodes;			/* list of nodes allocated to job_step */
 	char *partition;		/* partition the job is running in */
@@ -989,8 +992,10 @@ typedef struct batch_job_launch_msg {
 	uint32_t job_id;
 	uint32_t step_id;
 	uint32_t uid;
-	char    *user_name;
 	uint32_t gid;
+	char    *user_name;
+	uint32_t ngids;
+	uint32_t *gids;
 	uint32_t ntasks;	/* number of tasks in this job         */
 	uint32_t num_cpu_groups;/* elements in below cpu arrays */
 	uint16_t cpu_bind_type;	/* This currently does not do anything
@@ -1344,6 +1349,7 @@ slurm_free_node_registration_status_msg(slurm_node_registration_status_msg_t *
 extern void slurm_free_job_info(job_info_t * job);
 extern void slurm_free_job_info_members(job_info_t * job);
 
+extern void slurm_free_batch_script_msg(char *msg);
 extern void slurm_free_job_id_msg(job_id_msg_t * msg);
 extern void slurm_free_job_user_id_msg(job_user_id_msg_t * msg);
 extern void slurm_free_job_id_request_msg(job_id_request_msg_t * msg);
@@ -1531,6 +1537,14 @@ extern bool cluster_in_federation(void *ptr, char *cluster_name);
 /* Find where cluster_name nodes start in the node_array */
 extern int get_cluster_node_offset(char *cluster_name,
 				   node_info_msg_t *node_info_ptr);
+
+/*
+ * Print the char* given.
+ *
+ * Each \n will result in a new line.
+ * If inx is != -1 it is prepended to the string.
+ */
+extern void print_multi_line_string(char *user_msg, int inx);
 
 /* Given a protocol opcode return its string
  * description mapping the slurm_msg_type_t

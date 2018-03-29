@@ -578,8 +578,8 @@ extern slurmdb_job_rec_t *slurmdb_create_job_rec()
 	job->state = JOB_PENDING;
 	job->steps = list_create(slurmdb_destroy_step_rec);
 	job->requid = -1;
-	job->lft = (uint32_t)NO_VAL;
-	job->resvid = (uint32_t)NO_VAL;
+	job->lft = NO_VAL;
+	job->resvid = NO_VAL;
 
       	return job;
 }
@@ -588,12 +588,12 @@ extern slurmdb_step_rec_t *slurmdb_create_step_rec()
 {
 	slurmdb_step_rec_t *step = xmalloc(sizeof(slurmdb_step_rec_t));
 	memset(&step->stats, 0, sizeof(slurmdb_stats_t));
-	step->stepid = (uint32_t)NO_VAL;
+	step->stepid = NO_VAL;
 	step->state = NO_VAL;
 	step->exitcode = NO_VAL;
-	step->elapsed = (uint32_t)NO_VAL;
-	step->tot_cpu_sec = (uint32_t)NO_VAL;
-	step->tot_cpu_usec = (uint32_t)NO_VAL;
+	step->elapsed = NO_VAL;
+	step->tot_cpu_sec = NO_VAL;
+	step->tot_cpu_usec = NO_VAL;
 	step->requid = -1;
 
 	return step;
@@ -844,6 +844,7 @@ extern void slurmdb_destroy_job_rec(void *object)
 		xfree(job->cluster);
 		xfree(job->derived_es);
 		xfree(job->jobname);
+		xfree(job->mcs_label);
 		xfree(job->partition);
 		xfree(job->nodes);
 		xfree(job->req_gres);
@@ -853,6 +854,7 @@ extern void slurmdb_destroy_job_rec(void *object)
 		xfree(job->tres_req_str);
 		xfree(job->user);
 		xfree(job->wckey);
+		xfree(job->work_dir);
 		xfree(job);
 	}
 }
@@ -1341,7 +1343,7 @@ extern List slurmdb_get_info_cluster(char *cluster_names)
 	ListIterator itr, itr2;
 	bool all_clusters = 0;
 
-	if (cluster_names && !xstrcmp(cluster_names, "all"))
+	if (cluster_names && !xstrcasecmp(cluster_names, "all"))
 		all_clusters = 1;
 
 	cluster_name = slurm_get_cluster_name();
@@ -1413,7 +1415,7 @@ extern void slurmdb_init_assoc_rec(slurmdb_assoc_rec_t *assoc,
 	memset(assoc, 0, sizeof(slurmdb_assoc_rec_t));
 
 	assoc->def_qos_id = NO_VAL;
-	assoc->is_def = (uint16_t)NO_VAL;
+	assoc->is_def = NO_VAL16;
 
 	/* assoc->grp_tres_mins = NULL; */
 	/* assoc->grp_tres_run_mins = NULL; */
@@ -1450,7 +1452,7 @@ extern void slurmdb_init_clus_res_rec(slurmdb_clus_res_rec_t *clus_res,
 	if (free_it)
 		_free_clus_res_rec_members(clus_res);
 	memset(clus_res, 0, sizeof(slurmdb_clus_res_rec_t));
-	clus_res->percent_allowed = (uint16_t)NO_VAL;
+	clus_res->percent_allowed = NO_VAL16;
 }
 
 extern void slurmdb_init_cluster_rec(slurmdb_cluster_rec_t *cluster,
@@ -1532,7 +1534,7 @@ extern void slurmdb_init_res_rec(slurmdb_res_rec_t *res,
 	res->count = NO_VAL;
 	res->flags = SLURMDB_RES_FLAG_NOTSET;
 	res->id = NO_VAL;
-	res->percent_used = (uint16_t)NO_VAL;
+	res->percent_used = NO_VAL16;
 	res->type = SLURMDB_RESOURCE_NOTSET;
 }
 
@@ -1544,7 +1546,7 @@ extern void slurmdb_init_wckey_rec(slurmdb_wckey_rec_t *wckey, bool free_it)
 	if (free_it)
 		_free_wckey_rec_members(wckey);
 	memset(wckey, 0, sizeof(slurmdb_wckey_rec_t));
-	wckey->is_def = (uint16_t)NO_VAL;
+	wckey->is_def = NO_VAL16;
 }
 
 extern void slurmdb_init_tres_cond(slurmdb_tres_cond_t *tres,
@@ -1740,14 +1742,14 @@ extern uint32_t str_2_cluster_fed_states(char *state)
 		return SLURM_ERROR;
 	}
 
-	if (!strncasecmp(state, "Active", strlen(state)))
+	if (!xstrncasecmp(state, "Active", strlen(state)))
 		fed_state = CLUSTER_FED_STATE_ACTIVE;
-	else if (!strncasecmp(state, "Inactive", strlen(state)))
+	else if (!xstrncasecmp(state, "Inactive", strlen(state)))
 		fed_state = CLUSTER_FED_STATE_INACTIVE;
-	else if (!strncasecmp(state, "DRAIN", strlen(state))) {
+	else if (!xstrncasecmp(state, "DRAIN", strlen(state))) {
 		fed_state = CLUSTER_FED_STATE_ACTIVE;
 		fed_state |= CLUSTER_FED_STATE_DRAIN;
-	} else if (!strncasecmp(state, "DRAIN+REMOVE", strlen(state))) {
+	} else if (!xstrncasecmp(state, "DRAIN+REMOVE", strlen(state))) {
 		fed_state = CLUSTER_FED_STATE_ACTIVE;
 		fed_state |= (CLUSTER_FED_STATE_DRAIN |
 			      CLUSTER_FED_STATE_REMOVE);
@@ -1916,12 +1918,12 @@ extern slurmdb_admin_level_t str_2_slurmdb_admin_level(char *level)
 {
 	if (!level) {
 		return SLURMDB_ADMIN_NOTSET;
-	} else if (!strncasecmp(level, "None", 1)) {
+	} else if (!xstrncasecmp(level, "None", 1)) {
 		return SLURMDB_ADMIN_NONE;
-	} else if (!strncasecmp(level, "Operator", 1)) {
+	} else if (!xstrncasecmp(level, "Operator", 1)) {
 		return SLURMDB_ADMIN_OPERATOR;
-	} else if (!strncasecmp(level, "SuperUser", 1)
-		   || !strncasecmp(level, "Admin", 1)) {
+	} else if (!xstrncasecmp(level, "SuperUser", 1)
+		   || !xstrncasecmp(level, "Admin", 1)) {
 		return SLURMDB_ADMIN_SUPER_USER;
 	} else {
 		return SLURMDB_ADMIN_NOTSET;
@@ -2610,11 +2612,11 @@ extern uint32_t slurmdb_parse_purge(char *string)
 
 	if (purge != NO_VAL) {
 		int len = strlen(string+i);
-		if (!len || !strncasecmp("months", string+i, MAX(len, 1))) {
+		if (!len || !xstrncasecmp("months", string+i, MAX(len, 1))) {
 			purge |= SLURMDB_PURGE_MONTHS;
-		} else if (!strncasecmp("hours", string+i, MAX(len, 1))) {
+		} else if (!xstrncasecmp("hours", string+i, MAX(len, 1))) {
 			purge |= SLURMDB_PURGE_HOURS;
-		} else if (!strncasecmp("days", string+i, MAX(len, 1))) {
+		} else if (!xstrncasecmp("days", string+i, MAX(len, 1))) {
 			purge |= SLURMDB_PURGE_DAYS;
 		} else {
 			error("Invalid purge unit '%s', valid options "
@@ -3380,7 +3382,6 @@ extern slurmdb_tres_rec_t *slurmdb_copy_tres_rec(slurmdb_tres_rec_t *tres)
 	memcpy(tres_out, tres, sizeof(slurmdb_tres_rec_t));
 	tres_out->name = xstrdup(tres->name);
 	tres_out->type = xstrdup(tres->type);
-	tres_out->count = tres->count;
 
 	return tres_out;
 }
@@ -3545,6 +3546,9 @@ extern char *slurmdb_make_tres_string_from_simple(
 			break;
 		}
 		count = slurm_atoull(++tmp_str);
+
+		if (count == NO_VAL64)
+			goto get_next;
 
 		if (tres_str)
 			xstrcat(tres_str, ",");
@@ -3892,6 +3896,17 @@ extern int slurmdb_find_qos_in_list_by_name(void *x, void *key)
 	return 0;
 }
 
+extern int slurmdb_find_qos_in_list(void *x, void *key)
+{
+	slurmdb_qos_rec_t *qos_rec = (slurmdb_qos_rec_t *)x;
+	uint32_t qos_id = *(uint32_t *)key;
+
+	if (qos_rec->id == qos_id)
+		return 1;
+
+	return 0;
+}
+
 extern int slurmdb_find_selected_step_in_list(void *x, void *key)
 {
 	slurmdb_selected_step_t *selected_step = (slurmdb_selected_step_t *)x;
@@ -3966,9 +3981,9 @@ extern int slurmdb_find_tres_in_list_by_type(void *x, void *key)
 		end++;
 	}
 
-	if (!xstrncmp(tres_rec->type, type, end)) {
+	if (!xstrncasecmp(tres_rec->type, type, end)) {
 		if ((!found && !tres_rec->name) ||
-		    (found && !xstrcmp(tres_rec->name, type + end + 1))) {
+		    (found && !xstrcasecmp(tres_rec->name, type + end + 1))) {
 			return 1;
 		}
 	}

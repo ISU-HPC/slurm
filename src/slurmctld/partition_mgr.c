@@ -163,6 +163,7 @@ extern int build_part_bitmap(struct part_record *part_ptr)
 	bitstr_t *old_bitmap;
 	struct node_record *node_ptr;	/* pointer to node_record */
 	hostlist_t host_list;
+	int i;
 
 	part_ptr->total_cpus = 0;
 	part_ptr->total_nodes = 0;
@@ -221,10 +222,16 @@ extern int build_part_bitmap(struct part_record *part_ptr)
 			part_ptr->max_core_cnt = MAX(part_ptr->max_core_cnt,
 					node_ptr->cores);
 		}
-		node_ptr->part_cnt++;
-		xrealloc(node_ptr->part_pptr, (node_ptr->part_cnt *
-			sizeof(struct part_record *)));
-		node_ptr->part_pptr[node_ptr->part_cnt-1] = part_ptr;
+		for (i = 0; i < node_ptr->part_cnt; i++) {
+			if (node_ptr->part_pptr[i] == part_ptr)
+				break;
+		}
+		if (i == node_ptr->part_cnt) { /* Node in new partition */
+			node_ptr->part_cnt++;
+			xrealloc(node_ptr->part_pptr, (node_ptr->part_cnt *
+				 sizeof(struct part_record *)));
+			node_ptr->part_pptr[node_ptr->part_cnt-1] = part_ptr;
+		}
 		if (old_bitmap)
 			bit_clear(old_bitmap,
 				  (int) (node_ptr -
@@ -593,7 +600,7 @@ int load_all_part_state(void)
 	Buf buffer;
 	char *ver_str = NULL;
 	char* allow_alloc_nodes = NULL;
-	uint16_t protocol_version = (uint16_t)NO_VAL;
+	uint16_t protocol_version = NO_VAL16;
 	char* alternate = NULL;
 
 	/* read the file */
@@ -637,7 +644,7 @@ int load_all_part_state(void)
 	if (ver_str && !xstrcmp(ver_str, PART_STATE_VERSION))
 		safe_unpack16(&protocol_version, buffer);
 
-	if (protocol_version == (uint16_t)NO_VAL) {
+	if (protocol_version == NO_VAL16) {
 		if (!ignore_state_errors)
 			fatal("Can not recover partition state, data version incompatible, start with '-i' to ignore this");
 		error("**********************************************************");
@@ -1436,13 +1443,13 @@ extern int update_part (update_part_msg_t * part_desc, bool create_flag)
 		part_ptr->flags &= (~PART_FLAG_LLN);
 	}
 
-	if (part_desc->state_up != (uint16_t) NO_VAL) {
+	if (part_desc->state_up != NO_VAL16) {
 		info("update_part: setting state_up to %u for partition %s",
 		     part_desc->state_up, part_desc->name);
 		part_ptr->state_up = part_desc->state_up;
 	}
 
-	if (part_desc->max_share != (uint16_t) NO_VAL) {
+	if (part_desc->max_share != NO_VAL16) {
 		uint16_t force = part_desc->max_share & SHARED_FORCE;
 		uint16_t val = part_desc->max_share & (~SHARED_FORCE);
 		char tmp_str[24];
@@ -1478,13 +1485,13 @@ extern int update_part (update_part_msg_t * part_desc, bool create_flag)
 		}
 	}
 
-	if (part_desc->priority_tier != (uint16_t) NO_VAL) {
+	if (part_desc->priority_tier != NO_VAL16) {
 		info("update_part: setting PriorityTier to %u for partition %s",
 		     part_desc->priority_tier, part_desc->name);
 		part_ptr->priority_tier = part_desc->priority_tier;
 	}
 
-	if (part_desc->priority_job_factor != (uint16_t) NO_VAL) {
+	if (part_desc->priority_job_factor != NO_VAL16) {
 		info("update_part: setting PriorityJobFactor to %u for partition %s",
 		     part_desc->priority_job_factor, part_desc->name);
 		part_ptr->priority_job_factor = part_desc->priority_job_factor;

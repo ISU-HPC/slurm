@@ -1,8 +1,8 @@
 /*****************************************************************************\
- *  slurmd_plugstack.h - driver for slurmctld plugstack plugin
+ *  x11_forwarding.h - setup ssh port forwarding
  *****************************************************************************
- *  Copyright (C) 2013 Intel Inc
- *  Written by Ralph H Castain <ralph.h.castain@intel.com>
+ *  Copyright (C) 2017 SchedMD LLC.
+ *  Written by Tim Wickberg <tim@schedmd.com>
  *
  *  This file is part of SLURM, a resource management program.
  *  For details, see <https://slurm.schedmd.com/>.
@@ -34,34 +34,9 @@
  *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301  USA.
 \*****************************************************************************/
 
-#ifndef _SLURMD_PLUGSTACK_H
-#define _SLURMD_PLUGSTACK_H
+#ifndef _X11_FORWARDING_H_
+#define _X11_FORWARDING_H_
 
-#include "slurm/slurm.h"
-#include "src/slurmctld/slurmctld.h"
+extern int setup_x11_forward(stepd_step_rec_t *job, int *display);
 
-/*****************************************************************************\
- *  Plugin slurmctld/nonstop callback functions
-\*****************************************************************************/
-typedef struct slurm_nonstop_ops {
-	void		(*job_begin)	( struct job_record *job_ptr );
-	void		(*job_fini)	( struct job_record *job_ptr );
-	void		(*node_fail)	( struct job_record *job_ptr,
-					  struct node_record *node_ptr);
-} slurm_nonstop_ops_t;
-extern slurm_nonstop_ops_t nonstop_ops;
-/*
- * Initialize the slurmd plugstack plugin.
- *
- * Returns a SLURM errno.
- */
-extern int slurmd_plugstack_init(void);
-
-/*
- * Terminate the slurmd plugstack plugin. Free memory.
- *
- * Returns a SLURM errno.
- */
-extern int slurmd_plugstack_fini(void);
-
-#endif /* !_SLURMD_PLUGSTACK_H */
+#endif /* _X11_FORWARDING_H_ */

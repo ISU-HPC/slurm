@@ -1096,6 +1096,11 @@ static void *_step_fini(void *args)
 		      __func__);
 		return NULL;
 	}
+	if (!step_ptr->job_ptr) {
+		error("%s: step_ptr->job_ptr is NULL, this should never happen",
+		      __func__);
+		return NULL;
+	}
 
 	lock_slurmctld(job_read_lock);
 	memset(&nhc_info, 0, sizeof(nhc_info_t));
@@ -1115,7 +1120,8 @@ static void *_step_fini(void *args)
 		nhc_info.apid = SLURM_ID_HASH(step_ptr->job_ptr->job_id,
 					      step_ptr->step_id);
 
-		/* If we are killing the step it is usually because we
+		/*
+		 * If we are killing the step it is usually because we
 		 * can't kill it normally.  So NHC will start before
 		 * the step ends.  Setting the exit_code to SIGKILL
 		 * will make NHC do extra tests hopefully helping the
@@ -1146,8 +1152,7 @@ static void *_step_fini(void *args)
 	/* NHC has completed, release the step's resources */
 	_throttle_start();
 	lock_slurmctld(job_write_lock);
-	if (!step_ptr->job_ptr ||
-	    (step_ptr->job_ptr->job_id != nhc_info.jobid)) {
+	if (step_ptr->job_ptr->job_id != nhc_info.jobid) {
 		error("%s: For some reason we don't have a valid job_ptr for "
 		      "job %u APID %"PRIu64".  This should never happen.",
 		      __func__, nhc_info.jobid, nhc_info.apid);
@@ -1240,9 +1245,13 @@ extern int init ( void )
 	/* We must call the api here since we call this from other
 	 * things other than the slurmctld.
 	 */
-	uint16_t select_type_param = slurm_get_select_type_param();
-	if (select_type_param & CR_OTHER_CONS_RES)
+	other_select_type_param = slurm_get_select_type_param();
+
+	if (other_select_type_param & CR_OTHER_CONS_RES)
 		plugin_id = SELECT_PLUGIN_CRAY_CONS_RES;
+	else
+		plugin_id = SELECT_PLUGIN_CRAY_LINEAR;
+
 	debug_flags = slurm_get_debug_flags();
 
 #if defined(HAVE_NATIVE_CRAY) && !defined(HAVE_CRAY_NETWORK)
@@ -1394,7 +1403,7 @@ extern int select_p_state_restore(char *dir_name)
 	char *data = NULL;
 	int data_size = 0;
 	int data_allocated, data_read = 0;
-	uint16_t protocol_version = (uint16_t)NO_VAL;
+	uint16_t protocol_version = NO_VAL16;
 	uint32_t record_count;
 
 	if (scheduling_disabled)
@@ -1443,7 +1452,7 @@ extern int select_p_state_restore(char *dir_name)
 	safe_unpack16(&protocol_version, buffer);
 	debug3("Version in blade_state header is %u", protocol_version);
 
-	if (protocol_version == (uint16_t)NO_VAL) {
+	if (protocol_version == NO_VAL16) {
 		if (!ignore_state_errors)
 			fatal("Can not recover blade state, data version incompatible, start with '-i' to ignore this");
 		error("***********************************************");

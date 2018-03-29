@@ -56,15 +56,15 @@ static int _set_cond(int *start, int argc, char **argv,
 		}
 
 		if (!end ||
-		    !strncasecmp(argv[i], "Cluster", MAX(command_len, 1))) {
+		    !xstrncasecmp(argv[i], "Cluster", MAX(command_len, 1))) {
 			if (!job_cond->cluster_list)
 				job_cond->cluster_list =
 					list_create(slurm_destroy_char);
 			if (slurm_addto_char_list(job_cond->cluster_list,
 						  argv[i]+end))
 				set = 1;
-		} else if (!strncasecmp(argv[i], "Format",
-					MAX(command_len, 1))) {
+		} else if (!xstrncasecmp(argv[i], "Format",
+					 MAX(command_len, 1))) {
 			if (format_list)
 				slurm_addto_char_list(format_list, argv[i]+end);
 		} else {
@@ -103,8 +103,8 @@ static void _print_runaway_jobs(List format_list, List jobs)
 	int field_count;
 
 	printf("NOTE: Runaway jobs are jobs that don't exist in the "
-	       "controller but are still considered running in the "
-	       "database\n");
+	       "controller but are still considered pending, running or "
+	       "suspended in the database\n");
 
 	if (!format_list || !list_count(format_list)) {
 		if (!format_list)
@@ -202,6 +202,7 @@ static List _get_runaway_jobs(slurmdb_job_cond_t *job_cond)
 	job_cond->state_list = list_create(slurm_destroy_char);
 	slurm_addto_char_list(job_cond->state_list, "0");
 	slurm_addto_char_list(job_cond->state_list, "1");
+	slurm_addto_char_list(job_cond->state_list, "2");
 
 	if (!job_cond->cluster_list || !list_count(job_cond->cluster_list)) {
 		char *cluster = slurm_get_cluster_name();
@@ -230,8 +231,8 @@ static List _get_runaway_jobs(slurmdb_job_cond_t *job_cond)
 				      */
 	slurmdb_init_cluster_cond(&cluster_cond, 0);
 	cluster_cond.cluster_list = job_cond->cluster_list;
-	cluster_list = acct_storage_g_get_clusters(db_conn, my_uid,
-						   &cluster_cond);
+	cluster_list = slurmdb_clusters_get(db_conn,
+					    &cluster_cond);
 	if (!cluster_list) {
 		error("No cluster list returned.");
 		return NULL;
@@ -240,7 +241,7 @@ static List _get_runaway_jobs(slurmdb_job_cond_t *job_cond)
 		      (char *)list_peek(job_cond->cluster_list));
 		return NULL;
 	} else if (list_count(cluster_list) != 1) {
-		error("acct_storage_g_get_clusters didn't return exactly one cluster (%d)!  This should never happen.",
+		error("slurmdb_clusters_get didn't return exactly one cluster (%d)!  This should never happen.",
 		      list_count(cluster_list));
 		FREE_NULL_LIST(cluster_list);
 		return NULL;
@@ -262,6 +263,10 @@ static List _get_runaway_jobs(slurmdb_job_cond_t *job_cond)
 	runaway_jobs = list_create(NULL);
 	db_jobs_itr = list_iterator_create(db_jobs_list);
 	while ((db_job = list_next(db_jobs_itr))) {
+		/* If this job has end time, it is not a runaway job */
+		if (db_job->end)
+			continue;
+
 		job_runaway = true;
 		for (i = 0, clus_job = clus_jobs->job_array;
 		     i < clus_jobs->record_count; i++, clus_job++) {
@@ -286,7 +291,6 @@ extern int sacctmgr_list_runaway_jobs(int argc, char **argv)
 {
 	List runaway_jobs = NULL;
 	int rc = SLURM_SUCCESS;
-	uint32_t my_uid = getuid();
 	int i=0;
 	List format_list = list_create(slurm_destroy_char);
 	slurmdb_job_cond_t *job_cond = xmalloc(sizeof(slurmdb_job_cond_t));
@@ -301,8 +305,8 @@ extern int sacctmgr_list_runaway_jobs(int argc, char **argv)
 
 	for (i=0; i<argc; i++) {
 		int command_len = strlen(argv[i]);
-		if (!strncasecmp (argv[i], "Where", MAX(command_len, 5))
-		    || !strncasecmp (argv[i], "Set", MAX(command_len, 3)))
+		if (!xstrncasecmp(argv[i], "Where", MAX(command_len, 5))
+		    || !xstrncasecmp(argv[i], "Set", MAX(command_len, 3)))
 			i++;
 		_set_cond(&i, argc, argv, job_cond, format_list);
 	}
@@ -320,13 +324,13 @@ extern int sacctmgr_list_runaway_jobs(int argc, char **argv)
 
 	_print_runaway_jobs(format_list, runaway_jobs);
 
-	rc = acct_storage_g_fix_runaway_jobs(db_conn, my_uid, runaway_jobs);
+	rc = slurmdb_jobs_fix_runaway(db_conn, runaway_jobs);
 	if (rc == SLURM_SUCCESS) {
 		if (commit_check(ask_msg))
-			acct_storage_g_commit(db_conn, 1);
+			slurmdb_connection_commit(db_conn, 1);
 		else {
 			printf("Changes Discarded\n");
-			acct_storage_g_commit(db_conn, 0);
+			slurmdb_connection_commit(db_conn, 0);
 		}
 	} else
 		error("Failed to fix runaway job: %s\n",

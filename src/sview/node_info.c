@@ -1176,6 +1176,8 @@ extern int update_active_features_node(GtkDialog *dialog, const char *nodelist,
 	}
 	label = gtk_dialog_add_button(dialog,
 				      GTK_STOCK_YES, GTK_RESPONSE_OK);
+	gtk_window_set_type_hint(GTK_WINDOW(dialog),
+				 GDK_WINDOW_TYPE_HINT_NORMAL);
 	gtk_window_set_default(GTK_WINDOW(dialog), label);
 	gtk_dialog_add_button(dialog,
 			      GTK_STOCK_CANCEL, GTK_RESPONSE_CANCEL);
@@ -1266,6 +1268,8 @@ extern int update_avail_features_node(GtkDialog *dialog, const char *nodelist,
 	}
 	label = gtk_dialog_add_button(dialog,
 				      GTK_STOCK_YES, GTK_RESPONSE_OK);
+	gtk_window_set_type_hint(GTK_WINDOW(dialog),
+				 GDK_WINDOW_TYPE_HINT_NORMAL);
 	gtk_window_set_default(GTK_WINDOW(dialog), label);
 	gtk_dialog_add_button(dialog,
 			      GTK_STOCK_CANCEL, GTK_RESPONSE_CANCEL);
@@ -1354,6 +1358,8 @@ extern int update_gres_node(GtkDialog *dialog, const char *nodelist,
 		no_dialog = 1;
 	}
 	label = gtk_dialog_add_button(dialog, GTK_STOCK_YES, GTK_RESPONSE_OK);
+	gtk_window_set_type_hint(GTK_WINDOW(dialog),
+				 GDK_WINDOW_TYPE_HINT_NORMAL);
 	gtk_window_set_default(GTK_WINDOW(dialog), label);
 	gtk_dialog_add_button(dialog, GTK_STOCK_CANCEL, GTK_RESPONSE_CANCEL);
 
@@ -1410,7 +1416,7 @@ end_it:
 extern int update_state_node(GtkDialog *dialog,
 			     const char *nodelist, const char *type)
 {
-	uint16_t state = (uint16_t) NO_VAL;
+	uint16_t state = NO_VAL16;
 	char *upper = NULL, *lower = NULL;
 	int i = 0;
 	int rc = SLURM_SUCCESS;
@@ -1431,13 +1437,15 @@ extern int update_state_node(GtkDialog *dialog,
 		no_dialog = 1;
 	}
 	label = gtk_dialog_add_button(dialog, GTK_STOCK_YES, GTK_RESPONSE_OK);
+	gtk_window_set_type_hint(GTK_WINDOW(dialog),
+				 GDK_WINDOW_TYPE_HINT_NORMAL);
 	gtk_window_set_default(GTK_WINDOW(dialog), label);
 	gtk_dialog_add_button(dialog, GTK_STOCK_CANCEL, GTK_RESPONSE_CANCEL);
 
 	slurm_init_update_node_msg(node_msg);
 	node_msg->node_names = xstrdup(nodelist);
 
-	if (!strncasecmp("drain", type, 5)) {
+	if (!xstrncasecmp("drain", type, 5)) {
 		snprintf(tmp_char, sizeof(tmp_char),
 			 "Are you sure you want to drain node(s) %s?\n\n"
 			 "Please put reason.",
@@ -1445,13 +1453,13 @@ extern int update_state_node(GtkDialog *dialog,
 		entry = create_entry();
 		label = gtk_label_new(tmp_char);
 		state = NODE_STATE_DRAIN;
-	} else if (!strncasecmp("resume", type, 5)) {
+	} else if (!xstrncasecmp("resume", type, 5)) {
 		snprintf(tmp_char, sizeof(tmp_char),
 			 "Are you sure you want to resume node(s) %s?",
 			 nodelist);
 		label = gtk_label_new(tmp_char);
 		state = NODE_RESUME;
-	} else if (!strncasecmp("set", type, 3)) {
+	} else if (!xstrncasecmp("set", type, 3)) {
 		snprintf(tmp_char, sizeof(tmp_char),
 			 "Are you sure you want to down node(s) %s?\n\n"
 			 "Please put reason.",
@@ -1459,7 +1467,7 @@ extern int update_state_node(GtkDialog *dialog,
 		entry = create_entry();
 		label = gtk_label_new(tmp_char);
 		state = NODE_STATE_DOWN;
-	} else if (!strncasecmp("undrain", type, 5)) {
+	} else if (!xstrncasecmp("undrain", type, 5)) {
 		snprintf(tmp_char, sizeof(tmp_char),
 			 "Are you sure you want to undrain node(s) %s?",
 			 nodelist);
@@ -1467,7 +1475,7 @@ extern int update_state_node(GtkDialog *dialog,
 		state = NODE_STATE_UNDRAIN;
 	} else {
 
-		if (!strncasecmp("make", type, 4))
+		if (!xstrncasecmp("make", type, 4))
 			type = "idle";
 		for(i = 0; i < NODE_STATE_END; i++) {
 			upper = node_state_string(i);
@@ -2181,6 +2189,8 @@ extern void admin_node_name(char *name, char *old_value, char *type)
 		GTK_WINDOW(main_window),
 		GTK_DIALOG_MODAL | GTK_DIALOG_DESTROY_WITH_PARENT,
 		NULL);
+	gtk_window_set_type_hint(GTK_WINDOW(popup),
+				 GDK_WINDOW_TYPE_HINT_NORMAL);
 	gtk_window_set_transient_for(GTK_WINDOW(popup), NULL);
 
 	if (!xstrcasecmp("Update Available Features", type)

@@ -57,6 +57,7 @@ char *command_name;
 List clusters = NULL;
 int all_flag = 0;	/* display even hidden partitions */
 int detail_flag = 0;	/* display additional details */
+int future_flag = 0;	/* display future nodes */
 int exit_code = 0;	/* scontrol's exit code, =1 on any error at any time */
 int exit_flag = 0;	/* program to terminate if =1 */
 int federation_flag = 0;/* show federated jobs */
@@ -111,6 +112,7 @@ int main(int argc, char **argv)
 		{"clusters", 1, 0, 'M'},
 		{"details",  0, 0, 'd'},
 		{"federation",0, 0, OPT_LONG_FEDR},
+		{"future",   0, 0, 'F'},
 		{"help",     0, 0, 'h'},
 		{"hide",     0, 0, OPT_LONG_HIDE},
 		{"local",    0, 0, OPT_LONG_LOCAL},
@@ -144,6 +146,8 @@ int main(int argc, char **argv)
 	}
 	if (getenv("SCONTROL_FEDERATION"))
 		federation_flag = 1;
+	if (getenv("SCONTROL_FUTURE"))
+		future_flag = 1;
 	if (getenv("SCONTROL_LOCAL"))
 		local_flag = 1;
 	if (getenv("SCONTROL_SIB") || getenv("SCONTROL_SIBLING"))
@@ -151,9 +155,9 @@ int main(int argc, char **argv)
 
 	while (1) {
 		if ((optind < argc) &&
-		    !strncasecmp(argv[optind], "setdebugflags", 8))
+		    !xstrncasecmp(argv[optind], "setdebugflags", 8))
 			break;	/* avoid parsing "-<flagname>" as option */
-		if ((opt_char = getopt_long(argc, argv, "adhM:oQu:vV",
+		if ((opt_char = getopt_long(argc, argv, "adhM:FoQu:vV",
 					    long_options, &option_index)) == -1)
 			break;
 		switch (opt_char) {
@@ -167,6 +171,9 @@ int main(int argc, char **argv)
 			break;
 		case (int)'d':
 			detail_flag++;
+			break;
+		case (int)'F':
+			future_flag = 1;
 			break;
 		case (int)'h':
 			_usage ();
@@ -734,7 +741,7 @@ static int _process_command (int argc, char **argv)
 		return 0;
 	}
 
-	if (strncasecmp (tag, "abort", MAX(tag_len, 5)) == 0) {
+	if (xstrncasecmp(tag, "abort", MAX(tag_len, 5)) == 0) {
 		/* require full command name */
 		if (argc > 2) {
 			exit_code = 1;
@@ -749,9 +756,9 @@ static int _process_command (int argc, char **argv)
 				slurm_perror ("slurm_shutdown error");
 		}
 	}
-	else if (strncasecmp (tag, "all", MAX(tag_len, 2)) == 0)
+	else if (xstrncasecmp(tag, "all", MAX(tag_len, 2)) == 0)
 		all_flag = 1;
-	else if (strncasecmp (tag, "completing", MAX(tag_len, 2)) == 0) {
+	else if (xstrncasecmp(tag, "completing", MAX(tag_len, 2)) == 0) {
 		if (argc > 1) {
 			exit_code = 1;
 			fprintf (stderr,
@@ -760,7 +767,7 @@ static int _process_command (int argc, char **argv)
 		}
 		scontrol_print_completing();
 	}
-	else if (strncasecmp (tag, "cluster", MAX(tag_len, 2)) == 0) {
+	else if (xstrncasecmp(tag, "cluster", MAX(tag_len, 2)) == 0) {
 		if (clusters) {
 			FREE_NULL_LIST(clusters);
 			working_cluster_rec = NULL;
@@ -804,7 +811,7 @@ static int _process_command (int argc, char **argv)
 		/* if (old_slurm_ctl_conf_ptr) */
 		/* 	old_slurm_ctl_conf_ptr->last_update = 0; */
 	}
-	else if (strncasecmp (tag, "create", MAX(tag_len, 2)) == 0) {
+	else if (xstrncasecmp(tag, "create", MAX(tag_len, 2)) == 0) {
 		if (argc < 2) {
 			exit_code = 1;
 			fprintf (stderr, "too few arguments for %s keyword\n",
@@ -813,7 +820,7 @@ static int _process_command (int argc, char **argv)
 		}
 		_create_it ((argc - 1), &argv[1]);
 	}
-	else if (strncasecmp (tag, "details", MAX(tag_len, 1)) == 0) {
+	else if (xstrncasecmp(tag, "details", MAX(tag_len, 1)) == 0) {
 		if (argc > 1) {
 			exit_code = 1;
 			fprintf (stderr,
@@ -823,8 +830,8 @@ static int _process_command (int argc, char **argv)
 		}
 		detail_flag = 1;
 	}
-	else if ((strncasecmp (tag, "errnumstr", MAX(tag_len, 2)) == 0) ||
-		 (strncasecmp (tag, "errnostr", MAX(tag_len, 2)) == 0)) {
+	else if ((xstrncasecmp(tag, "errnumstr", MAX(tag_len, 2)) == 0) ||
+		 (xstrncasecmp(tag, "errnostr", MAX(tag_len, 2)) == 0)) {
 		if (argc != 2) {
 			exit_code = 1;
 			fprintf (stderr,
@@ -843,7 +850,7 @@ static int _process_command (int argc, char **argv)
 			}
 		}
 	}
-	else if (strncasecmp (tag, "exit", MAX(tag_len, 2)) == 0) {
+	else if (xstrncasecmp(tag, "exit", MAX(tag_len, 2)) == 0) {
 		if (argc > 1) {
 			exit_code = 1;
 			fprintf (stderr,
@@ -852,7 +859,7 @@ static int _process_command (int argc, char **argv)
 		}
 		exit_flag = 1;
 	}
-	else if (strncasecmp (tag, "help", MAX(tag_len, 2)) == 0) {
+	else if (xstrncasecmp(tag, "help", MAX(tag_len, 2)) == 0) {
 		if (argc > 1) {
 			exit_code = 1;
 			fprintf (stderr,
@@ -861,11 +868,11 @@ static int _process_command (int argc, char **argv)
 		}
 		_usage ();
 	}
-	else if (strncasecmp (tag, "hide", MAX(tag_len, 2)) == 0) {
+	else if (xstrncasecmp(tag, "hide", MAX(tag_len, 2)) == 0) {
 		all_flag = 0;
 		detail_flag = 0;
 	}
-	else if (strncasecmp (tag, "oneliner", MAX(tag_len, 1)) == 0) {
+	else if (xstrncasecmp(tag, "oneliner", MAX(tag_len, 1)) == 0) {
 		if (argc > 1) {
 			exit_code = 1;
 			fprintf (stderr,
@@ -874,7 +881,7 @@ static int _process_command (int argc, char **argv)
 		}
 		one_liner = 1;
 	}
-	else if (strncasecmp (tag, "pidinfo", MAX(tag_len, 3)) == 0) {
+	else if (xstrncasecmp(tag, "pidinfo", MAX(tag_len, 3)) == 0) {
 		if (argc > 2) {
 			exit_code = 1;
 			fprintf (stderr,
@@ -888,7 +895,7 @@ static int _process_command (int argc, char **argv)
 		} else
 			scontrol_pid_info ((pid_t) atol (argv[1]) );
 	}
-	else if (strncasecmp (tag, "ping", MAX(tag_len, 3)) == 0) {
+	else if (xstrncasecmp(tag, "ping", MAX(tag_len, 3)) == 0) {
 		if (argc > 1) {
 			exit_code = 1;
 			fprintf (stderr,
@@ -897,8 +904,8 @@ static int _process_command (int argc, char **argv)
 		}
 		_print_ping ();
 	}
-	else if ((strncasecmp (tag, "\\q", 2) == 0) ||
-		 (strncasecmp (tag, "quiet", MAX(tag_len, 4)) == 0)) {
+	else if ((xstrncasecmp(tag, "\\q", 2) == 0) ||
+		 (xstrncasecmp(tag, "quiet", MAX(tag_len, 4)) == 0)) {
 		if (argc > 1) {
 			exit_code = 1;
 			fprintf (stderr, "too many arguments for keyword:%s\n",
@@ -906,7 +913,7 @@ static int _process_command (int argc, char **argv)
 		}
 		quiet_flag = 1;
 	}
-	else if (strncasecmp (tag, "quit", MAX(tag_len, 4)) == 0) {
+	else if (xstrncasecmp(tag, "quit", MAX(tag_len, 4)) == 0) {
 		if (argc > 1) {
 			exit_code = 1;
 			fprintf (stderr,
@@ -915,7 +922,7 @@ static int _process_command (int argc, char **argv)
 		}
 		exit_flag = 1;
 	}
-	else if (strncasecmp (tag, "reboot_nodes", MAX(tag_len, 3)) == 0) {
+	else if (xstrncasecmp(tag, "reboot_nodes", MAX(tag_len, 3)) == 0) {
 		bool asap = false;
 		int argc_offset = 1;
 		if ((argc > 1) && !strcasecmp(argv[1], "ASAP")) {
@@ -937,7 +944,7 @@ static int _process_command (int argc, char **argv)
 				slurm_perror ("scontrol_reboot_nodes error");
 		}
 	}
-	else if (strncasecmp (tag, "reconfigure", MAX(tag_len, 3)) == 0) {
+	else if (xstrncasecmp(tag, "reconfigure", MAX(tag_len, 3)) == 0) {
 		if (argc > 2) {
 			exit_code = 1;
 			fprintf (stderr, "too many arguments for keyword:%s\n",
@@ -950,7 +957,7 @@ static int _process_command (int argc, char **argv)
 				slurm_perror ("slurm_reconfigure error");
 		}
 	}
-	else if (strncasecmp (tag, "checkpoint", MAX(tag_len, 2)) == 0) {
+	else if (xstrncasecmp(tag, "checkpoint", MAX(tag_len, 2)) == 0) {
 		if (argc > 5) {
 			exit_code = 1;
 			if (quiet_flag != 1)
@@ -976,7 +983,7 @@ static int _process_command (int argc, char **argv)
 			}
 		}
 	}
-	else if (strncasecmp (tag, "requeue", MAX(tag_len, 3)) == 0) {
+	else if (xstrncasecmp(tag, "requeue", MAX(tag_len, 3)) == 0) {
 		if (argc < 2) {
 			exit_code = 1;
 			if (quiet_flag != 1)
@@ -989,7 +996,7 @@ static int _process_command (int argc, char **argv)
 			}
 		}
 	}
-	else if (strncasecmp(tag, "requeuehold", 11) == 0) {
+	else if (xstrncasecmp(tag, "requeuehold", 11) == 0) {
 		if (argc < 2) {
 			exit_code = 1;
 			if (quiet_flag != 1)
@@ -1008,10 +1015,10 @@ static int _process_command (int argc, char **argv)
 		}
 
 	}
-	else if ((strncasecmp (tag, "hold",  4) == 0) ||
-		 (strncasecmp (tag, "holdu", 5) == 0) ||
-		 (strncasecmp (tag, "uhold", 5) == 0) ||
-	         (strncasecmp (tag, "release", MAX(tag_len, 3)) == 0)) {
+	else if ((xstrncasecmp(tag, "hold",  4) == 0) ||
+		 (xstrncasecmp(tag, "holdu", 5) == 0) ||
+		 (xstrncasecmp(tag, "uhold", 5) == 0) ||
+	         (xstrncasecmp(tag, "release", MAX(tag_len, 3)) == 0)) {
 		if (argc < 2) {
 			exit_code = 1;
 			if (quiet_flag != 1)
@@ -1030,8 +1037,8 @@ static int _process_command (int argc, char **argv)
 			(void) scontrol_hold(argv[0], NULL);   /* Clear cache */
 		}
 	}
-	else if ((strncasecmp (tag, "suspend", MAX(tag_len, 2)) == 0) ||
-	         (strncasecmp (tag, "resume", MAX(tag_len, 3)) == 0)) {
+	else if ((xstrncasecmp(tag, "suspend", MAX(tag_len, 2)) == 0) ||
+	         (xstrncasecmp(tag, "resume", MAX(tag_len, 3)) == 0)) {
 		if (argc < 2) {
 			exit_code = 1;
 			if (quiet_flag != 1)
@@ -1044,7 +1051,7 @@ static int _process_command (int argc, char **argv)
 			}
 		}
 	}
-	else if (strncasecmp (tag, "top", MAX(tag_len, 2)) == 0) {
+	else if (xstrncasecmp(tag, "top", MAX(tag_len, 2)) == 0) {
 		if (argc < 2) {
 			exit_code = 1;
 			if (quiet_flag != 1)
@@ -1061,7 +1068,7 @@ static int _process_command (int argc, char **argv)
 			scontrol_top_job(argv[1]);
 		}
 	}
-	else if (strncasecmp (tag, "wait_job", MAX(tag_len, 2)) == 0) {
+	else if (xstrncasecmp(tag, "wait_job", MAX(tag_len, 2)) == 0) {
 		if (cluster_flags & CLUSTER_FLAG_CRAY_A) {
 			fprintf(stderr,
 				"wait_job is handled automatically on Cray.\n");
@@ -1083,7 +1090,7 @@ static int _process_command (int argc, char **argv)
 				exit_code = 1;
 		}
 	}
-	else if (strncasecmp (tag, "setdebugflags", MAX(tag_len, 9)) == 0) {
+	else if (xstrncasecmp(tag, "setdebugflags", MAX(tag_len, 9)) == 0) {
 		if (argc > 2) {
 			exit_code = 1;
 			if (quiet_flag != 1)
@@ -1142,8 +1149,8 @@ static int _process_command (int argc, char **argv)
 			}
 		}
 	}
-	else if (!strncasecmp(tag, "fsdampeningfactor", MAX(tag_len, 3)) ||
-		 !strncasecmp(tag, "fairsharedampeningfactor",
+	else if (!xstrncasecmp(tag, "fsdampeningfactor", MAX(tag_len, 3)) ||
+		 !xstrncasecmp(tag, "fairsharedampeningfactor",
 			      MAX(tag_len, 3))) {
 		if (argc > 2) {
 			exit_code = 1;
@@ -1177,7 +1184,7 @@ static int _process_command (int argc, char **argv)
 			}
 		}
 	}
-	else if (strncasecmp (tag, "setdebug", MAX(tag_len, 2)) == 0) {
+	else if (xstrncasecmp(tag, "setdebug", MAX(tag_len, 2)) == 0) {
 		if (argc > 2) {
 			exit_code = 1;
 			if (quiet_flag != 1)
@@ -1230,7 +1237,7 @@ static int _process_command (int argc, char **argv)
 			}
 		}
 	}
-	else if (strncasecmp (tag, "schedloglevel", MAX(tag_len, 3)) == 0) {
+	else if (xstrncasecmp(tag, "schedloglevel", MAX(tag_len, 3)) == 0) {
 		if (argc > 2) {
 			exit_code = 1;
 			if (quiet_flag != 1)
@@ -1280,17 +1287,17 @@ static int _process_command (int argc, char **argv)
 			}
 		}
 	}
-	else if (strncasecmp (tag, "show", MAX(tag_len, 3)) == 0) {
+	else if (xstrncasecmp(tag, "show", MAX(tag_len, 3)) == 0) {
 		_show_it (argc, argv);
 	}
-	else if (strncasecmp (tag, "write", MAX(tag_len, 5)) == 0) {
+	else if (xstrncasecmp(tag, "write", MAX(tag_len, 5)) == 0) {
 		if (argc < 2) {
 			exit_code = 1;
 			fprintf(stderr,
 				"too few arguments for keyword:%s\n",
 				tag);
-		} else if (!strncasecmp(argv[1], "batch_script",
-					MAX(strlen(argv[1]), 5))) {
+		} else if (!xstrncasecmp(argv[1], "batch_script",
+					 MAX(strlen(argv[1]), 5))) {
 			/* write batch_script <jobid> <optional filename> */
 			if (argc > 4) {
 				exit_code = 1;
@@ -1300,8 +1307,8 @@ static int _process_command (int argc, char **argv)
 			} else {
 				scontrol_batch_script(argc-2, &argv[2]);
 			}
-		} else if (!strncasecmp(argv[1], "config",
-					MAX(strlen(argv[1]), 6))) {
+		} else if (!xstrncasecmp(argv[1], "config",
+					 MAX(strlen(argv[1]), 6))) {
 			/* write config */
 			if (argc > 2) {
 				exit_code = 1;
@@ -1318,7 +1325,7 @@ static int _process_command (int argc, char **argv)
 				argv[1]);
 		}
 	}
-	else if (strncasecmp (tag, "takeover", MAX(tag_len, 8)) == 0) {
+	else if (xstrncasecmp(tag, "takeover", MAX(tag_len, 8)) == 0) {
 		char *secondary = NULL;
 		slurm_ctl_conf_info_msg_t  *slurm_ctl_conf_ptr = NULL;
 
@@ -1339,7 +1346,7 @@ static int _process_command (int argc, char **argv)
 		}
 		xfree(secondary);
 	}
-	else if (strncasecmp (tag, "shutdown", MAX(tag_len, 8)) == 0) {
+	else if (xstrncasecmp(tag, "shutdown", MAX(tag_len, 8)) == 0) {
 		/* require full command name */
 		uint16_t options = 0;
 		if (argc == 2) {
@@ -1368,7 +1375,7 @@ static int _process_command (int argc, char **argv)
 			}
 		}
 	}
-	else if (strncasecmp (tag, "update", MAX(tag_len, 1)) == 0) {
+	else if (xstrncasecmp(tag, "update", MAX(tag_len, 1)) == 0) {
 		if (argc < 2) {
 			exit_code = 1;
 			fprintf (stderr, "too few arguments for %s keyword\n",
@@ -1377,7 +1384,7 @@ static int _process_command (int argc, char **argv)
 		}
 		_update_it ((argc - 1), &argv[1]);
 	}
-	else if (strncasecmp (tag, "delete", MAX(tag_len, 1)) == 0) {
+	else if (xstrncasecmp(tag, "delete", MAX(tag_len, 1)) == 0) {
 		if (argc < 2) {
 			exit_code = 1;
 			fprintf (stderr, "too few arguments for %s keyword\n",
@@ -1386,7 +1393,7 @@ static int _process_command (int argc, char **argv)
 		}
 		_delete_it ((argc - 1), &argv[1]);
 	}
-	else if (strncasecmp (tag, "verbose", MAX(tag_len, 4)) == 0) {
+	else if (xstrncasecmp(tag, "verbose", MAX(tag_len, 4)) == 0) {
 		if (argc > 1) {
 			exit_code = 1;
 			fprintf (stderr,
@@ -1395,7 +1402,7 @@ static int _process_command (int argc, char **argv)
 		}
 		quiet_flag = -1;
 	}
-	else if (strncasecmp (tag, "version", MAX(tag_len, 4)) == 0) {
+	else if (xstrncasecmp(tag, "version", MAX(tag_len, 4)) == 0) {
 		if (argc > 1) {
 			exit_code = 1;
 			fprintf (stderr,
@@ -1404,7 +1411,7 @@ static int _process_command (int argc, char **argv)
 		}
 		_print_version();
 	}
-	else if (strncasecmp (tag, "listpids", MAX(tag_len, 1)) == 0) {
+	else if (xstrncasecmp(tag, "listpids", MAX(tag_len, 1)) == 0) {
 		if (argc > 3) {
 			exit_code = 1;
 			fprintf (stderr,
@@ -1415,7 +1422,7 @@ static int _process_command (int argc, char **argv)
 					    argc <= 2 ? NULL : argv[2]);
 		}
 	}
-	else if (strncasecmp (tag, "notify", MAX(tag_len, 1)) == 0) {
+	else if (xstrncasecmp(tag, "notify", MAX(tag_len, 1)) == 0) {
 		if (argc < 3) {
 			exit_code = 1;
 			fprintf (stderr,
@@ -1426,7 +1433,7 @@ static int _process_command (int argc, char **argv)
 			slurm_perror("job notify failure");
 		}
 	}
-	else if (strncasecmp (tag, "callerid", MAX(tag_len, 2)) == 0) {
+	else if (xstrncasecmp(tag, "callerid", MAX(tag_len, 2)) == 0) {
 		if (argc < 5) {
 			exit_code = 1;
 			fprintf (stderr,
@@ -1471,10 +1478,10 @@ static void _create_it(int argc, char **argv)
 		} else {
 			tag_len = strlen(tag);
 		}
-		if (!strncasecmp(tag, "ReservationName", MAX(tag_len, 3))) {
+		if (!xstrncasecmp(tag, "ReservationName", MAX(tag_len, 3))) {
 			error_code = scontrol_create_res(argc, argv);
 			break;
-		} else if (!strncasecmp(tag, "PartitionName", MAX(tag_len, 3))) {
+		} else if (!xstrncasecmp(tag, "PartitionName", MAX(tag_len, 3))) {
 			error_code = scontrol_create_part(argc, argv);
 			break;
 		}
@@ -1519,7 +1526,7 @@ static void _delete_it(int argc, char **argv)
 	}
 
 	/* First identify the entity type to delete */
-	if (strncasecmp (tag, "PartitionName", MAX(tag_len, 3)) == 0) {
+	if (xstrncasecmp(tag, "PartitionName", MAX(tag_len, 3)) == 0) {
 		delete_part_msg_t part_msg;
 		part_msg.name = val;
 		if (slurm_delete_partition(&part_msg)) {
@@ -1527,7 +1534,7 @@ static void _delete_it(int argc, char **argv)
 			snprintf(errmsg, 64, "delete_partition %s", argv[0]);
 			slurm_perror(errmsg);
 		}
-	} else if (strncasecmp (tag, "ReservationName", MAX(tag_len, 3)) == 0) {
+	} else if (xstrncasecmp(tag, "ReservationName", MAX(tag_len, 3)) == 0) {
 		reservation_name_msg_t   res_msg;
 		res_msg.name = val;
 		if (slurm_delete_reservation(&res_msg)) {
@@ -1535,7 +1542,7 @@ static void _delete_it(int argc, char **argv)
 			snprintf(errmsg, 64, "delete_reservation %s", argv[0]);
 			slurm_perror(errmsg);
 		}
-	} else if (strncasecmp (tag, "BlockName", MAX(tag_len, 3)) == 0) {
+	} else if (xstrncasecmp(tag, "BlockName", MAX(tag_len, 3)) == 0) {
 		if (cluster_flags & CLUSTER_FLAG_BG) {
 			update_block_msg_t   block_msg;
 			slurm_init_update_block_msg ( &block_msg );
@@ -1578,8 +1585,8 @@ static void _show_it(int argc, char **argv)
 		return;
 	}
 
-	if (strncasecmp (argv[1], "layouts", MAX(tag_len, 2)) == 0 ||
-	    strncasecmp (argv[1], "assoc_mgr", MAX(tag_len, 2)) == 0)
+	if (xstrncasecmp(argv[1], "layouts", MAX(tag_len, 2)) == 0 ||
+	    xstrncasecmp(argv[1], "assoc_mgr", MAX(tag_len, 2)) == 0)
 		allow_opt = true;
 
 	if (argc > 3 && !allow_opt) {
@@ -1603,21 +1610,21 @@ static void _show_it(int argc, char **argv)
 		val = NULL;
 	}
 
-	if (strncasecmp (tag, "aliases", MAX(tag_len, 1)) == 0) {
+	if (xstrncasecmp(tag, "aliases", MAX(tag_len, 1)) == 0) {
 		if (val)
 			_print_aliases (val);
 		else
 			_print_aliases (NULL);
-	} else if (strncasecmp (tag, "blocks", MAX(tag_len, 2)) == 0) {
+	} else if (xstrncasecmp(tag, "blocks", MAX(tag_len, 2)) == 0) {
 		scontrol_print_block (val);
-	} else if (strncasecmp (tag, "burstbuffer", MAX(tag_len, 2)) == 0) {
+	} else if (xstrncasecmp(tag, "burstbuffer", MAX(tag_len, 2)) == 0) {
 		scontrol_print_burst_buffer ();
-	} else if (!strncasecmp(tag, "assoc_mgr", MAX(tag_len, 2)) ||
-		   !strncasecmp(tag, "cache", MAX(tag_len, 2))) {
+	} else if (!xstrncasecmp(tag, "assoc_mgr", MAX(tag_len, 2)) ||
+		   !xstrncasecmp(tag, "cache", MAX(tag_len, 2))) {
 		scontrol_print_assoc_mgr_info(argc - 2, argv + 2);
-	} else if (strncasecmp (tag, "config", MAX(tag_len, 1)) == 0) {
+	} else if (xstrncasecmp(tag, "config", MAX(tag_len, 1)) == 0) {
 		_print_config (val);
-	} else if (strncasecmp (tag, "daemons", MAX(tag_len, 1)) == 0) {
+	} else if (xstrncasecmp(tag, "daemons", MAX(tag_len, 1)) == 0) {
 		if (val) {
 			exit_code = 1;
 			if (quiet_flag != 1)
@@ -1626,51 +1633,51 @@ static void _show_it(int argc, char **argv)
 					argv[0]);
 		} else
 			_print_daemons();
-	} else if (strncasecmp (tag, "Federations",  MAX(tag_len, 1)) == 0) {
+	} else if (xstrncasecmp(tag, "Federations",  MAX(tag_len, 1)) == 0) {
 		scontrol_print_federation();
-	} else if (strncasecmp (tag, "FrontendName",  MAX(tag_len, 1)) == 0) {
+	} else if (xstrncasecmp(tag, "FrontendName",  MAX(tag_len, 1)) == 0) {
 		scontrol_print_front_end_list(val);
-	} else if (strncasecmp (tag, "hostnames", MAX(tag_len, 5)) == 0) {
+	} else if (xstrncasecmp(tag, "hostnames", MAX(tag_len, 5)) == 0) {
 		if (val)
 			scontrol_print_hosts(val);
 		else
 			scontrol_print_hosts(getenv("SLURM_NODELIST"));
-	} else if (strncasecmp (tag, "hostlist", MAX(tag_len, 5)) == 0) {
+	} else if (xstrncasecmp(tag, "hostlist", MAX(tag_len, 5)) == 0) {
 		if (!val) {
 			exit_code = 1;
 			fprintf(stderr, "invalid encode argument\n");
 			_usage();
 		} else if (scontrol_encode_hostlist(val, 0))
 			exit_code = 1;
-	} else if (strncasecmp (tag, "hostlistsorted", MAX(tag_len, 9)) == 0) {
+	} else if (xstrncasecmp(tag, "hostlistsorted", MAX(tag_len, 9)) == 0) {
 		if (!val) {
 			exit_code = 1;
 			fprintf(stderr, "invalid encode argument\n");
 			_usage();
 		} else if (scontrol_encode_hostlist(val, 1))
 			exit_code = 1;
-	} else if (strncasecmp (tag, "jobs", MAX(tag_len, 1)) == 0 ||
-		   strncasecmp (tag, "jobid", MAX(tag_len, 1)) == 0 ) {
+	} else if (xstrncasecmp(tag, "jobs", MAX(tag_len, 1)) == 0 ||
+		   xstrncasecmp(tag, "jobid", MAX(tag_len, 1)) == 0 ) {
 		scontrol_print_job (val);
-	} else if (strncasecmp (tag, "layouts", MAX(tag_len, 2)) == 0) {
+	} else if (xstrncasecmp(tag, "layouts", MAX(tag_len, 2)) == 0) {
 		scontrol_print_layout(argc-1, argv + 1);
-	} else if (strncasecmp(tag, "licenses", MAX(tag_len, 2)) == 0) {
+	} else if (xstrncasecmp(tag, "licenses", MAX(tag_len, 2)) == 0) {
 		scontrol_print_licenses(val);
-	} else if (strncasecmp (tag, "nodes", MAX(tag_len, 1)) == 0) {
+	} else if (xstrncasecmp(tag, "nodes", MAX(tag_len, 1)) == 0) {
 		scontrol_print_node_list (val);
-	} else if (strncasecmp (tag, "partitions", MAX(tag_len, 2)) == 0 ||
-		   strncasecmp (tag, "partitionname", MAX(tag_len, 2)) == 0) {
+	} else if (xstrncasecmp(tag, "partitions", MAX(tag_len, 2)) == 0 ||
+		   xstrncasecmp(tag, "partitionname", MAX(tag_len, 2)) == 0) {
 		scontrol_print_part (val);
-	} else if (strncasecmp (tag, "powercapping", MAX(tag_len, 2)) == 0) {
+	} else if (xstrncasecmp(tag, "powercapping", MAX(tag_len, 2)) == 0) {
 		scontrol_print_powercap (val);
-	} else if (strncasecmp (tag, "reservations", MAX(tag_len, 1)) == 0 ||
-		   strncasecmp (tag, "reservationname", MAX(tag_len, 1)) == 0) {
+	} else if (xstrncasecmp(tag, "reservations", MAX(tag_len, 1)) == 0 ||
+		   xstrncasecmp(tag, "reservationname", MAX(tag_len, 1)) == 0) {
 		scontrol_print_res (val);
-	} else if (strncasecmp (tag, "slurmd", MAX(tag_len, 2)) == 0) {
+	} else if (xstrncasecmp(tag, "slurmd", MAX(tag_len, 2)) == 0) {
 		_print_slurmd (val);
-	} else if (strncasecmp (tag, "steps", MAX(tag_len, 2)) == 0) {
+	} else if (xstrncasecmp(tag, "steps", MAX(tag_len, 2)) == 0) {
 		scontrol_print_step (val);
-	} else if (strncasecmp (tag, "topology", MAX(tag_len, 1)) == 0) {
+	} else if (xstrncasecmp(tag, "topology", MAX(tag_len, 1)) == 0) {
 		scontrol_print_topo (val);
 	} else {
 		exit_code = 1;
@@ -1713,33 +1720,34 @@ static void _update_it(int argc, char **argv)
 			tag_len = val - argv[i];
 			val++;
 		}
-		if (!strncasecmp(tag, "NodeName", MAX(tag_len, 3))) {
+		if (!xstrncasecmp(tag, "NodeName", MAX(tag_len, 3))) {
 			node_tag = 1;
-		} else if (!strncasecmp(tag, "PartitionName",
+		} else if (!xstrncasecmp(tag, "PartitionName",
 					MAX(tag_len, 3))) {
 			part_tag = 1;
-		} else if (!strncasecmp(tag, "JobId", MAX(tag_len, 3)) ||
-			   !strncasecmp(tag, "JobNAME", MAX(tag_len, 3))) {
+		} else if (!xstrncasecmp(tag, "JobId", MAX(tag_len, 3)) ||
+			   !xstrncasecmp(tag, "JobNAME", MAX(tag_len, 3))) {
 			job_tag = 1;
-		} else if (!strncasecmp(tag, "StepId", MAX(tag_len, 4))) {
+		} else if (!xstrncasecmp(tag, "StepId", MAX(tag_len, 4))) {
 			step_tag = 1;
-		} else if (!strncasecmp(tag, "BlockName", MAX(tag_len, 3))) {
+		} else if (!xstrncasecmp(tag, "BlockName", MAX(tag_len, 3))) {
 			block_tag = 1;
-		} else if (!strncasecmp(tag, "SubBPName", MAX(tag_len, 3)) ||
-			   !strncasecmp(tag, "SubMPName", MAX(tag_len, 3))) {
+		} else if (!xstrncasecmp(tag, "SubBPName", MAX(tag_len, 3)) ||
+			   !xstrncasecmp(tag, "SubMPName", MAX(tag_len, 3))) {
 			sub_tag = 1;
-		} else if (!strncasecmp(tag, "FrontendName",
-					MAX(tag_len, 2))) {
+		} else if (!xstrncasecmp(tag, "FrontendName",
+					 MAX(tag_len, 2))) {
 			front_end_tag = 1;
-		} else if (!strncasecmp(tag, "ReservationName",
-					MAX(tag_len, 3))) {
+		} else if (!xstrncasecmp(tag, "ReservationName",
+					 MAX(tag_len, 3))) {
 			res_tag = 1;
-		} else if (!strncasecmp(tag, "SlurmctldDebug",
-					MAX(tag_len, 2))) {
+		} else if (!xstrncasecmp(tag, "SlurmctldDebug",
+					 MAX(tag_len, 2))) {
 			debug_tag = 1;
-		} else if (!strncasecmp(tag, "Layouts",	MAX(tag_len, 5))) {
+		} else if (!xstrncasecmp(tag, "Layouts",
+					 MAX(tag_len, 5))) {
 			layout_tag = 1;
-		} else if (!strncasecmp(tag, "PowerCap", MAX(tag_len, 3))) {
+		} else if (!xstrncasecmp(tag, "PowerCap", MAX(tag_len, 3))) {
 			powercap_tag = 1;
 		}
 	}
@@ -1835,18 +1843,18 @@ static int _update_bluegene_block(int argc, char **argv)
 			return 0;
 		}
 
-		if (!strncasecmp(tag, "BlockName", MAX(tag_len, 2))) {
+		if (!xstrncasecmp(tag, "BlockName", MAX(tag_len, 2))) {
 			block_msg.bg_block_id = val;
-		} else if (!strncasecmp(tag, "State", MAX(tag_len, 2))) {
-			if (!strncasecmp(val, "ERROR", MAX(vallen, 1)))
+		} else if (!xstrncasecmp(tag, "State", MAX(tag_len, 2))) {
+			if (!xstrncasecmp(val, "ERROR", MAX(vallen, 1)))
 				block_msg.state = BG_BLOCK_ERROR_FLAG;
-			else if (!strncasecmp(val, "FREE", MAX(vallen, 1)))
+			else if (!xstrncasecmp(val, "FREE", MAX(vallen, 1)))
 				block_msg.state = BG_BLOCK_FREE;
-			else if (!strncasecmp(val, "RECREATE", MAX(vallen, 3)))
+			else if (!xstrncasecmp(val, "RECREATE", MAX(vallen, 3)))
 				block_msg.state = BG_BLOCK_BOOTING;
-			else if (!strncasecmp(val, "REMOVE", MAX(vallen, 3)))
+			else if (!xstrncasecmp(val, "REMOVE", MAX(vallen, 3)))
 				block_msg.state = BG_BLOCK_NAV;
-			else if (!strncasecmp(val, "RESUME", MAX(vallen, 3)))
+			else if (!xstrncasecmp(val, "RESUME", MAX(vallen, 3)))
 				block_msg.state = BG_BLOCK_TERM;
 			else {
 				exit_code = 1;
@@ -1870,7 +1878,7 @@ static int _update_bluegene_block(int argc, char **argv)
 	if (!block_msg.bg_block_id) {
 		error("You didn't supply a block name.");
 		return 0;
-	} else if (block_msg.state == (uint16_t)NO_VAL) {
+	} else if (block_msg.state == NO_VAL16) {
 		error("You didn't give me a state to set %s to "
 		      "(i.e. FREE, ERROR).", block_msg.mp_str);
 		return 0;
@@ -1920,13 +1928,13 @@ static int _update_bluegene_submp(int argc, char **argv)
 			return 0;
 		}
 
-		if (!strncasecmp(tag, "SubBPName", MAX(tag_len, 2))
-		    || !strncasecmp(tag, "SubMPName", MAX(tag_len, 2)))
+		if (!xstrncasecmp(tag, "SubBPName", MAX(tag_len, 2))
+		    || !xstrncasecmp(tag, "SubMPName", MAX(tag_len, 2)))
 			block_msg.mp_str = val;
-		else if (!strncasecmp(tag, "State", MAX(tag_len, 2))) {
-			if (!strncasecmp(val, "ERROR", MAX(vallen, 1)))
+		else if (!xstrncasecmp(tag, "State", MAX(tag_len, 2))) {
+			if (!xstrncasecmp(val, "ERROR", MAX(vallen, 1)))
 				block_msg.state = BG_BLOCK_ERROR_FLAG;
-			else if (!strncasecmp(val, "FREE", MAX(vallen, 1)))
+			else if (!xstrncasecmp(val, "FREE", MAX(vallen, 1)))
 				block_msg.state = BG_BLOCK_FREE;
 			else {
 				exit_code = 1;
@@ -1948,7 +1956,7 @@ static int _update_bluegene_submp(int argc, char **argv)
 	if (!block_msg.mp_str) {
 		error("You didn't supply an ionode list.");
 		return 0;
-	} else if (block_msg.state == (uint16_t)NO_VAL) {
+	} else if (block_msg.state == NO_VAL16) {
 		error("You didn't give me a state to set %s to "
 		      "(i.e. FREE, ERROR).", block_msg.mp_str);
 		return 0;
@@ -1994,23 +2002,23 @@ void _usage(void)
 	printf ("\
 scontrol [<OPTION>] [<COMMAND>]                                            \n\
     Valid <OPTION> values are:                                             \n\
-     -a or --all: equivalent to \"all\" command                            \n\
-     -d or --details: equivalent to \"details\" command                    \n\
-           --federation: Report federated job information if a member of a \n\
-	     one.                                                          \n\
-     -h or --help: equivalent to \"help\" command                          \n\
-           --hide: equivalent to \"hide\" command                          \n\
-           --local: Report information only about jobs on the local cluster.\n\
-	     Overrides --federation.                                       \n\
-     -M or --cluster: equivalent to \"cluster\" command. Implies --local.  \n\
-             NOTE: SlurmDBD must be up.                                    \n\
-     -o or --oneliner: equivalent to \"oneliner\" command                  \n\
-     -Q or --quiet: equivalent to \"quiet\" command                        \n\
-           --sibling: Report information about all sibling jobs on a       \n\
-	     federated cluster. Implies --federation.                      \n\
-     -u or --uid: Update job as user <uid> instead of the invoking user id.\n\
-     -v or --verbose: equivalent to \"verbose\" command                    \n\
-     -V or --version: equivalent to \"version\" command                    \n\
+     -a, --all      Equivalent to \"all\" command                          \n\
+     -d, --details  Equivalent to \"details\" command                      \n\
+     --federation   Report federated job information if a member of a  one \n\
+     -F, --future   Report information about nodes in \"FUTURE\" state.    \n\
+     -h, --help     Equivalent to \"help\" command                         \n\
+     --hide         Equivalent to \"hide\" command                         \n\
+     --local        Report information only about jobs on the local cluster.\n\
+	            Overrides --federation.                                \n\
+     -M, --cluster  Equivalent to \"cluster\" command. Implies --local.    \n\
+                    NOTE: SlurmDBD must be up.                             \n\
+     -o, --oneliner Equivalent to \"oneliner\" command                     \n\
+     -Q, --quiet    Equivalent to \"quiet\" command                        \n\
+     --sibling      Report information about all sibling jobs on a         \n\
+	            federated cluster. Implies --federation option.        \n\
+     -u,--uid       Update job as user \"uid\" instead of the invoking user.\n\
+     -v, --verbose  Equivalent to \"verbose\" command                      \n\
+     -V, --version  Equivalent to \"version\" command                      \n\
 									   \n\
   <keyword> may be omitted from the execute line and scontrol will execute \n\
   in interactive mode. It will process commands as entered until explicitly\n\
@@ -2073,7 +2081,7 @@ scontrol [<OPTION>] [<COMMAND>]                                            \n\
      shutdown <OPTS>          shutdown slurm daemons                       \n\
 			      (the primary controller will be stopped)     \n\
      suspend <job_list>       susend specified job (see resume)            \n\
-     top <job_id>             Put specified job first in queue for user    \n\
+     top <job_list>           Put specified job first in queue for user    \n\
      takeover                 ask slurm backup controller to take over     \n\
      uhold <jobid_list>       place user hold on specified job (see hold)  \n\
      update <SPECIFICATIONS>  update job, node, partition, reservation,    \n\

@@ -49,7 +49,7 @@ typedef struct {
 #define PMIXP_INFO_MAGIC 0xCAFE01F0
 	int magic;
 #endif
-	char nspace[PMIX_MAX_NSLEN];
+	char nspace[PMIXP_MAX_NSLEN];
 	uint32_t jobid; /* Current SLURM job id */
 	uint32_t stepid; /* Current step id (or NO_VAL) */
 	uint32_t nnodes; /* number of nodes in current step */
@@ -83,6 +83,7 @@ const char *pmixp_info_srv_usock_path(void);
 int pmixp_info_srv_usock_fd(void);
 bool pmixp_info_same_arch(void);
 bool pmixp_info_srv_direct_conn(void);
+bool pmixp_info_srv_direct_conn_early(void);
 bool pmixp_info_srv_direct_conn_ucx(void);
 
 

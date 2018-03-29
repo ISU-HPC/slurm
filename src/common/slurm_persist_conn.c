@@ -257,7 +257,9 @@ static int _process_service_connection(
 					arg, &msg, &buffer, &uid);
 				_persist_free_msg_members(persist_conn, &msg);
 				if (rc != SLURM_SUCCESS &&
-				    rc != ACCOUNTING_FIRST_REG) {
+				    rc != ACCOUNTING_FIRST_REG &&
+				    rc != ACCOUNTING_TRES_CHANGE_DB &&
+				    rc != ACCOUNTING_NODES_CHANGE_DB) {
 					error("Processing last message from "
 					      "connection %d(%s) uid(%d)",
 					      persist_conn->fd,
@@ -576,6 +578,7 @@ extern int slurm_persist_conn_open(slurm_persist_conn_t *persist_conn)
 
 	memset(&req, 0, sizeof(persist_init_req_msg_t));
 	req.cluster_name = persist_conn->cluster_name;
+	req.persist_type = persist_conn->persist_type;
 	req.port = persist_conn->my_port;
 	req.version = SLURM_PROTOCOL_VERSION;
 
@@ -1006,12 +1009,20 @@ unpack_error:
 extern void slurm_persist_pack_init_req_msg(
 	persist_init_req_msg_t *msg, Buf buffer)
 {
+	/* always send version field first for backwards compatibility */
 	pack16(msg->version, buffer);
 
-	/* Adding anything to this needs to happen after the version
-	   since this is where the receiver gets the version from. */
-	packstr(msg->cluster_name, buffer);
-	pack16(msg->port, buffer);
+	if (msg->version >= SLURM_17_11_PROTOCOL_VERSION) {
+		packstr(msg->cluster_name, buffer);
+		pack16(msg->persist_type, buffer);
+		pack16(msg->port, buffer);
+	} else if (msg->version >= SLURM_MIN_PROTOCOL_VERSION) {
+		packstr(msg->cluster_name, buffer);
+		pack16(msg->port, buffer);
+	} else {
+		error("%s: invalid protocol version %u",
+		      __func__, msg->version);
+	}
 }
 
 extern int slurm_persist_unpack_init_req_msg(
@@ -1025,8 +1036,19 @@ extern int slurm_persist_unpack_init_req_msg(
 	*msg = msg_ptr;
 
 	safe_unpack16(&msg_ptr->version, buffer);
-	safe_unpackstr_xmalloc(&msg_ptr->cluster_name, &tmp32, buffer);
-	safe_unpack16(&msg_ptr->port, buffer);
+
+	if (msg_ptr->version >= SLURM_17_11_PROTOCOL_VERSION) {
+		safe_unpackstr_xmalloc(&msg_ptr->cluster_name, &tmp32, buffer);
+		safe_unpack16(&msg_ptr->persist_type, buffer);
+		safe_unpack16(&msg_ptr->port, buffer);
+	} else if (msg_ptr->version >= SLURM_MIN_PROTOCOL_VERSION) {
+		safe_unpackstr_xmalloc(&msg_ptr->cluster_name, &tmp32, buffer);
+		safe_unpack16(&msg_ptr->port, buffer);
+	} else {
+		error("%s: invalid protocol_version %u",
+		      __func__, msg_ptr->version);
+		goto unpack_error;
+	}
 
 	return SLURM_SUCCESS;
 

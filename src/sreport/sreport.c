@@ -62,17 +62,18 @@ int input_words;	/* number of words of input permitted */
 bool local_flag;	/* --local option */
 int quiet_flag;		/* quiet=1, verbose=-1, normal=0 */
 char *tres_str = NULL;	/* --tres= value */
-List tres_list;		/* TRES to report, built from --tres= value */
+List g_tres_list = NULL;/* TRES list from database -- unlatered */
+List tres_list = NULL;  /* TRES list based of tres_str (--tres=str) */
 int all_clusters_flag = 0;
 char *cluster_flag = NULL;
 slurmdb_report_time_format_t time_format = SLURMDB_REPORT_TIME_MINS;
 char *time_format_string = "Minutes";
 void *db_conn = NULL;
-uint32_t my_uid = 0;
 slurmdb_report_sort_t sort_flag = SLURMDB_REPORT_SORT_TIME;
+char *tres_usage_str = "CPU";
 
 static char *	_build_cluster_string(void);
-static List	_build_tres_list(char *tres_str);
+static void	_build_tres_list(void);
 static void	_cluster_rep (int argc, char **argv);
 static int	_get_command (int *argc, char **argv);
 static void	_job_rep (int argc, char **argv);
@@ -242,13 +243,13 @@ main (int argc, char **argv)
 	    !local_flag)
 		cluster_flag = _build_cluster_string();
 
-	my_uid = getuid();
 	db_conn = slurmdb_connection_get();
 	if (errno) {
 		fatal("Problem connecting to the database: %m");
 		exit(1);
 	}
-	tres_list = _build_tres_list(tres_str);
+
+	_build_tres_list();
 
 	if (input_field_count)
 		exit_flag = 1;
@@ -298,8 +299,8 @@ static char *_build_cluster_string(void)
 	fed_cond.cluster_list = cluster_list;
 
 	if ((fed_list =
-	     acct_storage_g_get_federations(db_conn, my_uid, &fed_cond)) &&
-	     list_count(fed_list) == 1) {
+	     slurmdb_federations_get(db_conn, &fed_cond)) &&
+	    list_count(fed_list) == 1) {
 		fed = list_pop(fed_list);
 		fed_name = xstrdup(fed->name);
 		list_for_each(fed->cluster_list, _foreach_cluster_list_to_str,
@@ -312,45 +313,61 @@ static char *_build_cluster_string(void)
 	return cluster_str;
 }
 
-static List _build_tres_list(char *tres_str)
+static void _build_tres_list(void)
 {
-	List tres_list = NULL;
 	ListIterator iter;
 	slurmdb_tres_rec_t *tres;
-	slurmdb_tres_cond_t cond;
 	char *tres_tmp = NULL, *tres_tmp2 = NULL, *save_ptr = NULL, *tok;
 
-	memset(&cond, 0, sizeof(slurmdb_tres_cond_t));
-	tres_list = acct_storage_g_get_tres(db_conn, my_uid, &cond);
-	if (!tres_list) {
-		fatal("Problem getting TRES data: %m");
-		exit(1);
-	}
-
-	iter = list_iterator_create(tres_list);
-	while ((tres = list_next(iter))) {
-		if (tres_str) {
-			tres_tmp = xstrdup(tres_str);
-			xstrfmtcat(tres_tmp2, "%s%s%s",
-				   tres->type,
-				   tres->name ? "/" : "",
-				   tres->name ? tres->name : "");
-			tok = strtok_r(tres_tmp, ",", &save_ptr);
-			while (tok) {
-				if (!xstrcasecmp(tres_tmp2, tok))
-					break;
-				tok = strtok_r(NULL, ",", &save_ptr);
-			}
-			if (!tok) /* Not found */
-				tres->id = NO_VAL;	/* Skip this TRES */
-			xfree(tres_tmp2);
-			xfree(tres_tmp);
-		} else if (tres->id != TRES_CPU) {
-			tres->id = NO_VAL;		/* Skip this TRES */
+	if (!g_tres_list) {
+		slurmdb_tres_cond_t cond = {0};
+		g_tres_list = slurmdb_tres_get(db_conn, &cond);
+		if (!g_tres_list) {
+			fatal("Problem getting TRES data: %m");
+			exit(1);
 		}
 	}
+	FREE_NULL_LIST(tres_list);
+
+	tres_list = list_create(slurmdb_destroy_tres_rec);
+	if (!tres_str) {
+		int tres_cpu_id = TRES_CPU;
+		slurmdb_tres_rec_t *tres2;
+		if (!(tres = list_find_first(g_tres_list,
+					     slurmdb_find_tres_in_list,
+					     &tres_cpu_id)))
+			fatal("Failed to find CPU TRES!");
+		tres2 = slurmdb_copy_tres_rec(tres);
+		list_append(tres_list, tres2);
+
+		return;
+	}
+
+	tres_usage_str = "TRES";
+	iter = list_iterator_create(g_tres_list);
+	while ((tres = list_next(iter))) {
+		tres_tmp = xstrdup(tres_str);
+		xstrfmtcat(tres_tmp2, "%s%s%s",
+			   tres->type,
+			   tres->name ? "/" : "",
+			   tres->name ? tres->name : "");
+		tok = strtok_r(tres_tmp, ",", &save_ptr);
+		while (tok) {
+			if (!xstrcasecmp(tres_tmp2, tok))
+				break;
+			tok = strtok_r(NULL, ",", &save_ptr);
+		}
+		if (tok) {
+			slurmdb_tres_rec_t *tres2 =
+				slurmdb_copy_tres_rec(tres);
+			list_append(tres_list, tres2);
+		}
+		xfree(tres_tmp2);
+		xfree(tres_tmp);
+	}
+	if (!list_count(tres_list))
+		fatal("No valid TRES given");
 	list_iterator_destroy(iter);
-	return tres_list;
 }
 
 #if !HAVE_READLINE
@@ -396,14 +413,14 @@ static void _job_rep (int argc, char **argv)
 
 	/* For backwards compatibility we just look at the 1st char
 	 * by default since Sizes was the original name */
-	if (!strncasecmp (argv[0], "SizesByAccount", MAX(command_len, 1))) {
+	if (!xstrncasecmp(argv[0], "SizesByAccount", MAX(command_len, 1))) {
 		error_code = job_sizes_grouped_by_top_acct(
 			(argc - 1), &argv[1]);
-	} else if (!strncasecmp (argv[0],
+	} else if (!xstrncasecmp(argv[0],
 				 "SizesByWcKey", MAX(command_len, 8))) {
 		error_code = job_sizes_grouped_by_wckey(
 			(argc - 1), &argv[1]);
-	} else if (!strncasecmp (argv[0],
+	} else if (!xstrncasecmp(argv[0],
 				"SizesByAccountAndWcKey",
 				MAX(command_len, 15))) {
 		error_code = job_sizes_grouped_by_top_acct_and_wckey(
@@ -430,7 +447,7 @@ static void _user_rep (int argc, char **argv)
 {
 	int error_code = SLURM_SUCCESS;
 
-	if (strncasecmp (argv[0], "Top", 1) == 0) {
+	if (xstrncasecmp(argv[0], "Top", 1) == 0) {
 		error_code = user_top((argc - 1), &argv[1]);
 	} else {
 		exit_code = 1;
@@ -453,7 +470,7 @@ static void _resv_rep (int argc, char **argv)
 {
 	int error_code = SLURM_SUCCESS;
 
-	if (strncasecmp (argv[0], "Utilization", 1) == 0) {
+	if (xstrncasecmp(argv[0], "Utilization", 1) == 0) {
 		error_code = resv_utilization((argc - 1), &argv[1]);
 	} else {
 		exit_code = 1;
@@ -476,17 +493,17 @@ static void _cluster_rep (int argc, char **argv)
 {
 	int error_code = SLURM_SUCCESS;
 
-	if (strncasecmp (argv[0], "AccountUtilizationByUser", 1) == 0) {
+	if (xstrncasecmp(argv[0], "AccountUtilizationByUser", 1) == 0) {
 		error_code = cluster_account_by_user((argc - 1), &argv[1]);
-	} else if ((strncasecmp (argv[0], "UserUtilizationByAccount", 18) == 0)
-		   || (strncasecmp (argv[0], "UA", 2) == 0)) {
+	} else if ((xstrncasecmp(argv[0], "UserUtilizationByAccount", 18) == 0)
+		   || (xstrncasecmp(argv[0], "UA", 2) == 0)) {
 		error_code = cluster_user_by_account((argc - 1), &argv[1]);
-	} else if ((strncasecmp (argv[0], "UserUtilizationByWckey", 18) == 0)
-		   || (strncasecmp (argv[0], "UW", 2) == 0)) {
+	} else if ((xstrncasecmp(argv[0], "UserUtilizationByWckey", 18) == 0)
+		   || (xstrncasecmp(argv[0], "UW", 2) == 0)) {
 		error_code = cluster_user_by_wckey((argc - 1), &argv[1]);
-	} else if (strncasecmp (argv[0], "Utilization", 2) == 0) {
+	} else if (xstrncasecmp(argv[0], "Utilization", 2) == 0) {
 		error_code = cluster_utilization((argc - 1), &argv[1]);
-	} else if (strncasecmp (argv[0], "WCKeyUtilizationByUser", 1) == 0) {
+	} else if (xstrncasecmp(argv[0], "WCKeyUtilizationByUser", 1) == 0) {
 		error_code = cluster_wckey_by_user((argc - 1), &argv[1]);
 	} else {
 		exit_code = 1;
@@ -615,8 +632,7 @@ _process_command (int argc, char **argv)
 
 	command_len = strlen(argv[0]);
 
-	if ((strncasecmp (argv[0], "cluster",
-				 MAX(command_len, 2)) == 0)) {
+	if ((xstrncasecmp(argv[0], "cluster", MAX(command_len, 2)) == 0)) {
 		if (argc < 2) {
 			exit_code = 1;
 			if (quiet_flag != 1)
@@ -625,7 +641,7 @@ _process_command (int argc, char **argv)
 				        argv[0]);
 		} else
 			_cluster_rep((argc - 1), &argv[1]);
-	} else if (strncasecmp (argv[0], "help", MAX(command_len, 2)) == 0) {
+	} else if (xstrncasecmp(argv[0], "help", MAX(command_len, 2)) == 0) {
 		if (argc > 1) {
 			exit_code = 1;
 			fprintf (stderr,
@@ -633,7 +649,7 @@ _process_command (int argc, char **argv)
 				 argv[0]);
 		}
 		_usage ();
-	} else if ((strncasecmp (argv[0], "job", MAX(command_len, 1)) == 0)) {
+	} else if ((xstrncasecmp(argv[0], "job", MAX(command_len, 1)) == 0)) {
 		if (argc < 2) {
 			exit_code = 1;
 			if (quiet_flag != 1)
@@ -642,16 +658,16 @@ _process_command (int argc, char **argv)
 				        argv[0]);
 		} else
 			_job_rep((argc - 1), &argv[1]);
-	} else if (strncasecmp (argv[0], "quiet", MAX(command_len, 4)) == 0) {
+	} else if (xstrncasecmp(argv[0], "quiet", MAX(command_len, 4)) == 0) {
 		if (argc > 1) {
 			exit_code = 1;
 			fprintf (stderr, "too many arguments for keyword:%s\n",
 				 argv[0]);
 		}
 		quiet_flag = 1;
-	} else if ((strncasecmp (argv[0], "exit", MAX(command_len, 1)) == 0) ||
-		   (strncasecmp (argv[0], "\\q", MAX(command_len, 2)) == 0) ||
-		   (strncasecmp (argv[0], "quit", MAX(command_len, 4)) == 0)) {
+	} else if ((xstrncasecmp(argv[0], "exit", MAX(command_len, 1)) == 0) ||
+		   (xstrncasecmp(argv[0], "\\q", MAX(command_len, 2)) == 0) ||
+		   (xstrncasecmp(argv[0], "quit", MAX(command_len, 4)) == 0)) {
 		if (argc > 1) {
 			exit_code = 1;
 			fprintf (stderr,
@@ -659,14 +675,14 @@ _process_command (int argc, char **argv)
 				 argv[0]);
 		}
 		exit_flag = 1;
-	} else if (strncasecmp (argv[0], "local", MAX(command_len, 3)) == 0) {
+	} else if (xstrncasecmp(argv[0], "local", MAX(command_len, 3)) == 0) {
 		if (argc > 1) {
 			exit_code = 1;
 			fprintf (stderr, "too many arguments for keyword:%s\n",
 				 argv[0]);
 		}
 		local_flag = true;
-	} else if (strncasecmp (argv[0], "nonparsable",
+	} else if (xstrncasecmp(argv[0], "nonparsable",
 				MAX(command_len, 4)) == 0) {
 		if (argc > 1) {
 			exit_code = 1;
@@ -674,7 +690,7 @@ _process_command (int argc, char **argv)
 				 argv[0]);
 		}
 		print_fields_parsable_print = 0;
-	} else if (strncasecmp (argv[0], "parsable",
+	} else if (xstrncasecmp(argv[0], "parsable",
 				MAX(command_len, 8)) == 0) {
 		if (argc > 1) {
 			exit_code = 1;
@@ -682,7 +698,7 @@ _process_command (int argc, char **argv)
 				 argv[0]);
 		}
 		print_fields_parsable_print = PRINT_FIELDS_PARSABLE_ENDING;
-	} else if (strncasecmp (argv[0], "parsable2",
+	} else if (xstrncasecmp(argv[0], "parsable2",
 				MAX(command_len, 9)) == 0) {
 		if (argc > 1) {
 			exit_code = 1;
@@ -690,9 +706,9 @@ _process_command (int argc, char **argv)
 				 argv[0]);
 		}
 		print_fields_parsable_print = PRINT_FIELDS_PARSABLE_NO_ENDING;
-	} else if ((strncasecmp (argv[0], "reservation",
+	} else if ((xstrncasecmp(argv[0], "reservation",
 				 MAX(command_len, 2)) == 0)
-		   || (strncasecmp (argv[0], "resv",
+		   || (xstrncasecmp(argv[0], "resv",
 				    MAX(command_len, 2)) == 0)) {
 		if (argc < 2) {
 			exit_code = 1;
@@ -702,7 +718,7 @@ _process_command (int argc, char **argv)
 				        argv[0]);
 		} else
 			_resv_rep((argc - 1), &argv[1]);
-	} else if (strncasecmp (argv[0], "sort", MAX(command_len, 1)) == 0) {
+	} else if (xstrncasecmp(argv[0], "sort", MAX(command_len, 1)) == 0) {
 		if (argc < 2) {
 			exit_code = 1;
 			fprintf (stderr,
@@ -710,7 +726,7 @@ _process_command (int argc, char **argv)
 				 argv[0]);
 		} else
 			_set_sort(argv[1]);
-	} else if (strncasecmp (argv[0], "time", MAX(command_len, 1)) == 0) {
+	} else if (xstrncasecmp(argv[0], "time", MAX(command_len, 1)) == 0) {
 		if (argc < 2) {
 			exit_code = 1;
 			fprintf (stderr,
@@ -718,7 +734,7 @@ _process_command (int argc, char **argv)
 				 argv[0]);
 		} else
 			_set_time_format(argv[1]);
-	} else if (strncasecmp (argv[0], "verbose", MAX(command_len, 4)) == 0) {
+	} else if (xstrncasecmp(argv[0], "verbose", MAX(command_len, 4)) == 0) {
 		if (argc > 1) {
 			exit_code = 1;
 			fprintf (stderr,
@@ -726,7 +742,7 @@ _process_command (int argc, char **argv)
 				 argv[0]);
 		}
 		quiet_flag = -1;
-	} else if (strncasecmp (argv[0], "version", MAX(command_len, 4)) == 0) {
+	} else if (xstrncasecmp(argv[0], "version", MAX(command_len, 4)) == 0) {
 		if (argc > 1) {
 			exit_code = 1;
 			fprintf (stderr,
@@ -734,7 +750,7 @@ _process_command (int argc, char **argv)
 				 argv[0]);
 		}
 		_print_version();
-	} else if ((strncasecmp (argv[0], "user", MAX(command_len, 1)) == 0)) {
+	} else if ((xstrncasecmp(argv[0], "user", MAX(command_len, 1)) == 0)) {
 		if (argc < 2) {
 			exit_code = 1;
 			if (quiet_flag != 1)
@@ -755,25 +771,25 @@ static int _set_time_format(char *format)
 {
 	int command_len = strlen(format);
 
-	if (strncasecmp (format, "SecPer", MAX(command_len, 6)) == 0) {
+	if (xstrncasecmp(format, "SecPer", MAX(command_len, 6)) == 0) {
 		time_format = SLURMDB_REPORT_TIME_SECS_PER;
 		time_format_string = "Seconds/Percentage of Total";
-	} else if (strncasecmp (format, "MinPer", MAX(command_len, 6)) == 0) {
+	} else if (xstrncasecmp(format, "MinPer", MAX(command_len, 6)) == 0) {
 		time_format = SLURMDB_REPORT_TIME_MINS_PER;
 		time_format_string = "Minutes/Percentage of Total";
-	} else if (strncasecmp (format, "HourPer", MAX(command_len, 6)) == 0) {
+	} else if (xstrncasecmp(format, "HourPer", MAX(command_len, 6)) == 0) {
 		time_format = SLURMDB_REPORT_TIME_HOURS_PER;
 		time_format_string = "Hours/Percentage of Total";
-	} else if (strncasecmp (format, "Seconds", MAX(command_len, 1)) == 0) {
+	} else if (xstrncasecmp(format, "Seconds", MAX(command_len, 1)) == 0) {
 		time_format = SLURMDB_REPORT_TIME_SECS;
 		time_format_string = "Seconds";
-	} else if (strncasecmp (format, "Minutes", MAX(command_len, 1)) == 0) {
+	} else if (xstrncasecmp(format, "Minutes", MAX(command_len, 1)) == 0) {
 		time_format = SLURMDB_REPORT_TIME_MINS;
 		time_format_string = "Minutes";
-	} else if (strncasecmp (format, "Hours", MAX(command_len, 1)) == 0) {
+	} else if (xstrncasecmp(format, "Hours", MAX(command_len, 1)) == 0) {
 		time_format = SLURMDB_REPORT_TIME_HOURS;
 		time_format_string = "Hours";
-	} else if (strncasecmp (format, "Percent", MAX(command_len, 1)) == 0) {
+	} else if (xstrncasecmp(format, "Percent", MAX(command_len, 1)) == 0) {
 		time_format = SLURMDB_REPORT_TIME_PERCENT;
 		time_format_string = "Percentage of Total";
 	} else {
@@ -788,9 +804,9 @@ static int _set_sort(char *format)
 {
 	int command_len = strlen(format);
 
-	if (strncasecmp (format, "Name", MAX(command_len, 1)) == 0) {
+	if (xstrncasecmp(format, "Name", MAX(command_len, 1)) == 0) {
 		sort_flag = SLURMDB_REPORT_SORT_NAME;
-	} else if (strncasecmp (format, "Time", MAX(command_len, 6)) == 0) {
+	} else if (xstrncasecmp(format, "Time", MAX(command_len, 6)) == 0) {
 		sort_flag = SLURMDB_REPORT_SORT_TIME;
 	} else {
 		fprintf (stderr, "unknown timesort format %s", format);
@@ -815,6 +831,7 @@ sreport [<OPTION>] [<COMMAND>]                                             \n\
      -P or --parsable2: output will be '|' delimited without a '|' at the end\n\
      -Q or --quiet: equivalent to \"quiet\" command                        \n\
      -t <time_format>: Second, Minute, Hour, Percent, SecPer, MinPer, HourPer\n\
+     -T or --tres: comma separated list of TRES, or 'ALL' for all TRES     \n\
      -v or --verbose: equivalent to \"verbose\" command                    \n\
      -V or --version: equivalent to \"version\" command                    \n\
                                                                            \n\

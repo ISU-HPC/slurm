@@ -241,8 +241,7 @@ static int _addto_state_char_list(List char_list, char *names)
 					memcpy(name, names+start, (i-start));
 					c = job_state_num(name);
 					if (c == NO_VAL)
-						fatal("unrecognized job "
-						      "state value");
+						fatal("unrecognized job state value %s", name);
 					xfree(name);
 					name = xstrdup_printf("%d", c);
 
@@ -274,8 +273,9 @@ static int _addto_state_char_list(List char_list, char *names)
 			name = xmalloc((i-start)+1);
 			memcpy(name, names+start, (i-start));
 			c = job_state_num(name);
-			if (c == -1)
-				fatal("unrecognized job state value");
+			if (c == NO_VAL)
+				fatal("unrecognized job state value '%s'",
+				      name);
 			xfree(name);
 			name = xstrdup_printf("%d", c);
 
@@ -556,7 +556,7 @@ extern int get_data(void)
 	slurmdb_job_cond_t *job_cond = params.job_cond;
 
 	if (params.opt_completion) {
-		jobs = g_slurm_jobcomp_get_jobs(job_cond);
+		jobs = slurmdb_jobcomp_jobs_get(job_cond);
 		return SLURM_SUCCESS;
 	} else {
 		jobs = slurmdb_jobs_get(acct_db_conn, job_cond);
@@ -1007,7 +1007,7 @@ extern void parse_command_line(int argc, char **argv)
 	      params.opt_allocs);
 
 	if (params.opt_completion) {
-		g_slurm_jobcomp_init(params.opt_filein);
+		slurmdb_jobcomp_init(params.opt_filein);
 
 		acct_type = slurm_get_jobcomp_type();
 		if ((xstrcmp(acct_type, "jobcomp/none") == 0)
@@ -1017,8 +1017,11 @@ extern void parse_command_line(int argc, char **argv)
 		}
 		xfree(acct_type);
 	} else {
-		slurm_acct_storage_init(params.opt_filein);
-
+		if (slurm_acct_storage_init(params.opt_filein) !=
+		    SLURM_SUCCESS) {
+			fprintf(stderr, "SLURM unable to initialize storage plugin\n");
+			exit(1);
+		}
 		acct_type = slurm_get_accounting_storage_type();
 		if ((xstrcmp(acct_type, "accounting_storage/none") == 0)
 		    &&  (stat(params.opt_filein, &stat_buf) != 0)) {
@@ -1050,10 +1053,9 @@ extern void parse_command_line(int argc, char **argv)
 		slurmdb_init_federation_cond(&fed_cond, 0);
 		fed_cond.cluster_list = cluster_list;
 
-		if ((fed_list =
-		     acct_storage_g_get_federations(acct_db_conn, getuid(),
-						    &fed_cond)) &&
-		     list_count(fed_list) == 1) {
+		if ((fed_list = slurmdb_federations_get(
+			     acct_db_conn, &fed_cond)) &&
+		    list_count(fed_list) == 1) {
 			fed = list_peek(fed_list);
 			job_cond->cluster_list = _build_cluster_list(fed);
 			/* Leave cluster_name to identify remote only jobs */
@@ -1249,7 +1251,7 @@ extern void parse_command_line(int argc, char **argv)
 
 		command_len = strlen(start);
 
-		if (!strncasecmp("ALL", start, command_len)) {
+		if (!xstrncasecmp("ALL", start, command_len)) {
 			for (i = 0; fields[i].name; i++) {
 				if (newlen_set)
 					fields[i].len = newlen;
@@ -1261,7 +1263,7 @@ extern void parse_command_line(int argc, char **argv)
 		}
 
 		for (i = 0; fields[i].name; i++) {
-			if (!strncasecmp(fields[i].name, start, command_len))
+			if (!xstrncasecmp(fields[i].name, start, command_len))
 				goto foundfield;
 		}
 		error("Invalid field requested: \"%s\"", start);
@@ -1405,7 +1407,7 @@ extern void sacct_fini(void)
 	FREE_NULL_LIST(g_tres_list);
 
 	if (params.opt_completion)
-		g_slurm_jobcomp_fini();
+		slurmdb_jobcomp_fini();
 	else {
 		slurmdb_connection_close(&acct_db_conn);
 		slurm_acct_storage_fini();

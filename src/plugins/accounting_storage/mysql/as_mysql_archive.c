@@ -94,6 +94,7 @@ typedef struct {
 	char *job_db_inx;
 	char *jobid;
 	char *kill_requid;
+	char *mcs_label;
 	char *name;
 	char *nodelist;
 	char *node_inx;
@@ -116,6 +117,7 @@ typedef struct {
 	char *uid;
 	char *wckey;
 	char *wckey_id;
+	char *work_dir;
 } local_job_t;
 
 typedef struct {
@@ -128,6 +130,7 @@ typedef struct {
 	char *time_end;
 	char *time_start;
 	char *tres_str;
+	char *unused_wall;
 } local_resv_t;
 
 typedef struct {
@@ -260,6 +263,7 @@ static char *job_req_inx[] = {
 	"job_db_inx",
 	"id_job",
 	"kill_requid",
+	"mcs_label",
 	"job_name",
 	"nodelist",
 	"node_inx",
@@ -279,6 +283,7 @@ static char *job_req_inx[] = {
 	"id_user",
 	"wckey",
 	"id_wckey",
+	"work_dir",
 	"tres_alloc",
 	"tres_req",
 };
@@ -301,6 +306,7 @@ enum {
 	JOB_REQ_DB_INX,
 	JOB_REQ_JOBID,
 	JOB_REQ_KILL_REQUID,
+	JOB_REQ_MCS_LABEL,
 	JOB_REQ_NAME,
 	JOB_REQ_NODELIST,
 	JOB_REQ_NODE_INX,
@@ -320,6 +326,7 @@ enum {
 	JOB_REQ_UID,
 	JOB_REQ_WCKEY,
 	JOB_REQ_WCKEYID,
+	JOB_REQ_WORK_DIR,
 	JOB_REQ_TRESA,
 	JOB_REQ_TRESR,
 	JOB_REQ_COUNT
@@ -336,6 +343,7 @@ char *resv_req_inx[] = {
 	"resv_name",
 	"time_start",
 	"time_end",
+	"unused_wall",
 };
 
 enum {
@@ -348,6 +356,7 @@ enum {
 	RESV_REQ_NAME,
 	RESV_REQ_START,
 	RESV_REQ_END,
+	RESV_REQ_UNUSED,
 	RESV_REQ_COUNT
 };
 
@@ -620,6 +629,7 @@ static void _pack_local_job(local_job_t *object,
 	packstr(object->job_db_inx, buffer);
 	packstr(object->jobid, buffer);
 	packstr(object->kill_requid, buffer);
+	packstr(object->mcs_label, buffer);
 	packstr(object->name, buffer);
 	packstr(object->nodelist, buffer);
 	packstr(object->node_inx, buffer);
@@ -641,6 +651,7 @@ static void _pack_local_job(local_job_t *object,
 	packstr(object->uid, buffer);
 	packstr(object->wckey, buffer);
 	packstr(object->wckey_id, buffer);
+	packstr(object->work_dir, buffer);
 }
 
 /* this needs to be allocated before calling, and since we aren't
@@ -691,6 +702,7 @@ static int _unpack_local_job(local_job_t *object,
 		unpackstr_ptr(&object->job_db_inx, &tmp32, buffer);
 		unpackstr_ptr(&object->jobid, &tmp32, buffer);
 		unpackstr_ptr(&object->kill_requid, &tmp32, buffer);
+		unpackstr_ptr(&object->mcs_label, &tmp32, buffer);
 		unpackstr_ptr(&object->name, &tmp32, buffer);
 		unpackstr_ptr(&object->nodelist, &tmp32, buffer);
 		unpackstr_ptr(&object->node_inx, &tmp32, buffer);
@@ -712,6 +724,7 @@ static int _unpack_local_job(local_job_t *object,
 		unpackstr_ptr(&object->uid, &tmp32, buffer);
 		unpackstr_ptr(&object->wckey, &tmp32, buffer);
 		unpackstr_ptr(&object->wckey_id, &tmp32, buffer);
+		unpackstr_ptr(&object->work_dir, &tmp32, buffer);
 	} else if (rpc_version >= SLURM_17_02_PROTOCOL_VERSION) {
 		unpackstr_ptr(&object->account, &tmp32, buffer);
 		unpackstr_ptr(&object->admin_comment, &tmp32, buffer);
@@ -994,6 +1007,7 @@ static void _pack_local_resv(local_resv_t *object,
 	packstr(object->time_end, buffer);
 	packstr(object->time_start, buffer);
 	packstr(object->tres_str, buffer);
+	packstr(object->unused_wall, buffer);
 }
 
 /* this needs to be allocated before calling, and since we aren't
@@ -1004,7 +1018,18 @@ static int _unpack_local_resv(local_resv_t *object,
 	uint32_t tmp32;
 	char *tmp_char;
 
-	if (rpc_version >= SLURM_15_08_PROTOCOL_VERSION) {
+	if (rpc_version >= SLURM_17_11_PROTOCOL_VERSION) {
+		unpackstr_ptr(&object->assocs, &tmp32, buffer);
+		unpackstr_ptr(&object->flags, &tmp32, buffer);
+		unpackstr_ptr(&object->id, &tmp32, buffer);
+		unpackstr_ptr(&object->name, &tmp32, buffer);
+		unpackstr_ptr(&object->nodes, &tmp32, buffer);
+		unpackstr_ptr(&object->node_inx, &tmp32, buffer);
+		unpackstr_ptr(&object->time_end, &tmp32, buffer);
+		unpackstr_ptr(&object->time_start, &tmp32, buffer);
+		unpackstr_ptr(&object->tres_str, &tmp32, buffer);
+		unpackstr_ptr(&object->unused_wall, &tmp32, buffer);
+	} else if (rpc_version >= SLURM_15_08_PROTOCOL_VERSION) {
 		unpackstr_ptr(&object->assocs, &tmp32, buffer);
 		unpackstr_ptr(&object->flags, &tmp32, buffer);
 		unpackstr_ptr(&object->id, &tmp32, buffer);
@@ -1724,7 +1749,7 @@ static int _process_old_sql_line(const char *data_in,
 		}
 
 		/* get values */
-		while ((i < ending_start) && i < ending_start) {
+		while (i < ending_start) {
 			/* get to the start of the values */
 			while ((i < ending_start) && data_in[i-1] != '(')
 				i++;
@@ -2055,6 +2080,7 @@ static Buf _pack_archive_jobs(MYSQL_RES *result, char *cluster_name,
 		job.job_db_inx = row[JOB_REQ_DB_INX];
 		job.jobid = row[JOB_REQ_JOBID];
 		job.kill_requid = row[JOB_REQ_KILL_REQUID];
+		job.mcs_label = row[JOB_REQ_MCS_LABEL];
 		job.name = row[JOB_REQ_NAME];
 		job.nodelist = row[JOB_REQ_NODELIST];
 		job.node_inx = row[JOB_REQ_NODE_INX];
@@ -2074,6 +2100,7 @@ static Buf _pack_archive_jobs(MYSQL_RES *result, char *cluster_name,
 		job.uid = row[JOB_REQ_UID];
 		job.wckey = row[JOB_REQ_WCKEY];
 		job.wckey_id = row[JOB_REQ_WCKEYID];
+		job.work_dir = row[JOB_REQ_WORK_DIR];
 
 		_pack_local_job(&job, SLURM_PROTOCOL_VERSION, buffer);
 	}
@@ -2129,6 +2156,7 @@ static char *_load_jobs(uint16_t rpc_version, Buf buffer,
 			   object.job_db_inx,
 			   object.jobid,
 			   object.kill_requid,
+			   object.mcs_label,
 			   object.name,
 			   object.nodelist,
 			   object.node_inx,
@@ -2146,6 +2174,7 @@ static char *_load_jobs(uint16_t rpc_version, Buf buffer,
 			   object.uid,
 			   object.wckey,
 			   object.wckey_id,
+			   object.work_dir,
 			   object.tres_alloc_str,
 			   object.tres_req_str);
 
@@ -2191,6 +2220,7 @@ static Buf _pack_archive_resvs(MYSQL_RES *result, char *cluster_name,
 		resv.time_end = row[RESV_REQ_END];
 		resv.time_start = row[RESV_REQ_START];
 		resv.tres_str = row[RESV_REQ_TRES];
+		resv.unused_wall = row[RESV_REQ_UNUSED];
 
 		_pack_local_resv(&resv, SLURM_PROTOCOL_VERSION, buffer);
 	}
@@ -2237,7 +2267,8 @@ static char *_load_resvs(uint16_t rpc_version, Buf buffer,
 			   object.node_inx,
 			   object.name,
 			   object.time_start,
-			   object.time_end);
+			   object.time_end,
+			   object.unused_wall);
 
 		if (rpc_version < SLURM_15_08_PROTOCOL_VERSION)
 			xfree(object.tres_str);
@@ -3400,8 +3431,10 @@ extern int as_mysql_jobacct_process_archive_load(
 		return SLURM_ERROR;
 	}
 
-	/* this is the old version of an archive file where the file
-	   was straight sql. */
+	/*
+	 * this is the old version of an archive file where the file
+	 * was straight sql.
+	 */
 	if ((strlen(data) >= 12)
 	    && (!xstrncmp("insert into ", data, 12)
 		|| !xstrncmp("delete from ", data, 12)
@@ -3418,11 +3451,11 @@ extern int as_mysql_jobacct_process_archive_load(
 	if (debug_flags & DEBUG_FLAG_DB_ARCHIVE)
 		DB_DEBUG(mysql_conn->conn,
 			 "Version in archive header is %u", ver);
-	/* Don't verify the lower limit as we should be keeping all
-	   older versions around here just to support super old
-	   archive files since they don't get regenerated all the
-	   time.
-	*/
+	/*
+	 * Don't verify the lower limit as we should be keeping all
+	 * older versions around here just to support super old
+	 * archive files since they don't get regenerated all the time.
+	 */
 	if (ver > SLURM_PROTOCOL_VERSION) {
 		error("***********************************************");
 		error("Can not recover archive file, incompatible version, "

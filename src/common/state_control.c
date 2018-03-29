@@ -35,6 +35,7 @@
 \*****************************************************************************/
 
 #include <ctype.h>
+#include <limits.h>	/* For LONG_MAX */
 #include "src/common/state_control.h"
 #include "src/common/working_cluster.h"
 #include "src/common/xmalloc.h"
@@ -176,6 +177,8 @@ extern int parse_resv_nodecnt(resv_desc_msg_t *resv_msg_ptr, char *val,
 {
 	char *endptr = NULL, *node_cnt, *tok, *ptrptr = NULL;
 	int node_inx = 0;
+	long node_cnt_l;
+	int ret_code = SLURM_SUCCESS;
 
 	/*
 	 * NodeCnt and TRES=node= might appear within the same request,
@@ -190,8 +193,18 @@ extern int parse_resv_nodecnt(resv_desc_msg_t *resv_msg_ptr, char *val,
 		xrealloc(resv_msg_ptr->node_cnt,
 			 sizeof(uint32_t) * (node_inx + 2));
 		*free_tres_nodecnt = 1;
-		resv_msg_ptr->node_cnt[node_inx] =
-			strtol(tok, &endptr, 10);
+		/*
+		 * Use temporary variable to check for negative or huge values
+		 * since resv_msg_ptr->node_cnt is uint32_t.
+		 */
+		node_cnt_l = strtol(tok, &endptr, 10);
+		if ((node_cnt_l < 0) || (node_cnt_l == LONG_MAX)) {
+			ret_code = SLURM_ERROR;
+			break;
+		} else {
+			resv_msg_ptr->node_cnt[node_inx] = node_cnt_l;
+		}
+
 		if ((endptr != NULL) &&
 		    ((endptr[0] == 'k') ||
 		     (endptr[0] == 'K'))) {
@@ -203,26 +216,29 @@ extern int parse_resv_nodecnt(resv_desc_msg_t *resv_msg_ptr, char *val,
 		} else if ((endptr == NULL) ||
 			   (endptr[0] != '\0') ||
 			   (tok[0] == '\0')) {
-			if (err_msg) {
-				xfree(*err_msg);
-				if (from_tres)
-					xstrfmtcat(*err_msg,
-						   "Invalid TRES node count %s",
-						   val);
-				else
-					xstrfmtcat(*err_msg,
-						   "Invalid node count %s",
-						   val);
-			}
-			xfree(node_cnt);
-			return SLURM_ERROR;
+			ret_code = SLURM_ERROR;
+			break;
 		}
 		node_inx++;
 		tok = strtok_r(NULL, ",", &ptrptr);
 	}
 
+	if (ret_code != SLURM_SUCCESS) {
+		if (err_msg) {
+			xfree(*err_msg);
+			if (from_tres) {
+				xstrfmtcat(*err_msg,
+					   "Invalid TRES node count %s", val);
+			} else {
+				xstrfmtcat(*err_msg,
+					   "Invalid node count %s", val);
+			}
+		} else {
+			info("%s: Invalid node count (%s)", __func__, tok);
+		}
+	}
 	xfree(node_cnt);
-	return SLURM_SUCCESS;
+	return ret_code;
 }
 
 extern int state_control_parse_resv_tres(char *val,

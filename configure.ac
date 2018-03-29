@@ -3,7 +3,7 @@
 dnl Prologue
 dnl
 
-AC_INIT(slurm, m4_esyscmd([perl -ne 'print,exit if s/^\s*VERSION:\s*(\d*.\d*).\S*/\1/i' ./META | sed 's/^v//' | tr '-' '_' | tr -d '\n']), [slurm-dev@schedmd.com], [], [https://slurm.schedmd.com])
+AC_INIT(slurm, m4_esyscmd([perl -ne 'print,exit if s/^\s*VERSION:\s*(\d*.\d*).\S*/\1/i' ./META | sed 's/^v//' | tr '-' '_' | tr -d '\n']), [], [], [https://slurm.schedmd.com])
 AC_PREREQ(2.59)
 AC_CONFIG_SRCDIR([configure.ac])
 AC_CONFIG_AUX_DIR([auxdir])
@@ -11,8 +11,6 @@ AC_CANONICAL_TARGET([])
 
 dnl the is a generic flag to avoid building things
 AM_CONDITIONAL(DONT_BUILD, test "1" = "0")
-
-X_AC_GPL_LICENSED
 
 # Determine project/version from META file.
 # Sets PACKAGE, VERSION, SLURM_VERSION
@@ -107,7 +105,13 @@ AC_CHECK_HEADERS(mcheck.h values.h socket.h sys/socket.h  \
 AC_HEADER_SYS_WAIT
 AC_HEADER_TIME
 AC_HEADER_STDC
+
+# Workaround for transition of autoconf/glibc issues in deprecation of the
+# definitions major, minor, makedev by sys/types.h vs sys/sysmacros.h
+old_CFLAGS=$CFLAGS
+CFLAGS="$CFLAGS -Werror"
 AC_HEADER_MAJOR
+CFLAGS=$old_CFLAGS
 
 dnl Checks for structures.
 dnl
@@ -214,9 +218,9 @@ X_AC_LZ4
 X_AC_HWLOC
 X_AC_PMIX
 X_AC_FREEIPMI
-X_AC_SLURM_SEMAPHORE
 X_AC_RRDTOOL
 X_AC_UCX
+X_AC_SSH2
 
 X_AC_NCURSES
 AM_CONDITIONAL(HAVE_SOME_CURSES, test "x$ac_have_some_curses" = "xyes")
@@ -325,9 +329,15 @@ X_AC_MAN2HTML
 AM_CONDITIONAL(HAVE_MAN2HTML, test "x$ac_have_man2html" = "xyes")
 AC_SUBST(HAVE_MAN2HTML)
 
+# Workaround with gcc 7.2 printing a warning about printing NULL's
+# This should be fixed in a future version so we properly protect against
+# *printf handling NULLs
+old_CFLAGS=$CFLAGS
+CFLAGS="$CFLAGS -Wno-format-truncation"
 dnl check if we can use standard printf functions
 dnl
 X_AC_PRINTF_NULL
+CFLAGS=$old_CFLAGS
 
 dnl Check for whether to include readline support
 dnl
@@ -407,6 +417,9 @@ if test "x$ac_have_some_curses" = "xyes" ; then
    ac_build_smap="yes"
 fi
 AM_CONDITIONAL(BUILD_SMAP, test "x$ac_build_smap" = "xyes")
+
+dnl This needs to come last so it can detect deprecated options in use.
+X_AC_DEPRECATED
 
 dnl All slurm Makefiles:
 
@@ -529,6 +542,7 @@ AC_CONFIG_FILES([Makefile
 		 src/plugins/ext_sensors/rrd/Makefile
 		 src/plugins/ext_sensors/none/Makefile
 		 src/plugins/gres/Makefile
+		 src/plugins/gres/common/Makefile
 		 src/plugins/gres/gpu/Makefile
 		 src/plugins/gres/nic/Makefile
 		 src/plugins/gres/mic/Makefile
@@ -610,7 +624,6 @@ AC_CONFIG_FILES([Makefile
 		 src/plugins/select/serial/Makefile
 		 src/plugins/slurmctld/Makefile
 		 src/plugins/slurmctld/nonstop/Makefile
-		 src/plugins/slurmd/Makefile
 		 src/plugins/switch/Makefile
 		 src/plugins/switch/cray/Makefile
 		 src/plugins/switch/generic/Makefile

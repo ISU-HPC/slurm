@@ -49,8 +49,6 @@
 #include "pmixp_conn.h"
 #include "pmixp_dconn.h"
 
-#include <pmix_server.h>
-
 #define PMIXP_DEBUG_SERVER 1
 
 /*
@@ -184,10 +182,10 @@ static void _base_hdr_pack_full(Buf packbuf, pmixp_base_hdr_t *hdr)
 	pack32(hdr->msgsize, packbuf);
 	pack8(hdr->ext_flag, packbuf);
 	if (hdr->ext_flag) {
-		uint32_t expected_size = PMIXP_BASE_HDR_SIZE +
-				PMIXP_BASE_HDR_EXT_SIZE(pmixp_dconn_ep_len());
 		packmem(pmixp_dconn_ep_data(), pmixp_dconn_ep_len(), packbuf);
-		xassert(get_buf_offset(packbuf) == expected_size);
+		xassert(get_buf_offset(packbuf) ==
+			(PMIXP_BASE_HDR_SIZE +
+			 PMIXP_BASE_HDR_EXT_SIZE(pmixp_dconn_ep_len())));
 	}
 }
 
@@ -722,7 +720,7 @@ static void _process_server_request(pmixp_base_hdr_t *hdr, Buf buf)
 	case PMIXP_MSG_FAN_IN:
 	case PMIXP_MSG_FAN_OUT: {
 		pmixp_coll_t *coll;
-		pmix_proc_t *procs = NULL;
+		pmixp_proc_t *procs = NULL;
 		size_t nprocs = 0;
 		pmixp_coll_type_t type = 0;
 		int c_nodeid;
@@ -1283,10 +1281,13 @@ static int _slurm_send(pmixp_ep_t *ep, pmixp_base_hdr_t bhdr, Buf buf)
 
 static pthread_mutex_t _pmixp_pp_lock;
 
+#define PMIXP_PP_PWR2_MIN 0
+#define PMIXP_PP_PWR2_MAX 24
+
 static bool _pmixp_pp_on = false;
 static bool _pmixp_pp_same_thr = false;
-static int _pmixp_pp_low = 0;
-static int _pmixp_pp_up = 24;
+static int _pmixp_pp_low = PMIXP_PP_PWR2_MIN;
+static int _pmixp_pp_up = PMIXP_PP_PWR2_MAX;
 static int _pmixp_pp_bound = 10;
 static int _pmixp_pp_siter = 1000;
 static int _pmixp_pp_liter = 100;
@@ -1356,6 +1357,7 @@ static bool _consists_from_digits(char *s)
 void pmixp_server_init_pp(char ***env)
 {
 	char *env_ptr = NULL;
+	int tmp_int;
 
 	slurm_mutex_init(&_pmixp_pp_lock);
 
@@ -1375,13 +1377,17 @@ void pmixp_server_init_pp(char ***env)
 
 	if ((env_ptr = getenvp(*env, PMIXP_PP_LOW))) {
 		if (_consists_from_digits(env_ptr)) {
-			_pmixp_pp_low = atoi(env_ptr);
+			tmp_int = atoi(env_ptr);
+			_pmixp_pp_low = tmp_int < PMIXP_PP_PWR2_MAX ?
+				tmp_int : PMIXP_PP_PWR2_MAX;
 		}
 	}
 
 	if ((env_ptr = getenvp(*env, PMIXP_PP_UP))) {
 		if (_consists_from_digits(env_ptr)) {
-			_pmixp_pp_up = atoi(env_ptr);
+			tmp_int = atoi(env_ptr);
+			_pmixp_pp_up = tmp_int < PMIXP_PP_PWR2_MAX ?
+				tmp_int : PMIXP_PP_PWR2_MAX;
 		}
 	}
 
@@ -1529,9 +1535,12 @@ int pmixp_server_pp_send(int nodeid, int size)
 
 static pthread_mutex_t _pmixp_pp_lock;
 
+#define PMIXP_CPERF_PWR2_MIN 0
+#define PMIXP_CPERF_PWR2_MAX 20
+
 static bool _pmixp_cperf_on = false;
-static int _pmixp_cperf_low = 0;
-static int _pmixp_cperf_up = 24;
+static int _pmixp_cperf_low = PMIXP_CPERF_PWR2_MIN;
+static int _pmixp_cperf_up = PMIXP_CPERF_PWR2_MAX;
 static int _pmixp_cperf_bound = 10;
 static int _pmixp_cperf_siter = 1000;
 static int _pmixp_cperf_liter = 100;
@@ -1551,6 +1560,7 @@ static void _pmixp_server_cperf_inc()
 void pmixp_server_init_cperf(char ***env)
 {
 	char *env_ptr = NULL;
+	int tmp_int;
 
 	slurm_mutex_init(&_pmixp_pp_lock);
 
@@ -1564,13 +1574,17 @@ void pmixp_server_init_cperf(char ***env)
 
 	if ((env_ptr = getenvp(*env, PMIXP_CPERF_LOW))) {
 		if (_consists_from_digits(env_ptr)) {
-			_pmixp_cperf_low = atoi(env_ptr);
+			tmp_int = atoi(env_ptr);
+			_pmixp_cperf_low = tmp_int < PMIXP_CPERF_PWR2_MAX ?
+				tmp_int : PMIXP_CPERF_PWR2_MAX;
 		}
 	}
 
 	if ((env_ptr = getenvp(*env, PMIXP_CPERF_UP))) {
 		if (_consists_from_digits(env_ptr)) {
-			_pmixp_cperf_up = atoi(env_ptr);
+			tmp_int = atoi(env_ptr);
+			_pmixp_cperf_up = tmp_int < PMIXP_CPERF_PWR2_MAX ?
+				tmp_int : PMIXP_CPERF_PWR2_MAX;
 		}
 	}
 
@@ -1598,17 +1612,17 @@ bool pmixp_server_want_cperf()
 	return _pmixp_cperf_on;
 }
 
-static void _pmixp_cperf_cbfunc(pmix_status_t status,
+static void _pmixp_cperf_cbfunc(int status,
 				const char *data, size_t ndata,
 				void *cbdata,
-				pmix_release_cbfunc_t r_fn,
+				void *r_fn,
 				void *r_cbdata)
 {
 	/* small violation - we kinow what is the type of release
 	 * data and will use that knowledge to avoid the deadlock
 	 */
 	pmixp_coll_t *coll = pmixp_coll_from_cbdata(r_cbdata);
-	xassert(PMIX_SUCCESS == status);
+	xassert(SLURM_SUCCESS == status);
 
 	/*
 	 * we will be called with mutex locked.
@@ -1618,7 +1632,7 @@ static void _pmixp_cperf_cbfunc(pmix_status_t status,
 	slurm_mutex_unlock(&coll->lock);
 
 	/* invoke the callbak */
-	r_fn(r_cbdata);
+	pmixp_lib_release_invoke(r_fn, r_cbdata);
 
 	/* lock it back before proceed */
 	slurm_mutex_lock(&coll->lock);
@@ -1631,11 +1645,11 @@ static void _pmixp_cperf_cbfunc(pmix_status_t status,
 static int _pmixp_server_cperf_iter(char *data, int ndata)
 {
 	pmixp_coll_t *coll;
-	pmix_proc_t procs;
+	pmixp_proc_t procs;
 	int cur_count = _pmixp_server_cperf_count();
 
-	strncpy(procs.nspace, pmixp_info_namespace(), PMIX_MAX_NSLEN);
-	procs.rank = PMIX_RANK_WILDCARD;
+	strncpy(procs.nspace, pmixp_info_namespace(), PMIXP_MAX_NSLEN);
+	procs.rank = pmixp_lib_get_wildcard();
 
 	coll = pmixp_state_coll_get(PMIXP_COLL_TYPE_FENCE, &procs, 1);
 	xassert(!pmixp_coll_contrib_local(coll, data, ndata,

@@ -1549,25 +1549,6 @@ char *slurm_get_slurmctld_plugstack(void)
 	return slurmctld_plugstack;
 }
 
-/* slurm_get_slurmd_plugstack
- * get slurmd_plugstack from slurmd_conf object from
- * slurmd_conf object
- * RET char *   - slurmd_plugstack, MUST be xfreed by caller
- */
-char *slurm_get_slurmd_plugstack(void)
-{
-	char *slurmd_plugstack = NULL;
-	slurm_ctl_conf_t *conf;
-
-	if (slurmdbd_conf) {
-	} else {
-		conf = slurm_conf_lock();
-		slurmd_plugstack = xstrdup(conf->slurmd_plugstack);
-		slurm_conf_unlock();
-	}
-	return slurmd_plugstack;
-}
-
 /* slurm_get_slurmctld_timeout
  * get slurmctld_timeout from slurmctld_conf object from
  * slurmctld_conf object
@@ -2328,7 +2309,7 @@ int slurm_set_jobcomp_port(uint32_t port)
  */
 uint16_t slurm_get_keep_alive_time(void)
 {
-	uint16_t keep_alive_time = (uint16_t) NO_VAL;
+	uint16_t keep_alive_time = NO_VAL16;
 	slurm_ctl_conf_t *conf;
 
 	if (slurmdbd_conf) {
@@ -2604,6 +2585,22 @@ uint16_t slurm_get_select_type_param(void)
 		slurm_conf_unlock();
 	}
 	return select_type_param;
+}
+
+/* slurm_set_select_type_param
+ * set select_type_param for slurmctld_conf object
+ * IN uint16_t   - select_type_param
+ */
+void slurm_set_select_type_param(uint16_t select_type_param)
+{
+	slurm_ctl_conf_t *conf;
+
+	if (slurmdbd_conf) {
+	} else {
+		conf = slurm_conf_lock();
+		conf->select_type_param = select_type_param;
+		slurm_conf_unlock();
+	}
 }
 
 /** Return true if (remote) system runs Cray XT/XE */
@@ -4067,7 +4064,7 @@ int slurm_unpack_slurm_addr_array(slurm_addr_t ** slurm_address,
 
 	*slurm_address = NULL;
 	safe_unpack32(&nl, buffer);
-	if (nl > NO_VAL32)
+	if (nl > NO_VAL)
 		goto unpack_error;
 	*size_val = ntohl(nl);
 	*slurm_address = xmalloc((*size_val) * sizeof(slurm_addr_t));
@@ -4602,7 +4599,7 @@ List slurm_send_recv_msgs(const char *nodelist, slurm_msg_t *msg,
 List slurm_send_addr_recv_msgs(slurm_msg_t *msg, char *name, int timeout)
 {
 	static pthread_mutex_t conn_lock = PTHREAD_MUTEX_INITIALIZER;
-	static uint16_t conn_timeout = (uint16_t) NO_VAL;
+	static uint16_t conn_timeout = NO_VAL16;
 	List ret_list = NULL;
 	int fd = -1;
 	ret_data_info_t *ret_data_info = NULL;
@@ -4610,7 +4607,7 @@ List slurm_send_addr_recv_msgs(slurm_msg_t *msg, char *name, int timeout)
 	int i;
 
 	slurm_mutex_lock(&conn_lock);
-	if (conn_timeout == (uint16_t) NO_VAL)
+	if (conn_timeout == NO_VAL16)
 		conn_timeout = MIN(slurm_get_msg_timeout(), 10);
 	slurm_mutex_unlock(&conn_lock);
 

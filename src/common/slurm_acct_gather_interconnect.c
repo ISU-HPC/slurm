@@ -160,13 +160,16 @@ extern int acct_gather_interconnect_init(void)
 		g_context_num++;
 		plugin_entry = NULL; /* for next iteration */
 	}
+	xfree(full_plugin_type);
 	init_run = true;
 
 done:
 	slurm_mutex_unlock(&g_context_lock);
-	xfree(full_plugin_type);
 	if (retval == SLURM_SUCCESS)
 		retval = acct_gather_conf_init();
+	if (retval != SLURM_SUCCESS)
+		fatal("can not open the %s plugin", plugin_type);
+	xfree(type);
 
 
 	return retval;

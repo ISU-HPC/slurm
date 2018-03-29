@@ -50,6 +50,7 @@
 #include "src/common/slurm_protocol_defs.h"
 #include "src/common/slurm_acct_gather_energy.h"
 #include "src/common/slurm_acct_gather_interconnect.h"
+#include "src/common/xstring.h"
 #include "src/slurmd/common/proctrack.h"
 
 #include "common_jag.h"
@@ -166,7 +167,8 @@ static int _get_pss(char *proc_smaps_file, jag_prec_t *prec)
 	/* Check for error
 	 */
 	if (ferror(fp)) {
-		error("%s: ferror() indicates error on file %s",
+		debug("%s: ferror() indicates error on file %s, "
+		      "process may have exited while reading",
 		      __func__, proc_smaps_file);
 		fclose(fp);
 		return -1;
@@ -461,12 +463,12 @@ static void _handle_stats(List prec_list, char *proc_stat_file, char *proc_io_fi
 
 	if (no_share_data == -1) {
 		char *acct_params = slurm_get_jobacct_gather_params();
-		if (acct_params && strstr(acct_params, "NoShare"))
+		if (acct_params && xstrcasestr(acct_params, "NoShare"))
 			no_share_data = 1;
 		else
 			no_share_data = 0;
 
-		if (acct_params && strstr(acct_params, "UsePss"))
+		if (acct_params && xstrcasestr(acct_params, "UsePss"))
 			use_pss = 1;
 		else
 			use_pss = 0;
@@ -684,7 +686,7 @@ static void _record_profile(struct jobacctinfo *jobacct)
 		{ NULL, PROFILE_FIELD_NOT_SET }
 	};
 
-	static int profile_gid = -1;
+	static int64_t profile_gid = -1;
 	double et;
 	union {
 		double d;
@@ -836,7 +838,7 @@ extern void jag_common_poll_data(
 
 	if (no_over_memory_kill == -1) {
 		char *acct_params = slurm_get_jobacct_gather_params();
-		if (acct_params && strstr(acct_params, "NoOverMemoryKill"))
+		if (acct_params && xstrcasestr(acct_params, "NoOverMemoryKill"))
 			no_over_memory_kill = 1;
 		else
 			no_over_memory_kill = 0;

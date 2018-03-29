@@ -389,7 +389,7 @@ _handle_accept(void *arg)
 	if (auth_cred == NULL) {
 		error("Unpacking authentication credential: %s",
 		      g_slurm_auth_errstr(g_slurm_auth_errno(NULL)));
-		free_buf(buffer);
+		FREE_NULL_BUFFER(buffer);
 		goto fail;
 	}
 	auth_info = slurm_get_auth_info();
@@ -1113,7 +1113,7 @@ _handle_attach(int fd, stepd_step_rec_t *job, uid_t uid)
 	safe_read(fd, &srun->protocol_version, sizeof(int));
 
 	if (!srun->protocol_version)
-		srun->protocol_version = (uint16_t)NO_VAL;
+		srun->protocol_version = NO_VAL16;
 	/*
 	 * Check if jobstep is actually running.
 	 */
@@ -1398,7 +1398,7 @@ _handle_suspend(int fd, stepd_step_rec_t *job, uid_t uid)
 	static int launch_poe = -1;
 	int rc = SLURM_SUCCESS;
 	int errnum = 0;
-	uint16_t job_core_spec = (uint16_t) NO_VAL;
+	uint16_t job_core_spec = NO_VAL16;
 
 	safe_read(fd, &job_core_spec, sizeof(uint16_t));
 
@@ -1494,7 +1494,7 @@ _handle_resume(int fd, stepd_step_rec_t *job, uid_t uid)
 {
 	int rc = SLURM_SUCCESS;
 	int errnum = 0;
-	uint16_t job_core_spec = (uint16_t) NO_VAL;
+	uint16_t job_core_spec = NO_VAL16;
 
 	safe_read(fd, &job_core_spec, sizeof(uint16_t));
 
@@ -1571,7 +1571,7 @@ _handle_completion(int fd, stepd_step_rec_t *job, uid_t uid)
 	int step_rc;
 	char *buf = NULL;
 	int len;
-	Buf buffer;
+	Buf buffer = NULL;
 	bool lock_set = false;
 
 	debug("_handle_completion for job %u.%u",
@@ -1606,11 +1606,11 @@ _handle_completion(int fd, stepd_step_rec_t *job, uid_t uid)
 	buf = xmalloc(len);
 	safe_read(fd, buf, len);
 	buffer = create_buf(buf, len);
-	buf = NULL;
+	buf = NULL;	/* Moved to data portion of "buffer", freed with that */
 	if (jobacctinfo_unpack(&jobacct, SLURM_PROTOCOL_VERSION,
 			       PROTOCOL_TYPE_SLURM, buffer, 1) != SLURM_SUCCESS)
 		goto rwfail;
-	free_buf(buffer);
+	FREE_NULL_BUFFER(buffer);
 
 	/*
 	 * Record the completed nodes
@@ -1670,7 +1670,7 @@ rwfail:	if (lock_set) {
 		slurm_cond_signal(&step_complete.cond);
 		slurm_mutex_unlock(&step_complete.lock);
 	}
-	xfree(buf);
+	FREE_NULL_BUFFER(buffer);
 	return SLURM_FAILURE;
 }
 

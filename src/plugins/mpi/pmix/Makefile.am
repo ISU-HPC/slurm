@@ -24,7 +24,7 @@ pmix_internal_libs = \
 	$(top_builddir)/src/slurmd/common/libslurmd_reverse_tree_math.la
 
 pmix_ldflags = $(PLUGIN_FLAGS) $(HWLOC_LDFLAGS) $(UCX_LDFLAGS)
-pmix_libadd = $(pmix_internal_libs) $(PMIX_LIBS) $(HWLOC_LIBS) $(UCX_LIBS)
+pmix_libadd = $(pmix_internal_libs) $(HWLOC_LIBS) $(UCX_LIBS)
 
 # pkglib_v#dir is needed in each one of the below because of the way we
 # use pkglib_v#_LTLIBRARIES even though it is the same for each one it still
@@ -34,7 +34,7 @@ if HAVE_PMIX_V1
 
 pkglib_v1dir=$(pkglibdir)
 pkglib_v1_LTLIBRARIES = mpi_pmix_v1.la
-mpi_pmix_v1_la_SOURCES = $(pmix_src)
+mpi_pmix_v1_la_SOURCES = $(pmix_src) pmixp_client_v1.c
 mpi_pmix_v1_la_LIBADD = $(pmix_libadd)
 mpi_pmix_v1_la_LDFLAGS = $(pmix_ldflags) $(PMIX_V1_LDFLAGS)
 mpi_pmix_v1_la_CPPFLAGS = $(AM_CPPFLAGS) $(PMIX_V1_CPPFLAGS) -DHAVE_PMIX_VER=1
@@ -45,7 +45,7 @@ if HAVE_PMIX_V2
 
 pkglib_v2dir=$(pkglibdir)
 pkglib_v2_LTLIBRARIES = mpi_pmix_v2.la
-mpi_pmix_v2_la_SOURCES = $(pmix_src)
+mpi_pmix_v2_la_SOURCES = $(pmix_src) pmixp_client_v2.c
 mpi_pmix_v2_la_LIBADD = $(pmix_libadd)
 mpi_pmix_v2_la_LDFLAGS = $(pmix_ldflags) $(PMIX_V2_LDFLAGS)
 mpi_pmix_v2_la_CPPFLAGS = $(AM_CPPFLAGS) $(PMIX_V2_CPPFLAGS) -DHAVE_PMIX_VER=2
