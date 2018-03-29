@@ -470,7 +470,7 @@ rm -rf %{buildroot}
 %{_libdir}/*.so*
 %{_libdir}/slurm/src/*
 %{_libdir}/slurm/*.so
-%exclude %{_libdir}/slurm/accounting_storage_mysql.so
+#%exclude %{_libdir}/slurm/accounting_storage_mysql.so
 %exclude %{_libdir}/slurm/job_submit_pbs.so
 %exclude %{_libdir}/slurm/spank_pbs.so
 %{_mandir}
@@ -579,7 +579,7 @@ rm -rf %{buildroot}
 
 %if %{with dmtcp}
 %files dmtcp
-%defattr(-,root,root)
+%defattr(-,root,root,0755)
 %{_libdir}/slurm/checkpoint_dmtcp.so
 %endif
 
